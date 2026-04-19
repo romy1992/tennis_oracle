@@ -32,3 +32,6 @@ class OperationDB:
         """
         Base.metadata.create_all(bind=engine)
         print("Database aggiornato.")
+
+operationDB = OperationDB()
+operationDB.refresh_db()
