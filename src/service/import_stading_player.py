@@ -43,7 +43,7 @@ def import_players():
     """
     players = []
     # Recupero gli id dei tennisti
-    ids_players = set(standing.player_key for standing in standings_repo.search_all())
+    ids_players = set(standings_repo.search_column_values("player_key"))
     try:
         for id_player in ids_players:
             # Recupero
