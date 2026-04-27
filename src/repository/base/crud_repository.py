@@ -60,6 +60,27 @@ class CrudRepository:
                 logging.error(str(e))
                 raise
 
+    def search_column_values(self, column_name: str, distinct: bool = True):
+        """
+        Recupera solo i valori di una colonna, evitando il caricamento completo delle entità.
+        :param column_name: nome colonna dell'entità (es. 'id', 'event_key', 'player_key')
+        :param distinct: se True ritorna solo valori univoci
+        :return: lista piatta di valori
+        """
+        with self.session as session:
+            try:
+                column = getattr(self.entity, column_name)
+                query = session.query(column)
+                if distinct:
+                    query = query.distinct()
+                return [value for (value,) in query.all()]
+            except AttributeError as e:
+                logging.error(f"Column '{column_name}' not found in {self.entity}: {e}")
+                raise
+            except Exception as e:
+                logging.error(str(e))
+                raise
+
     def filter_by(self, **kwargs):
         """
         Ricerca puntuale dell'entità

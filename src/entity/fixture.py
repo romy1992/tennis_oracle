@@ -36,10 +36,11 @@ class Fixture(Base):
     event_second_player_logo = Column(String)
     event_qualification = Column(String)
 
-    # Colonne JSON per strutture figlie annidate (pointbypoint -> points, scores, statistics)
+    # Colonne JSON per strutture figlie annidate (pointbypoint -> points, scores, statistics,odds)
     pointbypoint = Column(JSON)
     scores = Column(JSON)
     statistics = Column(JSON)
+    odds = Column(JSON)
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
