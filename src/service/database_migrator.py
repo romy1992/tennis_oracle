@@ -16,6 +16,7 @@ from typing import Iterable, Optional
 
 from dotenv import load_dotenv
 from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -43,6 +44,14 @@ TABLE_MIGRATION_ORDER = (
     "player",
 )
 
+# Colonne univoche per upsert incrementale (sync giornaliero)
+TABLE_CONFLICT_COLUMNS = {
+    "event": ["event_type_key"],
+    "tournament": ["tournament_key"],
+    "fixture": ["event_key"],
+    "player": ["player_key"],
+}
+
 
 class DatabaseMigrator:
     """
@@ -55,6 +64,7 @@ class DatabaseMigrator:
         target_url: Optional[str] = None,
         batch_size: int = 500,
         clear_target: bool = False,
+        upsert: bool = False,
         tables: Optional[Iterable[str]] = None,
     ):
         load_dotenv(dotenv_path=CONFIG_PATH)
@@ -66,6 +76,7 @@ class DatabaseMigrator:
         )
         self.batch_size = batch_size
         self.clear_target = clear_target
+        self.upsert = upsert
         self.tables = list(tables) if tables else list(TABLE_MIGRATION_ORDER)
 
         self.source_engine = create_engine(self.source_url)
@@ -121,14 +132,18 @@ class DatabaseMigrator:
     def migrate_table(self, table_name: str) -> int:
         """
         Copia una singola tabella dalla sorgente alla destinazione.
-        :return: numero di righe inserite
+        :return: numero di righe elaborate
         """
+        if self.upsert and table_name in TABLE_CONFLICT_COLUMNS:
+            return self._migrate_table_upsert(table_name)
+        return self._migrate_table_insert(table_name)
+
+    def _migrate_table_insert(self, table_name: str) -> int:
         if not self._table_exists(self.source_engine, table_name):
             logger.warning("Tabella '%s' assente in sorgente, skip.", table_name)
             return 0
 
         self.ensure_target_schema()
-
         source_table = self._reflect_table(self.source_engine, table_name)
         target_table = self._reflect_table(self.target_engine, table_name)
 
@@ -149,13 +164,59 @@ class DatabaseMigrator:
 
                 inserted += len(payload)
                 logger.info(
-                    "Tabella '%s': copiate %s righe (totale %s)",
+                    "Tabella '%s': inserite %s righe (totale %s)",
                     table_name,
                     len(payload),
                     inserted,
                 )
 
         return inserted
+
+    def _migrate_table_upsert(self, table_name: str) -> int:
+        """Inserisce o aggiorna righe esistenti (adatto al cron giornaliero)."""
+        if not self._table_exists(self.source_engine, table_name):
+            logger.warning("Tabella '%s' assente in sorgente, skip.", table_name)
+            return 0
+
+        conflict_cols = TABLE_CONFLICT_COLUMNS[table_name]
+        self.ensure_target_schema()
+        source_table = self._reflect_table(self.source_engine, table_name)
+        target_table = self._reflect_table(self.target_engine, table_name)
+
+        processed = 0
+        with self.source_engine.connect() as source_conn:
+            result = source_conn.execution_options(
+                stream_results=True
+            ).execute(select(source_table))
+
+            while True:
+                rows = result.fetchmany(self.batch_size)
+                if not rows:
+                    break
+
+                payload = [dict(row._mapping) for row in rows]
+                stmt = pg_insert(target_table).values(payload)
+                update_columns = {
+                    col.name: stmt.excluded[col.name]
+                    for col in target_table.columns
+                    if col.name not in conflict_cols
+                }
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=conflict_cols,
+                    set_=update_columns,
+                )
+                with self.target_engine.begin() as target_conn:
+                    target_conn.execute(stmt)
+
+                processed += len(payload)
+                logger.info(
+                    "Tabella '%s': upsert %s righe (totale %s)",
+                    table_name,
+                    len(payload),
+                    processed,
+                )
+
+        return processed
 
     def migrate_all(self) -> dict[str, int]:
         """
@@ -225,9 +286,16 @@ class DatabaseMigrator:
 
 def run_migration(
     clear_target: bool = False,
+    upsert: bool = False,
     batch_size: int = 500,
+    tables: Optional[Iterable[str]] = None,
 ) -> dict[str, int]:
-    migrator = DatabaseMigrator(clear_target=clear_target, batch_size=batch_size)
+    migrator = DatabaseMigrator(
+        clear_target=clear_target,
+        upsert=upsert,
+        batch_size=batch_size,
+        tables=tables,
+    )
     summary = migrator.migrate_all()
     report = migrator.verify_migration()
     for table_name, counts in report.items():
@@ -259,5 +327,21 @@ if __name__ == "__main__":
         default=500,
         help="Righe per batch (default: 500).",
     )
+    parser.add_argument(
+        "--upsert",
+        action="store_true",
+        help="Usa INSERT ... ON CONFLICT UPDATE (consigliato per sync giornaliero).",
+    )
+    parser.add_argument(
+        "--tables",
+        nargs="+",
+        default=None,
+        help="Sottoinsieme tabelle da migrare (es. fixture).",
+    )
     args = parser.parse_args()
-    run_migration(clear_target=args.clear_target, batch_size=args.batch_size)
+    run_migration(
+        clear_target=args.clear_target,
+        upsert=args.upsert,
+        batch_size=args.batch_size,
+        tables=args.tables,
+    )

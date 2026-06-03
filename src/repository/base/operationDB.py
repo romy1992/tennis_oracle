@@ -34,4 +34,3 @@ class OperationDB:
         print("Database aggiornato.")
 
 operationDB = OperationDB()
-operationDB.refresh_db()
