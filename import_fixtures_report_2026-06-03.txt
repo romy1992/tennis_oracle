@@ -1,0 +1,64 @@
+Report esecuzione import_fixtures
+================================
+
+Data esecuzione: 2026-06-03 17:23 UTC circa
+Branch: cursor/report-import-fixtures-89f8
+
+Obiettivo
+---------
+Eseguire il modulo/classe di import fixture del progetto e riportare l'esito.
+
+Comandi eseguiti
+----------------
+1. Preparazione tabelle:
+   /tmp/import-fixtures-venv/bin/python -m src.repository.base.operationDB
+
+2. Esecuzione import:
+   /tmp/import-fixtures-venv/bin/python -m src.service.import_fixtures
+
+Parametri usati dal codice
+--------------------------
+Il modulo calcola automaticamente:
+- date_start = 2026-06-02
+- date_stop  = 2026-06-03
+
+Esito
+-----
+- Il processo Python e' terminato con exit code 0.
+- La chiamata API get_fixtures e' stata eseguita.
+- L'API ha risposto con errore applicativo:
+  cod: 1006
+  msg: Please make the payment for your account!
+- Di conseguenza non sono state ricevute fixture importabili.
+- Il codice ha gestito la risposta senza crash e ha loggato "No new fixtures to import".
+
+Conteggi DB
+-----------
+- Fixture prima dell'import: 0
+- Fixture dopo l'import:    0
+- Fixture importate:        0
+
+Note ambiente
+-------------
+- Il repository non contiene requirements.txt/pyproject.toml.
+- Per l'esecuzione e' stato creato un virtualenv temporaneo fuori dal repository:
+  /tmp/import-fixtures-venv
+- Sono state installate nel virtualenv le dipendenze runtime necessarie:
+  sqlalchemy, python-dotenv, psycopg2-binary, requests.
+- PostgreSQL locale e' stato installato/avviato nella VM per soddisfare la stringa
+  di connessione del progetto verso localhost:5432/tennis_db.
+- Il database tennis_db e le tabelle sono stati creati/aggiornati tramite il codice
+  esistente OperationDB.refresh_db.
+
+Log sanitizzato rilevante
+-------------------------
+DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): api.api-tennis.com:443
+DEBUG:urllib3.connectionpool:https://api.api-tennis.com:443 "GET /tennis/?date_start=2026-06-02&date_stop=2026-06-03&APIkey=[REDACTED]&method=get_fixtures HTTP/1.1" 200 None
+INFO:root:Call URL: https://api.api-tennis.com/tennis/?date_start=2026-06-02&date_stop=2026-06-03&APIkey=[REDACTED]&method=get_fixtures
+ERROR:root:Error in API request: [{'param': None, 'msg': 'Please make the payment for your account!', 'cod': 1006}]
+INFO:root:No new fixtures to import for params: {'date_start': '2026-06-02', 'date_stop': '2026-06-03', 'APIkey': '[REDACTED]', 'method': 'get_fixtures'}
+
+Conclusione
+-----------
+Esecuzione completata dal punto di vista tecnico, ma import non effettuato per
+blocco lato account/API (pagamento richiesto). Nessuna fixture e' stata inserita.
