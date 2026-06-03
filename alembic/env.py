@@ -4,10 +4,10 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
-from src.entity import Event, Tournament
+from src.entity import Event, Fixture, Player, Standing, Tournament
 from src.entity.base import Base
 
-_ = (Event, Tournament)
+_ = (Event, Tournament, Fixture, Standing, Player)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
