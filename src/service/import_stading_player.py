@@ -59,6 +59,3 @@ def import_players():
         # Inserisco DOPO aver fatto le chiamate
         if len(players) > 0:
             player_repo.save_all([Player(**player) for player in players])
-
-
-import_players()
