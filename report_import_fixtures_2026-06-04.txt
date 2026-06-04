@@ -1,0 +1,54 @@
+Report esecuzione import_fixtures
+=================================
+
+Data esecuzione: 2026-06-04 05:04:48 UTC
+Branch: cursor/report-import-fixtures-2586
+
+Classe/modulo eseguito:
+- src.service.import_fixtures
+
+Comando finale eseguito:
+- /tmp/import_fixtures_venv/bin/python -c "import src.repository.base.operationDB" && /tmp/import_fixtures_venv/bin/python -m src.service.import_fixtures
+
+Preparazione ambiente effettuata:
+- Creato virtualenv temporaneo fuori dal repository: /tmp/import_fixtures_venv
+- Installate dipendenze Python necessarie al modulo:
+  - requests
+  - python-dotenv
+  - sqlalchemy
+  - psycopg2-binary
+- Installato e avviato PostgreSQL locale.
+- Creato database locale atteso dal codice: tennis_db
+- Eseguito OperationDB.refresh_db() per creare/aggiornare le tabelle senza cancellare dati.
+
+Tentativo iniziale:
+- Il primo run del modulo e' fallito prima della chiamata API per connessione rifiutata a PostgreSQL su localhost:5432.
+- Errore principale:
+  psycopg2.OperationalError: connection to server at "localhost", port 5432 failed: Connection refused
+
+Esecuzione finale:
+- Exit code comando: 0
+- Il modulo ha raggiunto la chiamata API get_fixtures con parametri:
+  - date_start: 2026-06-03
+  - date_stop: 2026-06-04
+- La chiamata HTTP verso api.api-tennis.com ha risposto HTTP 200.
+- La risposta applicativa dell'API contiene pero' un errore:
+  - cod: 1006
+  - msg: Please make the payment for your account!
+
+Risultato import:
+- Fixture importati: 0
+- Conteggio finale tabella fixture nel database locale tennis_db: 0
+- Nessun nuovo dato e' stato salvato perche' l'API non ha restituito fixture validi.
+
+Log rilevanti, con API key oscurata:
+- DEBUG:urllib3.connectionpool: Starting new HTTPS connection (1): api.api-tennis.com:443
+- DEBUG:urllib3.connectionpool: https://api.api-tennis.com:443 "GET /tennis/?date_start=2026-06-03&date_stop=2026-06-04&APIkey=[REDACTED]&method=get_fixtures HTTP/1.1" 200 None
+- INFO:root: Call URL: https://api.api-tennis.com/tennis/?date_start=2026-06-03&date_stop=2026-06-04&APIkey=[REDACTED]&method=get_fixtures
+- ERROR:root: Error in API request: [{'param': None, 'msg': 'Please make the payment for your account!', 'cod': 1006}]
+- INFO:root: No new fixtures to import for params: {'date_start': '2026-06-03', 'date_stop': '2026-06-04', 'APIkey': '[REDACTED]', 'method': 'get_fixtures'}
+
+Conclusione:
+- La classe import_fixtures e' stata eseguita.
+- L'esecuzione tecnica e' arrivata fino alla chiamata API ed e' terminata senza crash nel run finale.
+- L'import non ha caricato dati per blocco/account API: "Please make the payment for your account!".
