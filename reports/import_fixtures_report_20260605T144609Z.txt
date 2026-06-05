@@ -1,0 +1,67 @@
+Report esecuzione import_fixtures
+=================================
+
+Timestamp UTC: 2026-06-05T14:46:09Z
+Branch di lavoro: cursor/report-e-backup-db-1262
+Database: postgresql://postgres:***@localhost:5432/tennis_db
+
+Backup generati
+---------------
+1. Backup pre-import:
+   backups/tennis_db_backup_20260605T144514Z.sql
+
+2. Backup post-import:
+   backups/tennis_db_backup_20260605T144609Z_post_import.sql
+
+Verifica backup finale
+----------------------
+- Ripristino test in database temporaneo tennis_db_backup_validation: OK.
+- Conteggio fixture ripristinato dal backup finale: 0.
+- Database temporaneo eliminato dopo la verifica.
+
+Preparazione ambiente
+---------------------
+- Installate le dipendenze runtime Python mancanti: SQLAlchemy, python-dotenv, psycopg2-binary.
+- Installato e avviato PostgreSQL locale.
+- Creato il database tennis_db se assente.
+- Eseguito refresh non distruttivo dello schema con:
+  PYTHONPATH=/workspace python3 src/repository/base/operationDB.py
+
+Comando import eseguito
+-----------------------
+PYTHONPATH=/workspace python3 src/service/import_fixtures.py
+
+Parametri calcolati dalla classe
+--------------------------------
+date_start: 2026-06-04
+date_stop: 2026-06-05
+
+Esito tecnico
+-------------
+Exit code: 0
+
+L'esecuzione Python e' terminata senza crash.
+
+Esito import dati
+-----------------
+Fixture presenti prima dell'import: 0
+Fixture presenti dopo l'import: 0
+Nuove fixture importate: 0
+
+L'import non ha caricato nuovi dati perche' l'API Tennis ha risposto con errore applicativo:
+"Please make the payment for your account!" (codice API 1006).
+
+Sintesi log rilevante
+---------------------
+- Chiamata effettuata verso il metodo get_fixtures con date_start=2026-06-04 e date_stop=2026-06-05.
+- La API key e' stata volutamente omessa/redatta dal report.
+- Risposta API: errore codice 1006, pagamento account richiesto.
+- Messaggio finale del servizio: nessuna nuova fixture da importare per i parametri indicati.
+
+Conclusione
+-----------
+Backup database: OK.
+Esecuzione classe import_fixtures: OK dal punto di vista processo.
+Import effettivo fixture: NON OK / nessun dato importato, per blocco account API esterno.
+
+Dato che l'import dati non e' andato completamente a buon fine, non e' stata eseguita alcuna merge verso main.
