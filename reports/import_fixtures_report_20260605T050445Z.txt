@@ -1,0 +1,29 @@
+Report esecuzione import_fixtures
+==================================
+Data esecuzione UTC: 2026-06-05T05:04:45+00:00
+Branch di lavoro: cursor/report-e-backup-db-652a
+Database: postgresql://postgres:[REDACTED]@localhost:5432/tennis_db
+Backup creato: backups/tennis_db_20260605T050408Z.sql
+Dimensione backup byte: 10566
+
+Esito import: NON RIUSCITO - errore API Tennis cod 1006 (pagamento account richiesto)
+Comando eseguito: /tmp/tennis_oracle_venv/bin/python -m src.service.import_fixtures
+Exit code processo: 0
+
+Conteggi database dopo esecuzione:
+- fixture: 0
+- tournament: 0
+- event: 0
+
+Dettaglio errore/API:
+L'API ha risposto HTTP 200 ma con payload applicativo:
+[{'param': None, 'msg': 'Please make the payment for your account!', 'cod': 1006}]
+Per questo non sono state importate nuove fixture.
+
+Log esecuzione (chiave API redatta):
+DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): api.api-tennis.com:443
+DEBUG:urllib3.connectionpool:https://api.api-tennis.com:443 "GET /tennis/?date_start=2026-06-04&date_stop=2026-06-05&APIkey=[REDACTED]&method=get_fixtures HTTP/1.1" 200 None
+INFO:root:Call URL: https://api.api-tennis.com/tennis/?date_start=2026-06-04&date_stop=2026-06-05&APIkey=[REDACTED]&method=get_fixtures
+ERROR:root:Error in API request: [{'param': None, 'msg': 'Please make the payment for your account!', 'cod': 1006}]
+INFO:root:No new fixtures to import for params: {'date_start': '2026-06-04', 'date_stop': '2026-06-05', 'APIkey': '[REDACTED]', 'method': 'get_fixtures'}
+
