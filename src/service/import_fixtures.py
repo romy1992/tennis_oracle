@@ -132,7 +132,7 @@ def calculate_date(days_back_start: int = 1, days_back_stop: int = 0):
     format_data = "%Y-%m-%d"
     current_data = datetime.now()
     date_start = (current_data - timedelta(days=days_back_start)).strftime(format_data)
-    date_stop = (current_data - timedelta(days=days_back_stop)).strftime(format_data)
+    date_start = (current_data - timedelta(days=2)).strftime(format_data)
     return date_start, date_stop
 
 
