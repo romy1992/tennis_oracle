@@ -3,4 +3,5 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
-python3 -m src.jobs.daily_pipeline >> logs/daily_pipeline.log 2>&1
+mkdir -p logs
+python3 scripts/run_import_fixtures_report_backup.py >> logs/import_fixtures_report_backup.log 2>&1
