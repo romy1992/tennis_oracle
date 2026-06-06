@@ -1,11 +1,13 @@
 from logging.config import fileConfig
+import os
+from pathlib import Path
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
-from src.entity import Event, Fixture, Player, Standing, Tournament
-from src.entity.base import Base
+from dotenv import load_dotenv
+from backend.app.db.base import Base, Event, Fixture, Player, Standing, Tournament
 
 _ = (Event, Tournament, Fixture, Standing, Player)
 
@@ -17,6 +19,14 @@ config = context.config
 # This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(dotenv_path=ROOT_DIR / ".env")
+load_dotenv(dotenv_path=ROOT_DIR / "properties" / "config.env")
+
+database_url = os.getenv("DATABASE_URL") or os.getenv("DATABASE_SOURCE_URL")
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url)
 
 # add your model's MetaData object here
 # for 'autogenerate' support

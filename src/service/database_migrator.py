@@ -49,6 +49,7 @@ TABLE_CONFLICT_COLUMNS = {
     "event": ["event_type_key"],
     "tournament": ["tournament_key"],
     "fixture": ["event_key"],
+    "standing": ["player_key", "league"],
     "player": ["player_key"],
 }
 
@@ -94,9 +95,17 @@ class DatabaseMigrator:
         return f"***@{host_part}"
 
     def ensure_target_schema(self) -> None:
-        """Crea su destinazione le tabelle definite dai model SQLAlchemy, se mancanti."""
-        Base.metadata.create_all(bind=self.target_engine)
-        logger.info("Schema destinazione verificato/creato.")
+        """Verifica che lo schema di destinazione sia già gestito da Alembic."""
+        expected_tables = set(Base.metadata.tables)
+        existing_tables = set(inspect(self.target_engine).get_table_names())
+        missing_tables = sorted(expected_tables - existing_tables)
+        if missing_tables:
+            raise RuntimeError(
+                "Schema destinazione incompleto. Esegui prima "
+                "`alembic upgrade head`. Tabelle mancanti: "
+                + ", ".join(missing_tables)
+            )
+        logger.info("Schema destinazione verificato.")
 
     def _table_exists(self, engine: Engine, table_name: str) -> bool:
         return table_name in inspect(engine).get_table_names()

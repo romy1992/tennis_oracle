@@ -7,6 +7,8 @@ from sqlalchemy.orm import sessionmaker
 CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "../../../properties/config.env"
 )
+ENV_PATH = os.path.join(os.path.dirname(__file__), "../../../.env")
+load_dotenv(dotenv_path=ENV_PATH)
 load_dotenv(dotenv_path=CONFIG_PATH)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

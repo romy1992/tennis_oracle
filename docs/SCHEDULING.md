@@ -26,6 +26,13 @@ SYNC_CLOUD=true
 - `DATABASE_TARGET_URL`: DB sul **server cloud agent**
 - Il cloud agent **non** raggiunge il tuo `localhost` senza tunnel SSH o host esposto
 
+Prima di schedulare il job, installa le dipendenze e applica lo schema:
+
+```bash
+pip install -r requirements.txt
+alembic upgrade head
+```
+
 ## Cron sul tuo PC (consigliato per DB locale)
 
 ### Linux / macOS

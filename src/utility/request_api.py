@@ -18,7 +18,7 @@ def request_api(method: str, params: dict = None):
     if response.status_code == 200:
         logging.info(f"Call URL: {response.url}")
         response_json = response.json().get("result")
-        if isinstance(response_json, list) and response_json[0].get("cod"):
+        if isinstance(response_json, list) and response_json and response_json[0].get("cod"):
             logging.error(f"Error in API request: {response_json}")
             response.raise_for_status()
             return None
