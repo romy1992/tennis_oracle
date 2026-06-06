@@ -17,10 +17,11 @@ class ApiTennisError(RuntimeError):
 
 def _sanitize_url(url):
     parts = urlsplit(url)
-    query = urlencode(
+    sanitized_query = [
         (key, "****" if key == "APIkey" else value)
         for key, value in parse_qsl(parts.query, keep_blank_values=True)
-    )
+    ]
+    query = urlencode(sanitized_query)
     return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
