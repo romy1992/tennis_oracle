@@ -1,10 +1,13 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, UniqueConstraint
 
 from src.entity.base import Base
 
 
 class Standing(Base):
     __tablename__ = "standing"
+    __table_args__ = (
+        UniqueConstraint("player_key", "league", name="uq_standing_player_league"),
+    )
 
     id_standing = Column(Integer, primary_key=True)
     place = Column(Integer)

@@ -124,7 +124,7 @@ def import_fixtures_by_params(params):
         logging.error(f"Error in API request: {e} with params: {params}")
 
 
-def calculate_date(days_back_start: int = 1, days_back_stop: int = 0):
+def calculate_date(days_back_start: int = 2, days_back_stop: int = 0):
     """
     Calcola intervallo date per import giornaliero.
     days_back_start=1, days_back_stop=0 -> da ieri a oggi (default cron).
@@ -132,11 +132,11 @@ def calculate_date(days_back_start: int = 1, days_back_stop: int = 0):
     format_data = "%Y-%m-%d"
     current_data = datetime.now()
     date_start = (current_data - timedelta(days=days_back_start)).strftime(format_data)
-    date_start = (current_data - timedelta(days=2)).strftime(format_data)
+    date_stop = (current_data - timedelta(days=days_back_stop)).strftime(format_data)
     return date_start, date_stop
 
 
-def run_daily_fixture_import(days_back_start: int = 1, days_back_stop: int = 0):
+def run_daily_fixture_import(days_back_start: int = 2, days_back_stop: int = 0):
     """Import partite nel DB configurato in repository_db (di solito il locale)."""
     date_start, date_stop = calculate_date(days_back_start, days_back_stop)
     params = {"date_start": date_start, "date_stop": date_stop}

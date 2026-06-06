@@ -7,5 +7,10 @@
 /.idea
 *.pyc
 /logs/
+/.env
+/.venv/
+/venv/
+__pycache__/
+properties/config.env
 
 

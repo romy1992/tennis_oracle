@@ -5,14 +5,27 @@ nessun annotation : metodo normale (riceve l'istanza(self) come primo argomento)
 self e cls stessa cosa, ma self è per i metodi di istanza e cls è per i metodi di classe. I metodi statici non ricevono né self né cls come argomento, poiché non sono legati a nessuna istanza o classe specifica.
 
 """
+import os
+
 import src.entity
+from alembic import command
+from alembic.config import Config
+
 from src.entity.base import Base
 from src.repository.base.repository_db import engine
 
 _ = src.entity
 
+ALEMBIC_INI = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../alembic.ini")
+)
+
 
 class OperationDB:
+
+    @staticmethod
+    def _alembic_config():
+        return Config(ALEMBIC_INI)
 
     @staticmethod
     def reset_db():
@@ -21,16 +34,15 @@ class OperationDB:
         In caso di necessità, droppa tutto il db cancellandolo
         """
         Base.metadata.drop_all(bind=engine)
-        Base.metadata.create_all(bind=engine)
-        print("Database ricreato da zero.")
+        command.upgrade(OperationDB._alembic_config(), "head")
+        print("Database ricreato da zero tramite Alembic.")
 
     @staticmethod
     def refresh_db():
         """
-            Ricrea le tabelle senza cancellare i dati
-            Utile per aggiornare la struttura del db senza perdere i dati
+            Applica le migrazioni Alembic senza cancellare i dati
         """
-        Base.metadata.create_all(bind=engine)
-        print("Database aggiornato.")
+        command.upgrade(OperationDB._alembic_config(), "head")
+        print("Database aggiornato tramite Alembic.")
 
 operationDB = OperationDB()
