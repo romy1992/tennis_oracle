@@ -1,0 +1,5 @@
+DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): api.api-tennis.com:443
+DEBUG:urllib3.connectionpool:https://api.api-tennis.com:443 "GET /tennis/?date_start=2026-06-05&date_stop=2026-06-06&APIkey=[REDACTED]&method=get_fixtures HTTP/1.1" 200 None
+INFO:root:Call URL: https://api.api-tennis.com/tennis/?date_start=2026-06-05&date_stop=2026-06-06&APIkey=[REDACTED]&method=get_fixtures
+ERROR:root:Error in API request: [{'param': None, 'msg': 'Please make the payment for your account!', 'cod': 1006}]
+INFO:root:No new fixtures to import for params: {'date_start': '2026-06-05', 'date_stop': '2026-06-06', 'APIkey': '[REDACTED]', 'method': 'get_fixtures'}

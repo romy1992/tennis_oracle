@@ -1,0 +1,52 @@
+Report esecuzione import_fixtures
+=================================
+Data esecuzione (UTC): 20260606_081902_utc
+Branch git: cursor/report-e-backup-db-d389
+Database configurato: postgresql://postgres:[REDACTED]@localhost:5432/tennis_db
+
+Backup database
+---------------
+Stato backup: OK
+File backup: db_backups/tennis_db_backup_20260606_081902_utc.sql
+Dimensione backup byte: 10566
+Inizio backup UTC: 2026-06-06T08:19:02.852088+00:00
+Fine backup UTC: 2026-06-06T08:19:02.918104+00:00
+Exit code pg_dump: 0
+STDOUT pg_dump:
+(vuoto)
+STDERR pg_dump:
+(vuoto)
+
+Import fixtures
+---------------
+Comando eseguito: python3 -m src.service.import_fixtures
+Stato import: KO
+Inizio import UTC: 2026-06-06T08:19:02.930720+00:00
+Fine import UTC: 2026-06-06T08:19:03.736306+00:00
+Exit code import: 0
+Timeout: no
+Fixture prima: 0
+Errore conteggio prima: (nessuno)
+Fixture dopo: 0
+Errore conteggio dopo: (nessuno)
+Delta fixture: 0
+File log completo: reports/import_fixtures_log_20260606_081902_utc.txt
+
+Esito complessivo
+-----------------
+KO - vedere dettagli backup/import e log.
+
+Merge main
+----------
+Non eseguito: l'esito complessivo e' KO per risposta API cod 1006 (account/payment richiesto), quindi non sussiste la condizione "se tutto va a buon fine".
+
+Righe di errore rilevate nel log import:
+ERROR:root:Error in API request: [{'param': None, 'msg': 'Please make the payment for your account!', 'cod': 1006}]
+
+Ultime righe log import
+-----------------------
+DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): api.api-tennis.com:443
+DEBUG:urllib3.connectionpool:https://api.api-tennis.com:443 "GET /tennis/?date_start=2026-06-05&date_stop=2026-06-06&APIkey=[REDACTED]&method=get_fixtures HTTP/1.1" 200 None
+INFO:root:Call URL: https://api.api-tennis.com/tennis/?date_start=2026-06-05&date_stop=2026-06-06&APIkey=[REDACTED]&method=get_fixtures
+ERROR:root:Error in API request: [{'param': None, 'msg': 'Please make the payment for your account!', 'cod': 1006}]
+INFO:root:No new fixtures to import for params: {'date_start': '2026-06-05', 'date_stop': '2026-06-06', 'APIkey': '[REDACTED]', 'method': 'get_fixtures'}
