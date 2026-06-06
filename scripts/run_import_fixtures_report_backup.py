@@ -39,17 +39,19 @@ class StepResult:
 class CaptureHandler(logging.Handler):
     def __init__(self) -> None:
         super().__init__(level=logging.INFO)
-        self.records: list[logging.LogRecord] = []
+        self.formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+        self.messages: list[str] = []
+        self.error_found = False
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.records.append(record)
+        self.messages.append(self.formatter.format(record))
+        self.error_found = self.error_found or record.levelno >= logging.ERROR
 
     def lines(self, database_url: str) -> list[str]:
-        formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
-        return [sanitize(formatter.format(record), database_url) for record in self.records]
+        return [sanitize(message, database_url) for message in self.messages]
 
     def has_errors(self) -> bool:
-        return any(record.levelno >= logging.ERROR for record in self.records)
+        return self.error_found
 
 
 def sanitize(value: str, database_url: str | None = None) -> str:
@@ -57,6 +59,7 @@ def sanitize(value: str, database_url: str | None = None) -> str:
     if database_url:
         sanitized = sanitized.replace(database_url, mask_database_url(database_url))
     sanitized = re.sub(r"(?i)(APIkey=)[^&\s]+", r"\1***", sanitized)
+    sanitized = re.sub(r"(['\"]APIkey['\"]\s*:\s*['\"])[^'\"]+", r"\1***", sanitized)
     return sanitized
 
 
