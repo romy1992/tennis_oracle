@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 from src.service import import_fixtures
 from src.service import run_import_fixtures_report_backup as runner
+from src.utility import request_api as request_api_module
 
 
 class FakeFixtureRepository:
@@ -102,6 +103,25 @@ class ReportAndBackupRunnerTest(unittest.TestCase):
         self.assertIn("Esito generale: KO", report)
         self.assertIn("- stato: failed", report)
         self.assertIn("Backup database: pg_dump non trovato", report)
+
+
+class RequestApiTest(unittest.TestCase):
+    def test_request_api_raises_for_application_error_and_masks_api_key_in_logs(self):
+        response = Mock(
+            status_code=200,
+            url="https://api.api-tennis.com/tennis/?APIkey=secret&method=get_fixtures",
+        )
+        response.json.return_value = {"result": [{"cod": 1006, "msg": "Please make the payment"}]}
+
+        with patch.object(request_api_module, "API_KEY", "secret"), \
+                patch.object(request_api_module.requests, "get", return_value=response), \
+                self.assertLogs(level="INFO") as logs:
+            with self.assertRaises(request_api_module.ApiTennisError):
+                request_api_module.request_api("get_fixtures", {"date_start": "2026-06-05"})
+
+        joined_logs = "\n".join(logs.output)
+        self.assertIn("APIkey=%2A%2A%2A%2A", joined_logs)
+        self.assertNotIn("APIkey=secret", joined_logs)
 
 
 if __name__ == "__main__":
