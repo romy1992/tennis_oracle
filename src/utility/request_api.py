@@ -6,6 +6,8 @@ import requests
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../../properties/config.env'))
 API_KEY = os.getenv("API_TENNIS_KEY")
 BASE_URL = os.getenv("API_TENNIS_BASE")
