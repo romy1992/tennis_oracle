@@ -12,6 +12,18 @@ fixtures_repo = FixtureRepository()
 logging.basicConfig(level=logging.INFO)
 
 
+def _new_import_stats(params):
+    return {
+        "params": dict(params) if params else {},
+        "status": "success",
+        "fixtures_received": 0,
+        "fixtures_already_present": 0,
+        "fixtures_imported": 0,
+        "odds_enriched": 0,
+        "errors": [],
+    }
+
+
 def import_all_fixtures(date_start="2000-01-01", date_stop=None, params=None):
     """
     Download e persistenza delle partite di tennis
@@ -97,31 +109,49 @@ def import_odds_full_by_tournament(params=None, tournament_key=None):
 
 
 def import_fixtures_by_params(params):
-    # Recupero prima tutti gli event_key univoci delle partite già presenti nel database per evitare di fare richieste API inutili
-    search_fixture_key = set(fixtures_repo.search_column_values("event_key"))
+    stats = _new_import_stats(params)
     try:
+        # Recupero prima tutti gli event_key univoci delle partite già presenti nel database per evitare di fare richieste API inutili
+        search_fixture_key = set(fixtures_repo.search_column_values("event_key"))
         # Chiamata esterna al servizio API per scaricare le partite del torneo
-        response = request_api(method="get_fixtures", params=params)
+        response = request_api(method="get_fixtures", params=dict(params))
         if response and len(response) > 0:
+            stats["fixtures_received"] = len(response)
             # Filtro le partite scaricate per evitare di inserire partite già presenti nel database e le salvo
-            fixtures = [Fixture(**fixture) for fixture in response
-                        if fixture.get("event_key") not in search_fixture_key]
+            fixtures_to_import = [
+                fixture for fixture in response
+                if fixture.get("event_key") not in search_fixture_key
+            ]
+            stats["fixtures_already_present"] = len(response) - len(fixtures_to_import)
+            fixtures = [Fixture(**fixture) for fixture in fixtures_to_import]
 
             if len(fixtures) > 0:
                 for fixture in fixtures:
                     # Recupero gli event_key per poter chiamare l'api delle odds e agganciarle prima di salvarle
                     event_key_fixture = fixture.event_key
-                    # chiamo api odds
-                    odds = request_api(method="get_odds", params={"match_key": event_key_fixture})
-                    if odds and len(odds) > 0:
-                        fixture.odds = odds
+                    try:
+                        # chiamo api odds
+                        odds = request_api(method="get_odds", params={"match_key": event_key_fixture})
+                        if odds and len(odds) > 0:
+                            fixture.odds = odds
+                            stats["odds_enriched"] += 1
+                    except Exception as e:
+                        message = f"Error importing odds for event_key {event_key_fixture}: {e}"
+                        stats["errors"].append(message)
+                        logging.error(message)
 
                 fixtures_repo.save_all(fixtures)
+                stats["fixtures_imported"] = len(fixtures)
                 logging.info(f"Imported {len(fixtures)} fixtures")
         else:
             logging.info(f"No new fixtures to import for params: {params}")
     except Exception as e:
+        stats["status"] = "failed"
+        stats["errors"].append(str(e))
         logging.error(f"Error in API request: {e} with params: {params}")
+    if stats["errors"] and stats["status"] == "success":
+        stats["status"] = "completed_with_errors"
+    return stats
 
 
 def calculate_date():
@@ -143,7 +173,12 @@ def calculate_date():
     return date_start, date_stop
 
 
-date_start, date_stop = calculate_date()
-params = {"date_start": date_start, "date_stop": date_stop}
-import_fixtures_by_params(params)
-#import_odds_full_by_tournament(params=params)
+def run_default_import():
+    date_start, date_stop = calculate_date()
+    params = {"date_start": date_start, "date_stop": date_stop}
+    return import_fixtures_by_params(params)
+
+
+if __name__ == "__main__":
+    run_default_import()
+    # import_odds_full_by_tournament(params=params)
