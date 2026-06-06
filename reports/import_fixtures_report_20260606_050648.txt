@@ -1,0 +1,25 @@
+Report import_fixtures
+======================
+Inizio UTC: 2026-06-06T05:06:48.574063+00:00
+Fine UTC: 2026-06-06T05:06:49.056224+00:00
+Esito generale: KO
+
+Parametri import:
+- date_start: 2026-06-05
+- date_stop: 2026-06-06
+
+Risultato import:
+- stato: failed
+- fixture ricevute: 0
+- fixture gia presenti: 0
+- fixture importate: 0
+- fixture arricchite con odds: 0
+
+Backup database:
+- stato: success
+- metodo: pg_dump
+- file: backups/tennis_db_20260606_050648.sql
+- dimensione byte: 10566
+
+Errori:
+- [{'param': None, 'msg': 'Please make the payment for your account!', 'cod': 1006}]
