@@ -137,7 +137,7 @@ def calculate_date():
     format_data = '%Y-%m-%d'
     current_data = datetime.now()
     # Scegliere da che giorno indietro si vuole andare per recuperare le partite
-    date_start = (current_data - timedelta(days=1)).strftime(format_data)
+    date_start = (current_data - timedelta(days=2)).strftime(format_data)
     # Fino a ...
     date_stop = (current_data - timedelta(days=0)).strftime(format_data)
     return date_start, date_stop
