@@ -7,7 +7,7 @@ from sqlalchemy import pool
 
 from alembic import context
 from dotenv import load_dotenv
-from backend.app.db.base import Base, Event, Fixture, Player, Standing, Tournament
+from src.app.db.base import Base, Event, Fixture, Player, Standing, Tournament
 
 _ = (Event, Tournament, Fixture, Standing, Player)
 

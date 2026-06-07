@@ -1,0 +1,275 @@
+:root {
+  color: #172033;
+  background: #f4f7fb;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: #101828;
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  padding: 28px;
+}
+
+.sidebar h1 {
+  font-size: 24px;
+  margin: 0 0 8px;
+}
+
+.sidebar p {
+  color: #b7c0d1;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.sidebar nav {
+  display: grid;
+  gap: 10px;
+}
+
+.sidebar nav a {
+  border-radius: 10px;
+  color: #d7deea;
+  padding: 12px 14px;
+}
+
+.sidebar nav a.active,
+.sidebar nav a:hover {
+  background: #24304a;
+  color: #ffffff;
+}
+
+.content {
+  padding: 32px;
+}
+
+.page {
+  display: grid;
+  gap: 24px;
+}
+
+.page-header {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.page-header h2 {
+  font-size: 32px;
+  margin: 0 0 6px;
+}
+
+.page-header p {
+  color: #65738a;
+  margin: 0;
+}
+
+.metrics-grid,
+.cards-grid,
+.filters-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.metrics-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cards-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.filters-grid {
+  background: #ffffff;
+  border: 1px solid #e4e9f2;
+  border-radius: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 16px;
+}
+
+.filters-grid.compact {
+  grid-template-columns: minmax(240px, 420px);
+}
+
+label {
+  color: #475569;
+  display: grid;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 8px;
+}
+
+input {
+  border: 1px solid #cfd8e6;
+  border-radius: 10px;
+  color: #172033;
+  font: inherit;
+  padding: 10px 12px;
+}
+
+.metric-card,
+.panel,
+.player-card,
+.state {
+  background: #ffffff;
+  border: 1px solid #e4e9f2;
+  border-radius: 16px;
+  box-shadow: 0 8px 20px rgb(15 23 42 / 5%);
+}
+
+.metric-card {
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+}
+
+.metric-card span,
+.metric-card small {
+  color: #65738a;
+}
+
+.metric-card strong {
+  font-size: 30px;
+}
+
+.panel {
+  padding: 22px;
+}
+
+.panel h3 {
+  margin: 0 0 16px;
+}
+
+.player-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+
+.player-card:hover {
+  border-color: #7aa7ff;
+}
+
+.player-card span,
+.player-card small,
+.note {
+  color: #65738a;
+}
+
+.pill {
+  background: #eef2f8;
+  border-radius: 999px;
+  color: #475569;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+
+.pill-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.table-wrap {
+  background: #ffffff;
+  border: 1px solid #e4e9f2;
+  border-radius: 16px;
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  min-width: 900px;
+  width: 100%;
+}
+
+th,
+td {
+  border-bottom: 1px solid #eef2f8;
+  padding: 13px 16px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: #f8fafc;
+  color: #475569;
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.state {
+  color: #65738a;
+  display: grid;
+  gap: 6px;
+  padding: 22px;
+}
+
+.state strong {
+  color: #172033;
+}
+
+.state-error {
+  background: #fff1f2;
+  border-color: #fecdd3;
+  color: #be123c;
+}
+
+.state-loading {
+  color: #3157a6;
+}
+
+.match-summary,
+.surface-list {
+  display: grid;
+  gap: 8px;
+}
+
+.back-link {
+  color: #3157a6;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    padding: 20px;
+  }
+
+  .sidebar nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metrics-grid,
+  .filters-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .content {
+    padding: 20px;
+  }
+}
