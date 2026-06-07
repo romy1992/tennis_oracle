@@ -24,6 +24,8 @@ cp .env.example .env
 APP_ENV=local
 DEBUG=false
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tennis_db
+CORS_ORIGINS=["http://localhost:5173","http://localhost:5174","http://127.0.0.1:5173","http://127.0.0.1:5174"]
+CORS_ORIGIN_REGEX=^https?://(localhost|127\.0\.0\.1):\d+$
 ```
 
 Per gli import dall'API tennis continua a essere supportato anche
@@ -49,7 +51,7 @@ alembic stamp head
 ## Avvio backend FastAPI
 
 ```bash
-uvicorn backend.app.main:app --reload
+uvicorn src.app.main:app --reload
 ```
 
 Endpoint minimi:
@@ -60,6 +62,68 @@ Endpoint minimi:
 - `GET /api/players`
 - `GET /api/players/{player_id}`
 - `GET /api/tournaments`
+
+## Avvio frontend React
+
+Il frontend vive in `frontend/` ed espone una prima UI per dashboard,
+partite, giocatori, dettaglio giocatore e tornei.
+
+```bash
+cd frontend
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Configura l'URL del backend in `frontend/.env`:
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+## Base dati ML-ready
+
+Le tabelle legacy usate dagli import (`fixture`, `player`, `tournament`) restano
+intatte. Per ML/DL sono state aggiunte tabelle canoniche separate:
+
+- `ml_player`
+- `ml_tournament`
+- `ml_match`
+- `ranking_snapshot`
+- `odds_snapshot`
+- `feature_snapshot`
+
+Applica le migrazioni:
+
+```bash
+alembic upgrade head
+```
+
+Le feature devono essere calcolate solo con dati precedenti alla data della
+partita. Il builder in `src/app/ml/features/feature_builder.py` usa sempre
+filtri `match_date < data_partita` e `ranking_date < data_partita` per evitare
+data leakage.
+
+Genera FeatureSnapshot ed esporta il dataset CSV:
+
+```bash
+python scripts/build_ml_dataset.py --build-features
+```
+
+Solo export da FeatureSnapshot già presenti:
+
+```bash
+python scripts/build_ml_dataset.py
+```
+
+Output predefinito:
+
+```text
+data/processed/tennis_features.csv
+```
+
+Il dataset builder (`src/app/ml/datasets/dataset_builder.py`) crea un DataFrame
+pandas, esporta CSV e separa feature/target, ma non esegue training.
 
 ## Comandi import esistenti
 
