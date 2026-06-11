@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Esegui dal root del progetto tennis_oracle (ad es. in cron alle 09:00)
+# Esegui dalla cartella backend (ad es. in cron alle 09:00)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"

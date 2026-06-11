@@ -1,24 +1,18 @@
 # tennis_oracle
 
-Backend FastAPI e pipeline Python per importare dati tennis da API esterna in
-PostgreSQL (`tennis_db`), esporli via API e sincronizzarli verso un database
-target.
+Monorepo con backend FastAPI (`backend/`) e frontend React (`frontend/`).
 
-## Setup locale
+Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), li espone via API e li sincronizza verso un database target.
 
-1. Crea un virtualenv e installa le dipendenze:
+## Setup backend
 
 ```bash
+cd backend
 pip install -r requirements.txt
-```
-
-2. Crea il file `.env` dalla configurazione di esempio:
-
-```bash
 cp .env.example .env
 ```
 
-3. Imposta almeno queste variabili:
+Imposta almeno queste variabili in `backend/.env`:
 
 ```env
 APP_ENV=local
@@ -29,14 +23,15 @@ CORS_ORIGIN_REGEX=^https?://(localhost|127\.0\.0\.1):\d+$
 ```
 
 Per gli import dall'API tennis continua a essere supportato anche
-`properties/config.env`, che deve contenere `API_TENNIS_KEY` e
+`backend/properties/config.env`, che deve contenere `API_TENNIS_KEY` e
 `API_TENNIS_BASE`.
 
-## Migrazioni Alembic
+### Migrazioni Alembic
 
-Applica lo schema PostgreSQL:
+Applica lo schema PostgreSQL (dalla cartella `backend/`):
 
 ```bash
+cd backend
 alembic upgrade head
 ```
 
@@ -48,9 +43,10 @@ caso puoi registrare lo stato corrente con:
 alembic stamp head
 ```
 
-## Avvio backend FastAPI
+### Avvio backend FastAPI
 
 ```bash
+cd backend
 uvicorn src.app.main:app --reload
 ```
 
@@ -63,7 +59,7 @@ Endpoint minimi:
 - `GET /api/players/{player_id}`
 - `GET /api/tournaments`
 
-## Avvio frontend React
+## Setup frontend
 
 Il frontend vive in `frontend/` ed espone una prima UI per dashboard,
 partite, giocatori, dettaglio giocatore e tornei.
@@ -96,17 +92,19 @@ intatte. Per ML/DL sono state aggiunte tabelle canoniche separate:
 Applica le migrazioni:
 
 ```bash
+cd backend
 alembic upgrade head
 ```
 
 Le feature devono essere calcolate solo con dati precedenti alla data della
-partita. Il builder in `src/app/ml/features/feature_builder.py` usa sempre
+partita. Il builder in `backend/src/app/ml/features/feature_builder.py` usa sempre
 filtri `match_date < data_partita` e `ranking_date < data_partita` per evitare
 data leakage.
 
 Genera FeatureSnapshot ed esporta il dataset CSV:
 
 ```bash
+cd backend
 python scripts/build_ml_dataset.py --build-features
 ```
 
@@ -119,13 +117,15 @@ python scripts/build_ml_dataset.py
 Output predefinito:
 
 ```text
-data/processed/tennis_features.csv
+backend/data/processed/tennis_features.csv
 ```
 
-Il dataset builder (`src/app/ml/datasets/dataset_builder.py`) crea un DataFrame
+Il dataset builder (`backend/src/app/ml/datasets/dataset_builder.py`) crea un DataFrame
 pandas, esporta CSV e separa feature/target, ma non esegue training.
 
 ## Comandi import esistenti
+
+Esegui dalla cartella `backend/`:
 
 ```bash
 # Bootstrap eventi e tornei

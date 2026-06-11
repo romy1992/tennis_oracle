@@ -2,18 +2,19 @@
 
 ## Cosa fa il job
 
-`DailyPipeline` (`src/jobs/daily_pipeline.py`):
+`DailyPipeline` (`backend/src/jobs/daily_pipeline.py`):
 
 1. **Import fixtures** nel DB locale (ieri → oggi, come `import_fixtures`)
 2. **Sync cloud** verso `DATABASE_TARGET_URL` con upsert (default tabella `fixture`)
 
-Comando unico:
+Comando unico (dalla cartella `backend/`):
 
 ```bash
+cd backend
 python3 -m src.jobs.daily_pipeline
 ```
 
-## Configurazione (`properties/config.env`)
+## Configurazione (`backend/properties/config.env`)
 
 ```env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tennis_db
@@ -29,6 +30,7 @@ SYNC_CLOUD=true
 Prima di schedulare il job, installa le dipendenze e applica lo schema:
 
 ```bash
+cd backend
 pip install -r requirements.txt
 alembic upgrade head
 ```
@@ -38,15 +40,15 @@ alembic upgrade head
 ### Linux / macOS
 
 ```bash
-mkdir -p /percorso/tennis_oracle/logs
-chmod +x /percorso/tennis_oracle/scripts/run_daily_job.sh
+mkdir -p /percorso/tennis_oracle/backend/logs
+chmod +x /percorso/tennis_oracle/backend/scripts/run_daily_job.sh
 crontab -e
 ```
 
 Aggiungi (adatta il percorso):
 
 ```cron
-0 9 * * * /percorso/tennis_oracle/scripts/run_daily_job.sh
+0 9 * * * /percorso/tennis_oracle/backend/scripts/run_daily_job.sh
 ```
 
 ### Windows (Task Scheduler)
@@ -54,9 +56,9 @@ Aggiungi (adatta il percorso):
 1. **Utilità di pianificazione** → Crea attività di base
 2. Trigger: ogni giorno alle **09:00**
 3. Azione: avvia programma  
-   - Programma: `C:\percorso\tennis_oracle\scripts\run_daily_job.bat`  
+   - Programma: `C:\percorso\tennis_oracle\backend\scripts\run_daily_job.bat`  
    - Oppure: `python` con argomenti `-m src.jobs.daily_pipeline`  
-   - Cartella iniziale: root del progetto
+   - Cartella iniziale: `backend/`
 
 ## Cursor Automations (agent cloud): quando usarle?
 
@@ -77,11 +79,13 @@ Utile solo se:
 
 Prompt esempio per Automation:
 
-> Ogni giorno alle 09:00 esegui `python3 -m src.jobs.daily_pipeline` nel repo tennis_oracle. Verifica che `properties/config.env` abbia le URL DB corrette e logga l'esito.
+> Ogni giorno alle 09:00 esegui `python3 -m src.jobs.daily_pipeline` nella cartella backend del repo tennis_oracle. Verifica che `backend/properties/config.env` abbia le URL DB corrette e logga l'esito.
 
 ## Test manuale
 
 ```bash
+cd backend
+
 # Solo import locale
 python3 -m src.service.import_fixtures
 
