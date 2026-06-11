@@ -1,5 +1,5 @@
 @echo off
-REM Esegui dal root del progetto (Task Scheduler Windows, ore 09:00)
+REM Esegui dalla cartella backend (Task Scheduler Windows, ore 09:00)
 cd /d "%~dp0.."
 set PYTHONPATH=%CD%
 if not exist logs mkdir logs

@@ -7,14 +7,16 @@
 /.idea
 *.pyc
 /logs/
-/.env
+/backend/.env
 /frontend/.env
 /frontend/dist/
 /frontend/node_modules/
-/data/processed/*.csv
+/backend/data/processed/*.csv
 /.venv/
 /venv/
+/backend/.venv/
+/backend/venv/
 __pycache__/
-properties/config.env
+backend/properties/config.env
 
 
