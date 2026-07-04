@@ -1,22 +1,19 @@
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { Navigate, createBrowserRouter, RouterProvider } from "react-router-dom";
 
 import { Layout } from "./components/Layout";
-import { Dashboard } from "./pages/Dashboard";
-import { MatchesPage } from "./pages/MatchesPage";
-import { PlayerDetailPage } from "./pages/PlayerDetailPage";
-import { PlayersPage } from "./pages/PlayersPage";
-import { TournamentsPage } from "./pages/TournamentsPage";
+import { BettingSlipsPage } from "./pages/BettingSlipsPage";
+import { PredictionStatsPage } from "./pages/PredictionStatsPage";
+import { PredictionsPage } from "./pages/PredictionsPage";
 
 const router = createBrowserRouter([
   {
     path: "/",
     element: <Layout />,
     children: [
-      { index: true, element: <Dashboard /> },
-      { path: "matches", element: <MatchesPage /> },
-      { path: "players", element: <PlayersPage /> },
-      { path: "players/:playerId", element: <PlayerDetailPage /> },
-      { path: "tournaments", element: <TournamentsPage /> }
+      { index: true, element: <Navigate to="/predictions" replace /> },
+      { path: "predictions", element: <PredictionsPage /> },
+      { path: "prediction-stats", element: <PredictionStatsPage /> },
+      { path: "betting-slips", element: <BettingSlipsPage /> }
     ]
   }
 ]);

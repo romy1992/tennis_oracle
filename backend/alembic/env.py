@@ -1,5 +1,6 @@
 from logging.config import fileConfig
 import os
+import sys
 from pathlib import Path
 
 from sqlalchemy import engine_from_config
@@ -7,9 +8,51 @@ from sqlalchemy import pool
 
 from alembic import context
 from dotenv import load_dotenv
-from backend.src.app.db.base import Base, Event, Fixture, Player, Standing, Tournament
 
-_ = (Event, Tournament, Fixture, Standing, Player)
+# Alembic is run from backend/; add repo root so `backend.*` imports resolve.
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = BACKEND_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from backend.src.app.db.base import (  # noqa: E402
+    Base,
+    BettingSlip,
+    BettingSlipDay,
+    BettingSlipPick,
+    Event,
+    FeatureSnapshot,
+    Fixture,
+    MLMatch,
+    MLPlayer,
+    MLTournament,
+    MatchPrediction,
+    NextFixture,
+    OddsSnapshot,
+    Player,
+    RankingSnapshot,
+    Standing,
+    Tournament,
+)
+
+_ = (
+    Event,
+    Tournament,
+    Fixture,
+    NextFixture,
+    MatchPrediction,
+    BettingSlip,
+    BettingSlipDay,
+    BettingSlipPick,
+    Standing,
+    Player,
+    FeatureSnapshot,
+    MLMatch,
+    MLPlayer,
+    MLTournament,
+    OddsSnapshot,
+    RankingSnapshot,
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -20,7 +63,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = BACKEND_DIR
 load_dotenv(dotenv_path=ROOT_DIR / ".env")
 load_dotenv(dotenv_path=ROOT_DIR / "properties" / "config.env")
 

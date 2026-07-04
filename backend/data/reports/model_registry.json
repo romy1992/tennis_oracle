@@ -1,0 +1,32 @@
+{
+  "versions": [
+    {
+      "id": "v1",
+      "label": "Baseline form+H2H+ATP parziale",
+      "description": "Primo baseline senza Elo/rank reali. Odds solo benchmark.",
+      "dataset": "backend/data/processed/tennis_winner_dataset_with_odds.csv",
+      "features_summary": "Uses rank_diff placeholder (9999) and ATP enrichment ranks when available.",
+      "models_path": "backend/data/models",
+      "metrics_path": "backend/data/reports/baseline_metrics.json",
+      "created_at": "2026-06-21T00:00:00+00:00"
+    },
+    {
+      "id": "v2",
+      "label": "Elo + ranking storico",
+      "description": "Elo overall/surface pre-match + rank ATP storico. Odds benchmark/value bet.",
+      "dataset": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\processed\\tennis_winner_dataset_with_odds_v2.csv",
+      "features_summary": "Uses historical ATP rank columns player_*_rank and rank_diff/rank_points_diff. ATP enrichment rank columns are excluded from v2 training.",
+      "models_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\models\\v2",
+      "metrics_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\baseline_v2_metrics.json",
+      "created_at": "2026-06-21T08:57:25.265601+00:00",
+      "updated_at": "2026-06-21T08:57:25.265601+00:00"
+    }
+  ],
+  "planned_versions": [
+    {
+      "id": "v3",
+      "label": "Boosting/tuning",
+      "status": "planned"
+    }
+  ]
+}

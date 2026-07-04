@@ -17,7 +17,7 @@ class _Response:
 
 
 class RequestApiTest(unittest.TestCase):
-    @patch("src.utility.request_api.requests.get", return_value=_Response())
+    @patch("backend.src.utility.request_api.requests.get", return_value=_Response())
     def test_empty_result_list_is_returned(self, _mock_get):
         self.assertEqual(request_api("get_fixtures"), [])
 

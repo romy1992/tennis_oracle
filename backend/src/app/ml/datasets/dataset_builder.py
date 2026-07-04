@@ -9,6 +9,18 @@ from sqlalchemy.orm import Session
 
 from backend.src.entity import Fixture, Tournament
 from backend.src.app.models import FeatureSnapshot
+from backend.src.app.ml.datasets.elo_builder import EloTracker, INITIAL_ELO
+from backend.src.app.ml.datasets.ranking_history import (
+    HistoricalRankingLookup,
+    WTA_RANKING_FALLBACK_NOTE,
+    build_historical_ranking_lookup,
+)
+from backend.src.app.ml.model_versioning import (
+    ATP_DATA_DIR,
+    DATASET_VERSIONS,
+    MATCH_MAPPING_PATH,
+    PROCESSED_DATA_DIR,
+)
 
 
 TARGET_COLUMN = "target_player_1_win"
@@ -50,6 +62,11 @@ ELO_DATASET_COLUMNS = [
     "player_2_surface_elo",
     "surface_elo_diff",
 ]
+RANK_POINTS_COLUMNS = [
+    "player_1_rank_points",
+    "player_2_rank_points",
+    "rank_points_diff",
+]
 DATASET_COLUMNS = [
     "match_id",
     "match_date",
@@ -59,6 +76,33 @@ DATASET_COLUMNS = [
     "player_1_rank",
     "player_2_rank",
     "rank_diff",
+    *ELO_DATASET_COLUMNS,
+    "player_1_last_5_win_rate",
+    "player_2_last_5_win_rate",
+    "player_1_last_10_win_rate",
+    "player_2_last_10_win_rate",
+    "player_1_surface_last_10_win_rate",
+    "player_2_surface_last_10_win_rate",
+    "player_1_matches_last_14_days",
+    "player_2_matches_last_14_days",
+    "player_1_days_since_last_match",
+    "player_2_days_since_last_match",
+    "h2h_player_1_wins",
+    "h2h_player_2_wins",
+    "h2h_surface_player_1_wins",
+    "h2h_surface_player_2_wins",
+    TARGET_COLUMN,
+]
+V2_DATASET_COLUMNS = [
+    "match_id",
+    "match_date",
+    "surface",
+    "player_1_id",
+    "player_2_id",
+    "player_1_rank",
+    "player_2_rank",
+    "rank_diff",
+    *RANK_POINTS_COLUMNS,
     *ELO_DATASET_COLUMNS,
     "player_1_last_5_win_rate",
     "player_2_last_5_win_rate",
@@ -103,6 +147,15 @@ class DatasetSummary:
     null_counts: dict[str, int]
     date_min: date | None
     date_max: date | None
+
+
+@dataclass(frozen=True)
+class V2DatasetSummary(DatasetSummary):
+    elo_min: float | None
+    elo_max: float | None
+    non_default_elo_pct: float
+    non_default_rank_pct: float
+    ranking_fallback_note: str
 
 
 @dataclass(frozen=True)
@@ -347,6 +400,149 @@ def legacy_match_rows_to_dataframe(matches: list[LegacyMatchRow]) -> pd.DataFram
     return pd.DataFrame(dataset_rows)
 
 
+def legacy_match_rows_to_dataframe_v2(
+    matches: list[LegacyMatchRow],
+    ranking_lookup: HistoricalRankingLookup | None = None,
+    elo_tracker: EloTracker | None = None,
+) -> pd.DataFrame:
+    player_history: dict[int, list[PlayerHistoryItem]] = {}
+    h2h: dict[tuple[int, int], dict[int, int]] = {}
+    surface_h2h: dict[tuple[int, int, str], dict[int, int]] = {}
+    tracker = elo_tracker or EloTracker()
+    rankings = ranking_lookup or HistoricalRankingLookup(pd.DataFrame(), {})
+    dataset_rows = []
+
+    for match_date, date_matches_iter in groupby(matches, key=lambda match: match.match_date):
+        date_matches = list(date_matches_iter)
+
+        for match in date_matches:
+            player_1_history = player_history.get(match.player_1_id, [])
+            player_2_history = player_history.get(match.player_2_id, [])
+            h2h_wins = h2h.get(_h2h_key(match.player_1_id, match.player_2_id), {})
+            surface_wins = surface_h2h.get(
+                _surface_h2h_key(match.player_1_id, match.player_2_id, match.surface),
+                {},
+            )
+            elo_features = tracker.pre_match_features(
+                match.player_1_id,
+                match.player_2_id,
+                match.surface,
+            )
+            rank_features = rankings.pre_match_features(
+                match.player_1_id,
+                match.player_2_id,
+                match.match_date,
+            )
+
+            dataset_rows.append(
+                {
+                    "match_id": match.match_id,
+                    "match_date": match.match_date,
+                    "surface": match.surface,
+                    "player_1_id": match.player_1_id,
+                    "player_2_id": match.player_2_id,
+                    "player_1_rank": rank_features.player_1_rank,
+                    "player_2_rank": rank_features.player_2_rank,
+                    "rank_diff": rank_features.rank_diff,
+                    "player_1_rank_points": rank_features.player_1_rank_points,
+                    "player_2_rank_points": rank_features.player_2_rank_points,
+                    "rank_points_diff": rank_features.rank_points_diff,
+                    "player_1_elo": elo_features.player_1_elo,
+                    "player_2_elo": elo_features.player_2_elo,
+                    "elo_diff": elo_features.elo_diff,
+                    "player_1_surface_elo": elo_features.player_1_surface_elo,
+                    "player_2_surface_elo": elo_features.player_2_surface_elo,
+                    "surface_elo_diff": elo_features.surface_elo_diff,
+                    "player_1_last_5_win_rate": _win_rate_last_n(player_1_history, 5),
+                    "player_2_last_5_win_rate": _win_rate_last_n(player_2_history, 5),
+                    "player_1_last_10_win_rate": _win_rate_last_n(player_1_history, 10),
+                    "player_2_last_10_win_rate": _win_rate_last_n(player_2_history, 10),
+                    "player_1_surface_last_10_win_rate": _win_rate_last_n(
+                        player_1_history,
+                        10,
+                        surface=match.surface,
+                    ),
+                    "player_2_surface_last_10_win_rate": _win_rate_last_n(
+                        player_2_history,
+                        10,
+                        surface=match.surface,
+                    ),
+                    "player_1_matches_last_14_days": _matches_last_14_days(
+                        player_1_history,
+                        match_date,
+                    ),
+                    "player_2_matches_last_14_days": _matches_last_14_days(
+                        player_2_history,
+                        match_date,
+                    ),
+                    "player_1_days_since_last_match": _days_since_last_match(
+                        player_1_history,
+                        match_date,
+                    ),
+                    "player_2_days_since_last_match": _days_since_last_match(
+                        player_2_history,
+                        match_date,
+                    ),
+                    "h2h_player_1_wins": h2h_wins.get(match.player_1_id, 0),
+                    "h2h_player_2_wins": h2h_wins.get(match.player_2_id, 0),
+                    "h2h_surface_player_1_wins": surface_wins.get(match.player_1_id, 0),
+                    "h2h_surface_player_2_wins": surface_wins.get(match.player_2_id, 0),
+                    "target_player_1_win": match.target_player_1_win,
+                }
+            )
+
+        for match in date_matches:
+            player_1_won = match.target_player_1_win == 1
+            player_2_won = not player_1_won
+            player_history.setdefault(match.player_1_id, []).append(
+                PlayerHistoryItem(
+                    match_date=match.match_date,
+                    surface=match.surface,
+                    won=player_1_won,
+                )
+            )
+            player_history.setdefault(match.player_2_id, []).append(
+                PlayerHistoryItem(
+                    match_date=match.match_date,
+                    surface=match.surface,
+                    won=player_2_won,
+                )
+            )
+
+            pair_key = _h2h_key(match.player_1_id, match.player_2_id)
+            h2h.setdefault(pair_key, {})
+            h2h[pair_key][match.player_1_id] = h2h[pair_key].get(match.player_1_id, 0)
+            h2h[pair_key][match.player_2_id] = h2h[pair_key].get(match.player_2_id, 0)
+            h2h[pair_key][match.player_1_id if player_1_won else match.player_2_id] += 1
+
+            surface_key = _surface_h2h_key(
+                match.player_1_id,
+                match.player_2_id,
+                match.surface,
+            )
+            surface_h2h.setdefault(surface_key, {})
+            surface_h2h[surface_key][match.player_1_id] = surface_h2h[surface_key].get(
+                match.player_1_id,
+                0,
+            )
+            surface_h2h[surface_key][match.player_2_id] = surface_h2h[surface_key].get(
+                match.player_2_id,
+                0,
+            )
+            surface_h2h[surface_key][
+                match.player_1_id if player_1_won else match.player_2_id
+            ] += 1
+
+            tracker.record_match(
+                match.player_1_id,
+                match.player_2_id,
+                match.surface,
+                player_1_won,
+            )
+
+    return pd.DataFrame(dataset_rows)
+
+
 def load_feature_snapshots(db: Session) -> list[FeatureSnapshot]:
     return load_valid_feature_snapshots(db)
 
@@ -469,6 +665,112 @@ def clean_dataset_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
     return dataframe[DATASET_COLUMNS]
 
 
+def clean_dataset_dataframe_v2(dataframe: pd.DataFrame) -> pd.DataFrame:
+    cleaned = clean_dataset_dataframe(dataframe)
+    if cleaned.empty:
+        return pd.DataFrame(columns=V2_DATASET_COLUMNS)
+
+    for column in RANK_POINTS_COLUMNS:
+        if column not in cleaned.columns:
+            cleaned[column] = pd.NA
+
+    rank_points_columns = ["player_1_rank_points", "player_2_rank_points"]
+    cleaned[rank_points_columns] = cleaned[rank_points_columns].fillna(0)
+    cleaned["rank_points_diff"] = (
+        cleaned["player_1_rank_points"] - cleaned["player_2_rank_points"]
+    )
+    cleaned[rank_points_columns + ["rank_points_diff"]] = cleaned[
+        rank_points_columns + ["rank_points_diff"]
+    ].astype("int64")
+    return cleaned[V2_DATASET_COLUMNS]
+
+
+def build_dataset_dataframe_v2(
+    db: Session,
+    rankings_dir: str | Path = ATP_DATA_DIR,
+    match_mapping_path: str | Path = MATCH_MAPPING_PATH,
+    base_dataset_path: str | Path | None = None,
+) -> pd.DataFrame:
+    resolved_base_path = Path(base_dataset_path) if base_dataset_path is not None else PROCESSED_DATA_DIR / DATASET_VERSIONS["v1"].base_dataset
+    if not resolved_base_path.exists():
+        resolved_base_path = PROCESSED_DATA_DIR / "tennis_winner_dataset_v2.csv"
+    ranking_lookup = build_historical_ranking_lookup(
+        rankings_dir,
+        match_mapping_path,
+        base_dataset_path=resolved_base_path if resolved_base_path.exists() else None,
+    )
+    raw_dataframe = legacy_match_rows_to_dataframe_v2(
+        load_legacy_match_rows(db),
+        ranking_lookup=ranking_lookup,
+    )
+    return clean_dataset_dataframe_v2(raw_dataframe)
+
+
+def summarize_v2_dataset(dataframe: pd.DataFrame) -> V2DatasetSummary:
+    base_summary = summarize_dataset(dataframe)
+    if dataframe.empty:
+        return V2DatasetSummary(
+            total_rows=base_summary.total_rows,
+            total_columns=len(V2_DATASET_COLUMNS),
+            target_percentages=base_summary.target_percentages,
+            null_counts=base_summary.null_counts,
+            date_min=base_summary.date_min,
+            date_max=base_summary.date_max,
+            elo_min=None,
+            elo_max=None,
+            non_default_elo_pct=0.0,
+            non_default_rank_pct=0.0,
+            ranking_fallback_note=WTA_RANKING_FALLBACK_NOTE,
+        )
+
+    elo_values = pd.concat(
+        [
+            pd.to_numeric(dataframe["player_1_elo"], errors="coerce"),
+            pd.to_numeric(dataframe["player_2_elo"], errors="coerce"),
+        ],
+        ignore_index=True,
+    )
+    rank_values = pd.concat(
+        [
+            pd.to_numeric(dataframe["player_1_rank"], errors="coerce"),
+            pd.to_numeric(dataframe["player_2_rank"], errors="coerce"),
+        ],
+        ignore_index=True,
+    )
+    non_default_elo = (
+        (elo_values != DEFAULT_ELO_VALUE).sum() / len(elo_values) * 100 if len(elo_values) else 0.0
+    )
+    non_default_rank = (
+        (rank_values != MISSING_RANK_VALUE).sum() / len(rank_values) * 100 if len(rank_values) else 0.0
+    )
+    return V2DatasetSummary(
+        total_rows=base_summary.total_rows,
+        total_columns=len(V2_DATASET_COLUMNS),
+        target_percentages=base_summary.target_percentages,
+        null_counts=base_summary.null_counts,
+        date_min=base_summary.date_min,
+        date_max=base_summary.date_max,
+        elo_min=float(elo_values.min()) if not elo_values.empty else None,
+        elo_max=float(elo_values.max()) if not elo_values.empty else None,
+        non_default_elo_pct=round(float(non_default_elo), 2),
+        non_default_rank_pct=round(float(non_default_rank), 2),
+        ranking_fallback_note=WTA_RANKING_FALLBACK_NOTE,
+    )
+
+
+def format_v2_dataset_summary(summary: V2DatasetSummary) -> str:
+    base = format_dataset_summary(summary)
+    return "\n".join(
+        [
+            base,
+            f"Elo min/max: {summary.elo_min} / {summary.elo_max}",
+            f"Righe con Elo non-default: {summary.non_default_elo_pct:.2f}%",
+            f"Righe con rank ATP storico: {summary.non_default_rank_pct:.2f}%",
+            f"Nota ranking: {summary.ranking_fallback_note}",
+        ]
+    )
+
+
 def build_dataset_dataframe(db: Session) -> pd.DataFrame:
     return clean_dataset_dataframe(
         legacy_match_rows_to_dataframe(load_legacy_match_rows(db))
@@ -579,4 +881,24 @@ def build_and_export_dataset_report(
         csv_path=csv_path,
         dataframe=dataframe,
         summary=summarize_dataset(dataframe),
+    )
+
+
+def build_and_export_dataset_report_v2(
+    db: Session,
+    output_dir: str | Path = "backend/data/processed",
+    filename: str = "tennis_winner_dataset_v2.csv",
+    rankings_dir: str | Path = ATP_DATA_DIR,
+    match_mapping_path: str | Path = MATCH_MAPPING_PATH,
+) -> DatasetBuildResult:
+    dataframe = build_dataset_dataframe_v2(
+        db,
+        rankings_dir=rankings_dir,
+        match_mapping_path=match_mapping_path,
+    )
+    csv_path = export_dataset_csv(dataframe, output_dir=output_dir, filename=filename)
+    return DatasetBuildResult(
+        csv_path=csv_path,
+        dataframe=dataframe,
+        summary=summarize_v2_dataset(dataframe),
     )
