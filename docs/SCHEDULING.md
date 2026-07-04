@@ -5,13 +5,25 @@
 `DailyPipeline` (`backend/src/jobs/daily_pipeline.py`):
 
 1. **Import fixtures** nel DB locale (ieri → oggi, come `import_fixtures`)
-2. **Sync cloud** verso `DATABASE_TARGET_URL` con upsert (default tabella `fixture`)
+2. **Import prossime partite** in `next_fixture` per i prossimi 10 giorni
+3. **Genera previsioni salvate** in `match_prediction` per le prossime partite, scegliendo automaticamente il modello migliore dalle metriche della versione attiva
+4. **Sync cloud** verso `DATABASE_TARGET_URL` con upsert
 
-Comando unico (dalla cartella `backend/`):
+Policy previsioni: il job mantiene una riga per `event_key + model_version + model_name`.
+Le righe future/non risolte vengono aggiornate se il job gira di nuovo; le righe gia
+valutabili con `actual_winner` non vengono sovrascritte, cosi lo storico resta
+confrontabile con i risultati importati.
+
+Policy modello: se `--prediction-model-name` non viene passato, il job legge
+`baseline_metrics.json` / `baseline_v2_metrics.json` e sceglie il modello con
+`roc_auc` piu alto; se non disponibile usa `accuracy`, poi `log_loss` piu basso.
+`roc_auc` e il criterio primario perche le previsioni esposte sono probabilita,
+quindi serve premiare la capacita discriminante del modello.
+
+Comando unico (dalla root del repository):
 
 ```bash
-cd backend
-python3 -m src.jobs.daily_pipeline
+python3 -m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v2
 ```
 
 ## Configurazione (`backend/properties/config.env`)
@@ -57,8 +69,8 @@ Aggiungi (adatta il percorso):
 2. Trigger: ogni giorno alle **09:00**
 3. Azione: avvia programma  
    - Programma: `C:\percorso\tennis_oracle\backend\scripts\run_daily_job.bat`  
-   - Oppure: `python` con argomenti `-m src.jobs.daily_pipeline`  
-   - Cartella iniziale: `backend/`
+   - Oppure: `python` con argomenti `-m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v2`  
+   - Cartella iniziale: root del repository `tennis_oracle/`
 
 ## Cursor Automations (agent cloud): quando usarle?
 
@@ -79,19 +91,25 @@ Utile solo se:
 
 Prompt esempio per Automation:
 
-> Ogni giorno alle 09:00 esegui `python3 -m src.jobs.daily_pipeline` nella cartella backend del repo tennis_oracle. Verifica che `backend/properties/config.env` abbia le URL DB corrette e logga l'esito.
+> Ogni giorno alle 09:00 esegui `python3 -m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v2` dalla root del repo tennis_oracle. Verifica che `backend/properties/config.env` abbia le URL DB corrette e logga l'esito.
 
 ## Test manuale
 
 ```bash
-cd backend
+cd /percorso/tennis_oracle
 
 # Solo import locale
-python3 -m src.service.import_fixtures
+python3 -m backend.src.service.import_fixtures
 
 # Import + sync cloud
-python3 -m src.jobs.daily_pipeline
+python3 -m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v2
 
 # Solo import, senza cloud
-python3 -m src.jobs.daily_pipeline --no-sync
+python3 -m backend.src.jobs.daily_pipeline --no-sync --days-forward 10 --prediction-model-version v2
+
+# Override manuale del modello, se vuoi rigenerare una variante specifica
+python3 -m backend.src.jobs.daily_pipeline --no-sync --prediction-model-version v2 --prediction-model-name random_forest
+
+# Solo generazione previsioni per fixture gia importate
+python3 -m backend.src.jobs.generate_upcoming_predictions --days-forward 10 --model-version v2
 ```

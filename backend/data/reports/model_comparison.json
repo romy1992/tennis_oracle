@@ -1,0 +1,252 @@
+{
+  "generated_at": "2026-06-21T08:57:25.261173+00:00",
+  "versions": {
+    "v1": {
+      "metrics_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\baseline_metrics.json",
+      "dataset_used": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\processed\\tennis_winner_dataset_with_odds.csv",
+      "features_used": [
+        "surface",
+        "rank_diff",
+        "player_1_last_5_win_rate",
+        "player_2_last_5_win_rate",
+        "player_1_last_10_win_rate",
+        "player_2_last_10_win_rate",
+        "player_1_surface_last_10_win_rate",
+        "player_2_surface_last_10_win_rate",
+        "player_1_matches_last_14_days",
+        "player_2_matches_last_14_days",
+        "player_1_days_since_last_match",
+        "player_2_days_since_last_match",
+        "h2h_player_1_wins",
+        "h2h_player_2_wins",
+        "h2h_surface_player_1_wins",
+        "h2h_surface_player_2_wins",
+        "player_1_atp_rank",
+        "player_2_atp_rank",
+        "atp_rank_diff",
+        "player_1_atp_rank_points",
+        "player_2_atp_rank_points",
+        "atp_rank_points_diff",
+        "player_1_age",
+        "player_2_age",
+        "age_diff",
+        "player_1_height",
+        "player_2_height",
+        "height_diff",
+        "player_1_hand",
+        "player_2_hand",
+        "atp_surface",
+        "atp_tourney_level",
+        "atp_round",
+        "atp_best_of",
+        "atp_match_found"
+      ],
+      "rank_features_note": null,
+      "models": {
+        "logistic_regression": {
+          "accuracy": 0.623198,
+          "precision": 0.623597,
+          "recall": 0.66991,
+          "f1": 0.645924,
+          "roc_auc": 0.675434,
+          "log_loss": 0.645728,
+          "confusion_matrix": [
+            [
+              18926,
+              14047
+            ],
+            [
+              11467,
+              23272
+            ]
+          ],
+          "class_distribution_train": {
+            "1": 138329,
+            "0": 132516
+          },
+          "class_distribution_test": {
+            "1": 34739,
+            "0": 32973
+          }
+        },
+        "random_forest": {
+          "accuracy": 0.629608,
+          "precision": 0.629543,
+          "recall": 0.67561,
+          "f1": 0.651763,
+          "roc_auc": 0.686694,
+          "log_loss": 0.640499,
+          "confusion_matrix": [
+            [
+              19162,
+              13811
+            ],
+            [
+              11269,
+              23470
+            ]
+          ],
+          "class_distribution_train": {
+            "1": 138329,
+            "0": 132516
+          },
+          "class_distribution_test": {
+            "1": 34739,
+            "0": 32973
+          }
+        }
+      },
+      "market_benchmark": {
+        "market_accuracy": 0.714983,
+        "market_log_loss": 0.552505,
+        "market_roc_auc": 0.791232,
+        "market_profit_if_bet_player_1_all": -5368.522468,
+        "market_roi_if_bet_player_1_all": -0.110144,
+        "odds_coverage_rows": 48741,
+        "odds_coverage_pct": 71.98281
+      }
+    },
+    "v2": {
+      "metrics_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\baseline_v2_metrics.json",
+      "dataset_used": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\processed\\tennis_winner_dataset_with_odds_v2.csv",
+      "features_used": [
+        "surface",
+        "rank_diff",
+        "rank_points_diff",
+        "elo_diff",
+        "surface_elo_diff",
+        "player_1_last_5_win_rate",
+        "player_2_last_5_win_rate",
+        "player_1_last_10_win_rate",
+        "player_2_last_10_win_rate",
+        "player_1_surface_last_10_win_rate",
+        "player_2_surface_last_10_win_rate",
+        "player_1_matches_last_14_days",
+        "player_2_matches_last_14_days",
+        "player_1_days_since_last_match",
+        "player_2_days_since_last_match",
+        "h2h_player_1_wins",
+        "h2h_player_2_wins",
+        "h2h_surface_player_1_wins",
+        "h2h_surface_player_2_wins",
+        "player_1_age",
+        "player_2_age",
+        "age_diff",
+        "player_1_height",
+        "player_2_height",
+        "height_diff",
+        "player_1_hand",
+        "player_2_hand",
+        "atp_surface",
+        "atp_tourney_level",
+        "atp_round",
+        "atp_best_of",
+        "atp_match_found"
+      ],
+      "rank_features_note": "Uses historical ATP rank columns player_*_rank and rank_diff/rank_points_diff. ATP enrichment rank columns are excluded from v2 training.",
+      "models": {
+        "logistic_regression": {
+          "accuracy": 0.683724,
+          "precision": 0.686083,
+          "recall": 0.707172,
+          "f1": 0.696468,
+          "roc_auc": 0.753538,
+          "log_loss": 0.586501,
+          "confusion_matrix": [
+            [
+              21727,
+              11242
+            ],
+            [
+              10174,
+              24570
+            ]
+          ],
+          "class_distribution_train": {
+            "1": 138329,
+            "0": 132522
+          },
+          "class_distribution_test": {
+            "1": 34744,
+            "0": 32969
+          },
+          "value_bet_overall": {
+            "edge_threshold": 0.03,
+            "bets_count": 18761,
+            "hit_rate": 0.450456,
+            "total_profit": -2511.32695,
+            "roi": -0.133859,
+            "yield": -0.133859,
+            "odds_coverage_rows": 48737,
+            "odds_coverage_pct": 71.975839
+          },
+          "value_bet_with_odds": {
+            "edge_threshold": 0.03,
+            "bets_count": 18761,
+            "hit_rate": 0.450456,
+            "total_profit": -2511.32695,
+            "roi": -0.133859,
+            "yield": -0.133859,
+            "odds_coverage_rows": 48737,
+            "odds_coverage_pct": 100.0
+          }
+        },
+        "random_forest": {
+          "accuracy": 0.690311,
+          "precision": 0.692956,
+          "recall": 0.711864,
+          "f1": 0.702283,
+          "roc_auc": 0.759535,
+          "log_loss": 0.58609,
+          "confusion_matrix": [
+            [
+              22010,
+              10959
+            ],
+            [
+              10011,
+              24733
+            ]
+          ],
+          "class_distribution_train": {
+            "1": 138329,
+            "0": 132522
+          },
+          "class_distribution_test": {
+            "1": 34744,
+            "0": 32969
+          },
+          "value_bet_overall": {
+            "edge_threshold": 0.03,
+            "bets_count": 18919,
+            "hit_rate": 0.354828,
+            "total_profit": -3174.051797,
+            "roi": -0.167771,
+            "yield": -0.167771,
+            "odds_coverage_rows": 48737,
+            "odds_coverage_pct": 71.975839
+          },
+          "value_bet_with_odds": {
+            "edge_threshold": 0.03,
+            "bets_count": 18919,
+            "hit_rate": 0.354828,
+            "total_profit": -3174.051797,
+            "roi": -0.167771,
+            "yield": -0.167771,
+            "odds_coverage_rows": 48737,
+            "odds_coverage_pct": 100.0
+          }
+        }
+      },
+      "market_benchmark": {
+        "market_accuracy": 0.71498,
+        "market_log_loss": 0.552502,
+        "market_roc_auc": 0.791233,
+        "market_profit_if_bet_player_1_all": -5364.522468,
+        "market_roi_if_bet_player_1_all": -0.110071,
+        "odds_coverage_rows": 48737,
+        "odds_coverage_pct": 71.975839
+      }
+    }
+  }
+}

@@ -488,6 +488,7 @@ def build_atp_singles_outputs(
     atp_data_dir: Path,
     output_dir: Path,
     base_dataset_filename: str = "tennis_winner_dataset.csv",
+    enriched_dataset_filename: str = "tennis_winner_dataset_atp_enriched.csv",
 ) -> AtpSinglesBuildResult:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -513,6 +514,7 @@ def build_atp_singles_outputs(
         output_dir / base_dataset_filename,
         match_mapping,
         output_dir,
+        filename=enriched_dataset_filename,
     )
     enriched_rows = 0
     if enriched_path:

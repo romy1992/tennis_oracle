@@ -20,10 +20,18 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.src.entity import Event, Fixture, Player, Standing, Tournament
+from backend.src.entity import (
+    Event,
+    Fixture,
+    MatchPrediction,
+    NextFixture,
+    Player,
+    Standing,
+    Tournament,
+)
 from backend.src.entity.base import Base
 
-_ = (Event, Tournament, Fixture, Standing, Player)
+_ = (Event, Tournament, Fixture, NextFixture, MatchPrediction, Standing, Player)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,6 +48,8 @@ TABLE_MIGRATION_ORDER = (
     "event",
     "tournament",
     "fixture",
+    "next_fixture",
+    "match_prediction",
     "standing",
     "player",
 )
@@ -49,6 +59,8 @@ TABLE_CONFLICT_COLUMNS = {
     "event": ["event_type_key"],
     "tournament": ["tournament_key"],
     "fixture": ["event_key"],
+    "next_fixture": ["event_key"],
+    "match_prediction": ["event_key", "model_version"],
     "standing": ["player_key", "league"],
     "player": ["player_key"],
 }

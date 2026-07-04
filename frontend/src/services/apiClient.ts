@@ -1,4 +1,21 @@
-import type { BackendHealth, ListParams, Player, TennisMatch, Tournament } from "../types/api";
+import type {
+  BettingSlipCalendarResponse,
+  BettingSlipStatsParams,
+  BettingSlipStatsResponse,
+  BettingSlipsDailyResponse,
+  BettingSlipsQueryParams,
+  BettingSlipsRefreshResponse,
+  DailyPredictionStatsResponse,
+  DailyStatsParams,
+  FixturesWithPredictionsPage,
+  ImportFixturesResponse,
+  ImportStatusResponse,
+  MLModelVersion,
+  NextFixtureWithPrediction,
+  PredictionQueryParams,
+  PredictionSummaryResponse,
+  RefreshMatchesResponse
+} from "../types/api";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -12,7 +29,10 @@ export class ApiError extends Error {
   }
 }
 
-function withQuery(path: string, params: Record<string, string | number | undefined> = {}) {
+function withQuery(
+  path: string,
+  params: Record<string, string | number | boolean | undefined> = {}
+) {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined) {
@@ -38,14 +58,58 @@ async function request<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function post<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      message = payload.detail ?? message;
+    } catch {
+      // Keep the generic HTTP message when the backend does not return JSON.
+    }
+    throw new ApiError(message, response.status);
+  }
+  return (await response.json()) as T;
+}
+
 export const apiClient = {
-  getHealth: () => request<BackendHealth>("/health"),
-  getMatches: (params: ListParams = {}) =>
-    request<TennisMatch[]>(withQuery("/api/matches", params)),
-  getMatch: (matchId: number) => request<TennisMatch>(`/api/matches/${matchId}`),
-  getPlayers: (params: ListParams = {}) =>
-    request<Player[]>(withQuery("/api/players", params)),
-  getPlayer: (playerId: number) => request<Player>(`/api/players/${playerId}`),
-  getTournaments: (params: ListParams = {}) =>
-    request<Tournament[]>(withQuery("/api/tournaments", params))
+  getNextFixturesPredictions: (params: PredictionQueryParams = {}) =>
+    request<FixturesWithPredictionsPage>(
+      withQuery("/api/next-fixtures/predictions", params)
+    ),
+  getUpcomingPredictions: (params: PredictionQueryParams = {}) =>
+    request<FixturesWithPredictionsPage>(
+      withQuery("/api/next-fixtures/predictions", params)
+    ),
+  getDailyPredictionStats: (params: DailyStatsParams = {}) =>
+    request<DailyPredictionStatsResponse>(
+      withQuery("/api/predictions/stats/daily", params)
+    ),
+  getPredictionSummary: (params: { model_version?: MLModelVersion } = {}) =>
+    request<PredictionSummaryResponse>(
+      withQuery("/api/predictions/stats/summary", params)
+    ),
+  getImportStatus: () => request<ImportStatusResponse>("/api/imports/status"),
+  refreshMatches: (params: {
+    model_version?: MLModelVersion;
+    force_next_import?: boolean;
+  } = {}) =>
+    post<RefreshMatchesResponse>(
+      withQuery("/api/imports/refresh", params)
+    ),
+  importPlayedFixtures: (daysBack: number) =>
+    post<ImportFixturesResponse>("/api/imports/fixtures", { days_back: daysBack }),
+  getDailyBettingSlips: (params: BettingSlipsQueryParams = {}) =>
+    request<BettingSlipsDailyResponse>(withQuery("/api/betting-slips/daily", params)),
+  refreshBettingSlips: (params: BettingSlipsQueryParams = {}) =>
+    post<BettingSlipsRefreshResponse>(withQuery("/api/betting-slips/refresh", params)),
+  getBettingSlipStats: (params: BettingSlipStatsParams = {}) =>
+    request<BettingSlipStatsResponse>(withQuery("/api/betting-slips/stats", params)),
+  getBettingSlipCalendar: (params: { model_version?: MLModelVersion; model_name?: string } = {}) =>
+    request<BettingSlipCalendarResponse>(withQuery("/api/betting-slips/calendar", params))
 };

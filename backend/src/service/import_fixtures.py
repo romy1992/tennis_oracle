@@ -151,4 +151,4 @@ def run_daily_fixture_import(days_back_start: int = 1, days_back_stop: int = 0):
 
 
 if __name__ == "__main__":
-    run_daily_fixture_import(days_back_start=1, days_back_stop=0)  # Esempio: import partite da 3 giorni fa a oggi
+    run_daily_fixture_import(days_back_start=2, days_back_stop=0)  # Esempio: import partite da 3 giorni fa a oggi

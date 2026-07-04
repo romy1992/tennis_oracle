@@ -1,10 +1,9 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 const navItems = [
-  { to: "/", label: "Dashboard" },
-  { to: "/matches", label: "Partite" },
-  { to: "/players", label: "Giocatori" },
-  { to: "/tournaments", label: "Tornei" }
+  { to: "/predictions", label: "Partite" },
+  { to: "/betting-slips", label: "Consiglio schedina" },
+  { to: "/prediction-stats", label: "Statistiche previsioni" }
 ];
 
 export function Layout() {
@@ -13,7 +12,7 @@ export function Layout() {
       <aside className="sidebar">
         <div>
           <h1>tennis_oracle</h1>
-          <p>Dati tennis importati dal backend FastAPI.</p>
+          <p>Previsioni e risultati tennis aggiornati ogni giorno.</p>
         </div>
         <nav>
           {navItems.map((item) => (

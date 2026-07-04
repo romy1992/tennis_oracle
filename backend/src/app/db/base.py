@@ -1,4 +1,15 @@
-from backend.src.entity import Event, Fixture, Player, Standing, Tournament
+from backend.src.entity import (
+    BettingSlip,
+    BettingSlipDay,
+    BettingSlipPick,
+    Event,
+    Fixture,
+    MatchPrediction,
+    NextFixture,
+    Player,
+    Standing,
+    Tournament,
+)
 from backend.src.entity.base import Base
 from backend.src.app.models.ml import (
     FeatureSnapshot,
@@ -14,6 +25,11 @@ __all__ = [
     "Base",
     "Event",
     "Fixture",
+    "NextFixture",
+    "MatchPrediction",
+    "BettingSlip",
+    "BettingSlipDay",
+    "BettingSlipPick",
     "Player",
     "Standing",
     "Tournament",

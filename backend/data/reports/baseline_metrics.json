@@ -1,0 +1,163 @@
+{
+  "dataset_used": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\processed\\tennis_winner_dataset_with_odds.csv",
+  "rows_total": 338557,
+  "columns_total": 74,
+  "date_min": "1990-02-05",
+  "date_max": "2026-06-20",
+  "split": {
+    "strategy": "temporal",
+    "test_size": 0.2,
+    "train_rows": 270845,
+    "test_rows": 67712,
+    "train_date_min": "1990-02-05",
+    "train_date_max": "2025-04-23",
+    "test_date_min": "2025-04-23",
+    "test_date_max": "2026-06-20"
+  },
+  "features_used": [
+    "surface",
+    "rank_diff",
+    "player_1_last_5_win_rate",
+    "player_2_last_5_win_rate",
+    "player_1_last_10_win_rate",
+    "player_2_last_10_win_rate",
+    "player_1_surface_last_10_win_rate",
+    "player_2_surface_last_10_win_rate",
+    "player_1_matches_last_14_days",
+    "player_2_matches_last_14_days",
+    "player_1_days_since_last_match",
+    "player_2_days_since_last_match",
+    "h2h_player_1_wins",
+    "h2h_player_2_wins",
+    "h2h_surface_player_1_wins",
+    "h2h_surface_player_2_wins",
+    "player_1_atp_rank",
+    "player_2_atp_rank",
+    "atp_rank_diff",
+    "player_1_atp_rank_points",
+    "player_2_atp_rank_points",
+    "atp_rank_points_diff",
+    "player_1_age",
+    "player_2_age",
+    "age_diff",
+    "player_1_height",
+    "player_2_height",
+    "height_diff",
+    "player_1_hand",
+    "player_2_hand",
+    "atp_surface",
+    "atp_tourney_level",
+    "atp_round",
+    "atp_best_of",
+    "atp_match_found"
+  ],
+  "features_excluded": [
+    "match_id",
+    "match_date",
+    "player_1_id",
+    "player_2_id",
+    "player_1_rank",
+    "player_2_rank",
+    "player_1_elo",
+    "player_2_elo",
+    "elo_diff",
+    "player_1_surface_elo",
+    "player_2_surface_elo",
+    "surface_elo_diff",
+    "target_player_1_win",
+    "atp_source_file",
+    "atp_category",
+    "atp_tourney_id",
+    "atp_tourney_name",
+    "atp_tourney_date",
+    "atp_days_from_tourney_start",
+    "atp_tournament_similarity",
+    "atp_score",
+    "atp_minutes",
+    "player_1_atp_id",
+    "player_2_atp_id",
+    "player_1_atp_name",
+    "player_2_atp_name",
+    "player_1_ioc",
+    "player_2_ioc",
+    "avg_player_1_odds",
+    "avg_player_2_odds",
+    "avg_market_prob_player_1",
+    "avg_market_prob_player_2",
+    "avg_bookmaker_margin",
+    "odds_bookmaker_count",
+    "market_prob_player_1",
+    "market_prob_player_2",
+    "market_edge_baseline_player_1",
+    "player_1_profit_if_bet",
+    "player_2_profit_if_bet"
+  ],
+  "models": {
+    "logistic_regression": {
+      "accuracy": 0.623198,
+      "precision": 0.623597,
+      "recall": 0.66991,
+      "f1": 0.645924,
+      "roc_auc": 0.675434,
+      "log_loss": 0.645728,
+      "confusion_matrix": [
+        [
+          18926,
+          14047
+        ],
+        [
+          11467,
+          23272
+        ]
+      ],
+      "class_distribution_train": {
+        "1": 138329,
+        "0": 132516
+      },
+      "class_distribution_test": {
+        "1": 34739,
+        "0": 32973
+      }
+    },
+    "random_forest": {
+      "accuracy": 0.629608,
+      "precision": 0.629543,
+      "recall": 0.67561,
+      "f1": 0.651763,
+      "roc_auc": 0.686694,
+      "log_loss": 0.640499,
+      "confusion_matrix": [
+        [
+          19162,
+          13811
+        ],
+        [
+          11269,
+          23470
+        ]
+      ],
+      "class_distribution_train": {
+        "1": 138329,
+        "0": 132516
+      },
+      "class_distribution_test": {
+        "1": 34739,
+        "0": 32973
+      }
+    }
+  },
+  "market_benchmark": {
+    "market_accuracy": 0.714983,
+    "market_log_loss": 0.552505,
+    "market_roc_auc": 0.791232,
+    "market_profit_if_bet_player_1_all": -5368.522468,
+    "market_roi_if_bet_player_1_all": -0.110144,
+    "odds_coverage_rows": 48741,
+    "odds_coverage_pct": 71.98281
+  },
+  "model_paths": {
+    "logistic_regression": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\models\\logistic_regression.pkl",
+    "random_forest": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\models\\random_forest.pkl"
+  },
+  "metrics_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\baseline_metrics.json"
+}
