@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from src.app.db.session import get_db
-from src.app.schemas import MatchRead
-from src.app.services.matches import get_match, list_matches
+from backend.src.app.db.session import get_db
+from backend.src.app.schemas import MatchRead
+from backend.src.app.services.matches import get_match, list_matches
 
 
 router = APIRouter(prefix="/matches", tags=["matches"])

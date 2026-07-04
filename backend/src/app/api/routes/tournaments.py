@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from src.app.db.session import get_db
-from src.app.schemas import TournamentRead
-from src.app.services.tournaments import list_tournaments
+from backend.src.app.db.session import get_db
+from backend.src.app.schemas import TournamentRead
+from backend.src.app.services.tournaments import list_tournaments
 
 
 router = APIRouter(prefix="/tournaments", tags=["tournaments"])

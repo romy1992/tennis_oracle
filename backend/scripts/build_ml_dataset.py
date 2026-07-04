@@ -1,9 +1,9 @@
 import argparse
 import logging
 
-from src.app.db.session import SessionLocal
-from src.app.ml.datasets.dataset_builder import build_and_export_dataset
-from src.app.ml.features.feature_builder import build_feature_snapshots
+from backend.src.app.db.session import SessionLocal
+from backend.src.app.ml.datasets.dataset_builder import build_and_export_dataset
+from backend.src.app.ml.features.feature_builder import build_feature_snapshots
 
 
 logging.basicConfig(level=logging.INFO)

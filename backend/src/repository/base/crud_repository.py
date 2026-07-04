@@ -2,7 +2,7 @@ import logging
 
 from sqlalchemy import or_
 
-from src.repository.base.repository_db import SessionLocal
+from backend.src.repository.base.repository_db import SessionLocal
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -127,6 +127,25 @@ class CrudRepository:
                 if filter_by:
                     session.delete(filter_by)
                     session.commit()
+            except Exception as e:
+                logging.error(str(e))
+                session.rollback()
+                raise
+
+    def delete_by_filters(self, filters: dict = None):
+        """
+        Cancella in maniera massiva applicando filtri opzionali.
+        :param filters: dizionario per filter_by (es. {'league': 'ATP'})
+        :return: numero di righe cancellate
+        """
+        with self.session as session:
+            try:
+                query = session.query(self.entity)
+                if filters:
+                    query = query.filter_by(**filters)
+                deleted_rows = query.delete(synchronize_session=False)
+                session.commit()
+                return deleted_rows
             except Exception as e:
                 logging.error(str(e))
                 session.rollback()

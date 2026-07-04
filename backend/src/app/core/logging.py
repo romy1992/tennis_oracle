@@ -1,6 +1,6 @@
 import logging
 
-from src.app.core.config import get_settings
+from backend.src.app.core.config import get_settings
 
 
 def configure_logging() -> None:

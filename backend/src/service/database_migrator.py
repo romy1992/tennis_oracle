@@ -20,8 +20,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.entity import Event, Fixture, Player, Standing, Tournament
-from src.entity.base import Base
+from backend.src.entity import Event, Fixture, Player, Standing, Tournament
+from backend.src.entity.base import Base
 
 _ = (Event, Tournament, Fixture, Standing, Player)
 

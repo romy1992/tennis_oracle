@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Date, Integer, String, Time
 from sqlalchemy.types import JSON
 
-from src.entity.base import Base
+from backend.src.entity.base import Base
 
 
 class Fixture(Base):

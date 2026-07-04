@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, UniqueConstraint
 
-from src.entity.base import Base
+from backend.src.entity.base import Base
 
 
 class Standing(Base):

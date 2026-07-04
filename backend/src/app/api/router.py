@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from src.app.api.routes import matches, players, tournaments
+from backend.src.app.api.routes import matches, players, tournaments
 
 
 api_router = APIRouter()

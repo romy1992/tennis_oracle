@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.app.api.router import api_router
-from src.app.api.routes.health import router as health_router
-from src.app.core.config import get_settings
-from src.app.core.logging import configure_logging
+from backend.src.app.api.router import api_router
+from backend.src.app.api.routes.health import router as health_router
+from backend.src.app.core.config import get_settings
+from backend.src.app.core.logging import configure_logging
 
 
 configure_logging()

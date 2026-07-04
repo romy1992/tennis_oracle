@@ -1,9 +1,9 @@
 import logging
 
-from src.entity import Event, Tournament
-from src.repository.event_repository import EventRepository
-from src.repository.tournaments_repository import TournamentsRepository
-from src.utility.request_api import request_api
+from backend.src.entity import Event, Tournament
+from backend.src.repository.event_repository import EventRepository
+from backend.src.repository.tournaments_repository import TournamentsRepository
+from backend.src.utility.request_api import request_api
 
 logging.basicConfig(level=logging.INFO)
 

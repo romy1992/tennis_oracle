@@ -97,31 +97,45 @@ alembic upgrade head
 ```
 
 Le feature devono essere calcolate solo con dati precedenti alla data della
-partita. Il builder in `backend/src/app/ml/features/feature_builder.py` usa sempre
-filtri `match_date < data_partita` e `ranking_date < data_partita` per evitare
-data leakage.
+partita. Con lo schema attuale il dataset builder legge direttamente dalle
+tabelle legacy `fixture` e `tournament`: usa `fixture` per match, player, data e
+target, e `tournament.tournament_sourface` come `surface`.
 
-Genera FeatureSnapshot ed esporta il dataset CSV:
-
-```bash
-cd backend
-python scripts/build_ml_dataset.py --build-features
-```
-
-Solo export da FeatureSnapshot già presenti:
+Crea il dataset CSV addestrabile:
 
 ```bash
-python scripts/build_ml_dataset.py
+cd backend/src
+python -m app.ml.datasets.build_dataset
 ```
 
 Output predefinito:
 
 ```text
-backend/data/processed/tennis_features.csv
+backend/data/processed/tennis_winner_dataset.csv
 ```
 
-Il dataset builder (`backend/src/app/ml/datasets/dataset_builder.py`) crea un DataFrame
-pandas, esporta CSV e separa feature/target, ma non esegue training.
+Arricchimento opzionale ATP singles, usando i CSV in
+`backend/data/processed/tennis_atp-master`:
+
+```bash
+cd backend/src
+python -m app.ml.datasets.build_atp_singles
+```
+
+Questo comando non sovrascrive il dataset base e crea:
+
+- `backend/data/processed/atp_singles_matches_normalized.csv`
+- `backend/data/processed/atp_singles_match_mapping.csv`
+- `backend/data/processed/atp_singles_player_mapping.csv`
+- `backend/data/processed/tennis_winner_dataset_atp_enriched.csv`
+
+Il dataset builder (`backend/src/app/ml/datasets/dataset_builder.py`) crea un
+DataFrame pandas, calcola storico forma/H2H scorrendo i match in ordine
+temporale, gestisce rank/Elo mancanti con valori numerici puliti, esporta CSV e
+separa feature/target, ma non esegue training. Le classifiche in `standing` sono
+correnti e non storiche, quindi non vengono usate come ranking pre-match per
+evitare data leakage. Per il training usa uno split temporale, ad esempio train
+sulle date più vecchie e validation/test sulle date più recenti.
 
 ## Comandi import esistenti
 

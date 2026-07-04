@@ -11,8 +11,8 @@ import src.entity
 from alembic import command
 from alembic.config import Config
 
-from src.entity.base import Base
-from src.repository.base.repository_db import engine
+from backend.src.entity.base import Base
+from backend.src.repository.base.repository_db import engine
 
 _ = src.entity
 
