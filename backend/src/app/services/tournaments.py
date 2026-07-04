@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.app.models import Tournament
+from backend.src.app.models import Tournament
 
 
 def list_tournaments(

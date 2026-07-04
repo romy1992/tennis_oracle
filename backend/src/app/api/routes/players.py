@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from src.app.db.session import get_db
-from src.app.schemas import PlayerRead
-from src.app.services.players import get_player, list_players
+from backend.src.app.db.session import get_db
+from backend.src.app.schemas import PlayerRead
+from backend.src.app.services.players import get_player, list_players
 
 
 router = APIRouter(prefix="/players", tags=["players"])

@@ -14,8 +14,8 @@ from typing import Iterable, Optional
 
 from dotenv import load_dotenv
 
-from src.service.database_migrator import run_migration
-from src.service.import_fixtures import run_daily_fixture_import
+from backend.src.service.database_migrator import run_migration
+from backend.src.service.import_fixtures import run_daily_fixture_import
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -1,5 +1,5 @@
-from src.entity import Standing
-from src.repository.base.crud_repository import CrudRepository
+from backend.src.entity import Standing
+from backend.src.repository.base.crud_repository import CrudRepository
 
 
 class StandingRepository(CrudRepository):  # Connessione base con i metodi crud

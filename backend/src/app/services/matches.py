@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.app.models import Fixture
+from backend.src.app.models import Fixture
 
 
 def list_matches(db: Session, limit: int = 100, offset: int = 0) -> list[Fixture]:

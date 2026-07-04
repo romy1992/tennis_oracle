@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.types import JSON
 
-from src.entity.base import Base
+from backend.src.entity.base import Base
 
 
 class Player(Base):

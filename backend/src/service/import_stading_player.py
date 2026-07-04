@@ -1,9 +1,9 @@
 import logging
 
-from src.entity import Player, Standing
-from src.repository.player_repository import PlayerRepository
-from src.repository.standing_repository import StandingRepository
-from src.utility.request_api import request_api
+from backend.src.entity import Player, Standing
+from backend.src.repository.player_repository import PlayerRepository
+from backend.src.repository.standing_repository import StandingRepository
+from backend.src.utility.request_api import request_api
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,7 +24,36 @@ def import_standings(params=None, type_operation="insert"):
         if type_operation == "insert":
             standings_repo.save_all(standings)
         elif type_operation == "update":
-            standings_repo.update(standings)  # TODO da sistemare con update
+            search_all_standings = standings_repo.search_all()
+            # player_key non e' globalmente univoco: va usato insieme a league.
+            standing_id_by_player_key_league = {
+                (str(ss.player_key), ss.league): ss.id_standing for ss in search_all_standings
+            }
+
+            list_standings_update = [
+                {
+                    "id_standing": standing_id_by_player_key_league[(str(s.player_key), s.league)],
+                    "place": s.place,
+                    "movement": s.movement,
+                    "points": s.points,
+                }
+                for s in standings
+                if (str(s.player_key), s.league) in standing_id_by_player_key_league
+            ]
+
+            list_standings_insert = [
+                s
+                for s in standings
+                if (str(s.player_key), s.league) not in standing_id_by_player_key_league
+            ]
+
+            standings_repo.massive_update_bulk(list_standings_update)
+            standings_repo.save_all(list_standings_insert)
+            logging.info(
+                "Standings update completato: update=%s insert=%s",
+                len(list_standings_update),
+                len(list_standings_insert),
+            )
     else:
         logging.error(f"Error in API request: {response}")
 
@@ -33,8 +62,8 @@ def refresh_standing_players():
     """
     Esegue il download/refresh della classifica dei tennisti ATP (maschile) e WTA (femminile) e salva i dati nel database.
     """
-    import_standings(params={"event_type": "ATP"})
-    import_standings(params={"event_type": "WTA"})
+    import_standings(params={"event_type": "ATP"}, type_operation="update")
+    import_standings(params={"event_type": "WTA"}, type_operation="update")
 
 
 def import_players():

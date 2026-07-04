@@ -4,9 +4,9 @@ from datetime import date
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.app.ml.features.feature_builder import calculate_h2h, calculate_win_rate_last_n
-from src.app.models import MLMatch, MLPlayer
-from src.entity.base import Base
+from backend.src.app.ml.features.feature_builder import calculate_h2h, calculate_win_rate_last_n
+from backend.src.app.models import MLMatch, MLPlayer
+from backend.src.entity.base import Base
 
 
 class FeatureBuilderTest(unittest.TestCase):

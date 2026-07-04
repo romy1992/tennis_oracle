@@ -1,6 +1,6 @@
-from src.app.schemas.match import MatchRead
-from src.app.schemas.player import PlayerRead
-from src.app.schemas.tournament import TournamentRead
+from backend.src.app.schemas.match import MatchRead
+from backend.src.app.schemas.player import PlayerRead
+from backend.src.app.schemas.tournament import TournamentRead
 
 
 __all__ = ["MatchRead", "PlayerRead", "TournamentRead"]

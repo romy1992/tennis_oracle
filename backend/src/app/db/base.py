@@ -1,6 +1,6 @@
-from src.entity import Event, Fixture, Player, Standing, Tournament
-from src.entity.base import Base
-from src.app.models.ml import (
+from backend.src.entity import Event, Fixture, Player, Standing, Tournament
+from backend.src.entity.base import Base
+from backend.src.app.models.ml import (
     FeatureSnapshot,
     MLMatch,
     MLPlayer,

@@ -12,7 +12,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.entity.base import Base
+from backend.src.entity.base import Base
 
 
 class MLPlayer(Base):

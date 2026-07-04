@@ -1,10 +1,11 @@
 import logging
 from datetime import datetime, timedelta
 
-from src.entity import Fixture
-from src.repository.fixture_repository import FixtureRepository
-from src.repository.tournaments_repository import TournamentsRepository
-from src.utility.request_api import request_api
+from backend.src.entity import Fixture
+from backend.src.repository.fixture_repository import FixtureRepository
+from backend.src.repository.tournaments_repository import TournamentsRepository
+from backend.src.service.import_stading_player import refresh_standing_players
+from backend.src.utility.request_api import request_api
 
 tournaments_repo = TournamentsRepository()
 fixtures_repo = FixtureRepository()
@@ -140,10 +141,14 @@ def run_daily_fixture_import(days_back_start: int = 1, days_back_stop: int = 0):
     """Import partite nel DB configurato in repository_db (di solito il locale)."""
     date_start, date_stop = calculate_date(days_back_start, days_back_stop)
     params = {"date_start": date_start, "date_stop": date_stop}
+
     logging.info("Avvio import fixtures: %s", params)
     import_fixtures_by_params(params)
     logging.info("Import fixtures completato.")
 
+    logging.info("Aggiornamento della classifica maschile e femminile")
+    refresh_standing_players()
+
 
 if __name__ == "__main__":
-    run_daily_fixture_import()
+    run_daily_fixture_import(days_back_start=1, days_back_stop=0)  # Esempio: import partite da 3 giorni fa a oggi
