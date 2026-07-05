@@ -59,6 +59,31 @@ Endpoint minimi:
 - `GET /api/players/{player_id}`
 - `GET /api/tournaments`
 
+### Bot Telegram
+
+Il backend include un bot Telegram in polling che consulta le API FastAPI
+esistenti per pronostici, schedine e partite, senza duplicare la logica ML.
+
+Aggiungi a `backend/.env`:
+
+```env
+TELEGRAM_BOT_TOKEN=123456:token_del_bot
+TELEGRAM_API_BASE_URL=http://localhost:8000/api
+TELEGRAM_MODEL_VERSION=v2
+TELEGRAM_DEFAULT_STAKE=10.0
+```
+
+Avvia prima FastAPI, poi in un secondo terminale:
+
+```bash
+cd backend
+python -m src.app.telegram.bot
+```
+
+Comandi principali: `/start`, `/help`, `/pronostici`, `/giorno <0-10>`,
+`/10giorni`, `/schedine [YYYY-MM-DD|0-10]`, `/partite [YYYY-MM-DD|0-10]`,
+`/cerca <nome giocatore>`.
+
 ## Setup frontend
 
 Il frontend vive in `frontend/` ed espone una prima UI per dashboard,
