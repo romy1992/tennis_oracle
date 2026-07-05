@@ -5,8 +5,11 @@ pandas
 psycopg2-binary
 pydantic
 pydantic-settings
+pillow
 python-dotenv
+python-telegram-bot
 requests
 scikit-learn
 sqlalchemy
+tzdata
 uvicorn
