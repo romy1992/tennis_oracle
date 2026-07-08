@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 
 import { MetricCard } from "../components/MetricCard";
+import { ModelControls } from "../components/ModelControls";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
 import type {
   DailyPredictionStatsResponse,
+  MLModelName,
   MLModelVersion,
   PredictionSummaryResponse
 } from "../types/api";
+import { readStoredModelName, readStoredModelVersion } from "../utils/modelVersion";
 import { formatDate } from "../utils/tennis";
 
 function formatPct(value: number | null | undefined) {
@@ -32,7 +35,8 @@ function formatUnits(value: number | null | undefined) {
 }
 
 export function PredictionStatsPage() {
-  const [selectedVersion, setSelectedVersion] = useState<MLModelVersion>("v2");
+  const [selectedVersion, setSelectedVersion] = useState<MLModelVersion>(() => readStoredModelVersion());
+  const [selectedModelName, setSelectedModelName] = useState<MLModelName>(() => readStoredModelName());
   const [dailyStats, setDailyStats] = useState<DailyPredictionStatsResponse | null>(null);
   const [summary, setSummary] = useState<PredictionSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,9 +49,13 @@ export function PredictionStatsPage() {
         const [statsData, summaryData] = await Promise.all([
           apiClient.getDailyPredictionStats({
             model_version: selectedVersion,
+            model_name: selectedModelName,
             from_day: 0
           }),
-          apiClient.getPredictionSummary({ model_version: selectedVersion })
+          apiClient.getPredictionSummary({
+            model_version: selectedVersion,
+            model_name: selectedModelName
+          })
         ]);
         setDailyStats(statsData);
         setSummary(summaryData);
@@ -59,7 +67,7 @@ export function PredictionStatsPage() {
       }
     }
     void load();
-  }, [selectedVersion]);
+  }, [selectedVersion, selectedModelName]);
 
   if (loading) {
     return <LoadingState title="Caricamento statistiche..." />;
@@ -82,17 +90,14 @@ export function PredictionStatsPage() {
             Storico completo delle previsioni salvate confrontate con i risultati importati.
           </p>
         </div>
-        <label className="filters-grid" style={{ minWidth: 280 }}>
-          <span>Versione modello</span>
-          <select
-            id="prediction-stats-model-version"
-            value={selectedVersion}
-            onChange={(event) => setSelectedVersion(event.target.value as MLModelVersion)}
-          >
-            <option value="v1">v1</option>
-            <option value="v2">v2</option>
-          </select>
-        </label>
+        <div className="header-actions">
+          <ModelControls
+            modelVersion={selectedVersion}
+            modelName={selectedModelName}
+            onModelVersionChange={setSelectedVersion}
+            onModelNameChange={setSelectedModelName}
+          />
+        </div>
       </header>
 
       <div className="metrics-grid">
@@ -166,7 +171,9 @@ export function PredictionStatsPage() {
       <article className="panel">
         <div className="panel-header">
           <h3>Breakdown modello</h3>
-          <span className="pill">{selectedVersion}</span>
+          <span className="pill">
+            {selectedVersion} · {selectedModelName}
+          </span>
         </div>
 
         {!summary || summary.breakdown.length === 0 ? (

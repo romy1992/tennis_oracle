@@ -143,3 +143,29 @@ class BettingSlipStatsResponse(BaseModel):
     to_date: date
     days: list[BettingSlipStatsDay] = Field(default_factory=list)
     summary: BettingSlipStatsSummary
+
+
+class BettingSlipModelStatsRow(BaseModel):
+    model_version: str
+    model_name: str
+    slips_total: int
+    slips_won: int
+    slips_lost: int
+    slips_pending: int
+    slip_win_rate_pct: float | None = None
+    picks_total: int
+    picks_won: int
+    picks_lost: int
+    picks_pending: int
+    pick_hit_rate_pct: float | None = None
+    theoretical_profit_units: float = 0.0
+    theoretical_roi_pct: float | None = None
+    first_date: date
+    last_date: date
+
+
+class BettingSlipModelStatsResponse(BaseModel):
+    from_date: date
+    to_date: date
+    stake: float
+    rows: list[BettingSlipModelStatsRow] = Field(default_factory=list)

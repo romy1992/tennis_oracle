@@ -31,6 +31,7 @@ def read_import_status(db: Session = Depends(get_db)) -> ImportStatusResponse:
 @router.post("/refresh", response_model=RefreshMatchesResponse)
 def refresh_upcoming_matches(
     model_version: ModelVersion = "v2",
+    model_name: str | None = None,
     days_forward: int = 10,
     force_next_import: bool = False,
     db: Session = Depends(get_db),
@@ -40,6 +41,7 @@ def refresh_upcoming_matches(
             db,
             days_forward=days_forward,
             model_version=model_version,
+            model_name=model_name,
             force_next_import=force_next_import,
         )
         return RefreshMatchesResponse.model_validate(result)

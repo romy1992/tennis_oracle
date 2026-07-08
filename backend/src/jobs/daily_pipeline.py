@@ -150,7 +150,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--prediction-model-version",
-        choices=["v1", "v2"],
+        choices=["v1", "v2", "v3"],
         default="v2",
         help="Versione modello da usare per generare le previsioni.",
     )

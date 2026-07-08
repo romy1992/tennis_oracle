@@ -124,6 +124,39 @@ class ImportRoutesTest(unittest.TestCase):
         mock_next_import.assert_called_once()
         mock_predictions.assert_called_once()
 
+    @patch("backend.src.app.services.imports.import_played_fixtures")
+    @patch("backend.src.app.services.imports.run_daily_next_fixture_import")
+    @patch("backend.src.jobs.generate_upcoming_predictions.select_best_model")
+    def test_refresh_route_returns_200_when_v3_metrics_are_missing(
+        self,
+        mock_select_best_model,
+        mock_next_import,
+        mock_import_played,
+    ):
+        mock_select_best_model.side_effect = FileNotFoundError(
+            "Metrics report not found: baseline_v3_metrics.json"
+        )
+        mock_next_import.return_value = {"inserted": 2, "updated": 1}
+        mock_import_played.return_value = {"days_back": 3}
+
+        response = self.client.post(
+            "/api/imports/refresh",
+            params={"model_version": "v3", "force_next_import": "true"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["next_fixtures_imported"])
+        self.assertEqual(payload["predictions_summary"]["model_version"], "v3")
+        self.assertEqual(payload["predictions_summary"]["predictions_generated"], 0)
+        self.assertIn("warnings", payload["predictions_summary"])
+        self.assertIn(
+            "Metrics report not found",
+            payload["predictions_summary"]["warnings"][0],
+        )
+        mock_next_import.assert_called_once()
+        mock_import_played.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

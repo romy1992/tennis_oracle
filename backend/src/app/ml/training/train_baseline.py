@@ -108,6 +108,20 @@ ALLOWED_FEATURE_COLUMNS_V2 = [
     "atp_match_found",
 ]
 
+ODDS_FEATURE_COLUMNS = [
+    "avg_player_1_odds",
+    "avg_player_2_odds",
+    "avg_market_prob_player_1",
+    "avg_market_prob_player_2",
+    "avg_bookmaker_margin",
+    "odds_bookmaker_count",
+]
+
+ALLOWED_FEATURE_COLUMNS_V3 = [
+    *ALLOWED_FEATURE_COLUMNS_V2,
+    *ODDS_FEATURE_COLUMNS,
+]
+
 LEAKAGE_EXCLUDED_COLUMNS = {
     TARGET_COLUMN,
     "match_id",
@@ -179,9 +193,17 @@ class TrainingResult:
 
 
 def allowed_feature_columns(model_version: str) -> list[str]:
+    if model_version == "v3":
+        return ALLOWED_FEATURE_COLUMNS_V3
     if model_version == "v2":
         return ALLOWED_FEATURE_COLUMNS_V2
     return ALLOWED_FEATURE_COLUMNS_V1
+
+
+def leakage_excluded_columns(model_version: str = "v2") -> set[str]:
+    if model_version == "v3":
+        return LEAKAGE_EXCLUDED_COLUMNS.difference(ODDS_FEATURE_COLUMNS)
+    return LEAKAGE_EXCLUDED_COLUMNS
 
 
 def select_training_dataset(
@@ -231,10 +253,11 @@ def selected_feature_columns(
     model_version: str = "v2",
 ) -> list[str]:
     allowed = allowed_feature_columns(model_version)
+    excluded = leakage_excluded_columns(model_version)
     return [
         column
         for column in allowed
-        if column in dataframe.columns and column not in LEAKAGE_EXCLUDED_COLUMNS
+        if column in dataframe.columns and column not in excluded
     ]
 
 
@@ -245,10 +268,11 @@ def excluded_feature_columns(
 ) -> list[str]:
     allowed = set(allowed_feature_columns(model_version))
     selected = set(selected_features)
+    excluded = leakage_excluded_columns(model_version)
     return [
         column
         for column in dataframe.columns
-        if column not in selected and (column in LEAKAGE_EXCLUDED_COLUMNS or column not in allowed)
+        if column not in selected and (column in excluded or column not in allowed)
     ]
 
 
@@ -295,6 +319,23 @@ def build_preprocessor(dataframe: pd.DataFrame, feature_columns: list[str]):
     return ColumnTransformer(transformers=transformers, remainder="drop")
 
 
+def filter_rows_with_valid_odds(dataframe: pd.DataFrame) -> pd.DataFrame:
+    missing_columns = [column for column in ODDS_FEATURE_COLUMNS if column not in dataframe.columns]
+    if missing_columns:
+        raise ValueError(f"Dataset v3 senza colonne odds richieste: {missing_columns}")
+
+    clean = dataframe.copy()
+    numeric_odds = clean[ODDS_FEATURE_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    mask = numeric_odds.notna().all(axis=1)
+    mask &= numeric_odds["avg_player_1_odds"] > 1.0
+    mask &= numeric_odds["avg_player_2_odds"] > 1.0
+    mask &= numeric_odds["avg_market_prob_player_1"].between(0.0, 1.0)
+    mask &= numeric_odds["avg_market_prob_player_2"].between(0.0, 1.0)
+    mask &= numeric_odds["avg_bookmaker_margin"] >= 0.0
+    mask &= numeric_odds["odds_bookmaker_count"] > 0
+    return clean.loc[mask].reset_index(drop=True)
+
+
 def train_baseline(
     processed_dir: str | Path = PROCESSED_DATA_DIR,
     models_dir: str | Path | None = None,
@@ -310,6 +351,11 @@ def train_baseline(
     version_paths = MODEL_VERSIONS[model_version]  # type: ignore[index]
     dataset_path = select_training_dataset(processed_dir, model_version=model_version)
     dataframe = pd.read_csv(dataset_path, low_memory=False)
+    rows_before_odds_filter = len(dataframe)
+    if model_version == "v3":
+        dataframe = filter_rows_with_valid_odds(dataframe)
+        if dataframe.empty:
+            raise ValueError("Dataset v3 senza righe con odds valide.")
     split = temporal_train_test_split(dataframe, test_size=test_size)
     feature_columns = selected_feature_columns(split.train, model_version=model_version)
     if not feature_columns:
@@ -376,6 +422,7 @@ def train_baseline(
         "model_version": model_version,
         "dataset_used": str(dataset_path),
         "rows_total": int(len(dataframe)),
+        "rows_before_odds_filter": int(rows_before_odds_filter),
         "columns_total": int(len(dataframe.columns)),
         "date_min": _date_min(dataframe, "match_date"),
         "date_max": _date_max(dataframe, "match_date"),
@@ -397,6 +444,12 @@ def train_baseline(
         "model_paths": {name: str(path) for name, path in model_paths.items()},
         "metrics_path": str(reports_path / metrics_filename),
     }
+    if model_version == "v3":
+        metrics["odds_filter"] = {
+            "required": True,
+            "rows_removed": int(rows_before_odds_filter - len(dataframe)),
+            "required_columns": ODDS_FEATURE_COLUMNS,
+        }
 
     metrics_path = reports_path / metrics_filename
     with metrics_path.open("w", encoding="utf-8") as metrics_file:
@@ -543,14 +596,23 @@ def update_model_registry_entry(
     registry = _load_registry()
     now = datetime.now(timezone.utc).isoformat()
     version_paths = MODEL_VERSIONS[model_version]  # type: ignore[index]
+    labels = {
+        "v1": "Baseline form+H2H+ATP parziale",
+        "v2": "Elo + ranking storico",
+        "v3": "Odds-aware",
+    }
+    descriptions = {
+        "v1": "Primo baseline senza Elo/rank reali. Odds solo benchmark.",
+        "v2": "Elo overall/surface pre-match + rank ATP storico. Odds benchmark/value bet.",
+        "v3": (
+            "Elo/rank/form/H2H come v2 con odds match-winner aggregate come feature ML. "
+            "Training e inferenza solo su match con odds."
+        ),
+    }
     entry = {
         "id": model_version,
-        "label": "Baseline form+H2H+ATP parziale" if model_version == "v1" else "Elo + ranking storico",
-        "description": (
-            "Primo baseline senza Elo/rank reali. Odds solo benchmark."
-            if model_version == "v1"
-            else "Elo overall/surface pre-match + rank ATP storico. Odds benchmark/value bet."
-        ),
+        "label": labels.get(model_version, model_version),
+        "description": descriptions.get(model_version, ""),
         "dataset": str(dataset_path),
         "features_summary": version_paths.rank_features_note,
         "models_path": str(models_dir),
@@ -558,8 +620,6 @@ def update_model_registry_entry(
         "created_at": now,
         "updated_at": now,
     }
-    if model_version == "v3":
-        entry["planned"] = True
 
     versions = [item for item in registry.get("versions", []) if item.get("id") != model_version]
     versions.append(entry)
@@ -567,6 +627,10 @@ def update_model_registry_entry(
     registry["versions"] = versions
     if model_version == "v2":
         registry["planned_versions"] = [{"id": "v3", "label": "Boosting/tuning", "status": "planned"}]
+    if model_version == "v3":
+        registry["planned_versions"] = [
+            item for item in registry.get("planned_versions", []) if item.get("id") != "v3"
+        ]
 
     REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
     with REGISTRY_PATH.open("w", encoding="utf-8") as registry_file:
@@ -631,7 +695,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--model-version",
-        choices=["v1", "v2"],
+        choices=["v1", "v2", "v3"],
         default="v2",
         help="Versione modello/dataset da addestrare.",
     )

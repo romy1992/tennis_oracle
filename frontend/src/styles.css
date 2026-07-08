@@ -741,6 +741,22 @@ th {
   text-transform: uppercase;
 }
 
+.table-sort-button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  padding: 0;
+  text-align: left;
+  text-transform: inherit;
+}
+
+.model-stats-table {
+  min-width: 1280px;
+}
+
 .state {
   color: #65738a;
   display: grid;

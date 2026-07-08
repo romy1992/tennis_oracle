@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { ModelControls } from "../components/ModelControls";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
 import type {
@@ -8,8 +9,11 @@ import type {
   BettingSlipCalendarResponse,
   BettingSlipPick,
   BettingSlipStatsResponse,
-  BettingSlipsDailyResponse
+  BettingSlipsDailyResponse,
+  MLModelName,
+  MLModelVersion
 } from "../types/api";
+import { readStoredModelName, readStoredModelVersion } from "../utils/modelVersion";
 import { formatDate } from "../utils/tennis";
 
 const STAKE_PRESETS = [1, 5, 10, 25, 50];
@@ -51,9 +55,10 @@ function pickDotClass(status: BettingSlipPick["pick_status"]) {
   return "pending";
 }
 
-function slipStatusLabel(status: BettingSlip["slip_status"]) {
+function slipStatusLabel(status: BettingSlip["slip_status"], historicalOutcomesMissing = false) {
   if (status === "won") return "Presa";
   if (status === "lost") return "Persa";
+  if (historicalOutcomesMissing) return "Esito mancante";
   return "In corso";
 }
 
@@ -217,7 +222,15 @@ function truncateText(value: string | null | undefined, maxLength = 28) {
   return `${value.slice(0, maxLength - 1)}…`;
 }
 
-function SlipCard({ slip, stake }: { slip: BettingSlip; stake: number }) {
+function SlipCard({
+  slip,
+  stake,
+  historicalOutcomesMissing
+}: {
+  slip: BettingSlip;
+  stake: number;
+  historicalOutcomesMissing: boolean;
+}) {
   const { potentialReturn, potentialProfit, actualOutcome } = computeStakeValues(slip, stake);
 
   async function copySlip() {
@@ -232,7 +245,9 @@ function SlipCard({ slip, stake }: { slip: BettingSlip; stake: number }) {
           <p className="slip-description">{slip.description}</p>
         </div>
         <div className="slip-card-meta">
-          <span className={`slip-status-badge ${slip.slip_status}`}>{slipStatusLabel(slip.slip_status)}</span>
+          <span className={`slip-status-badge ${slip.slip_status}`}>
+            {slipStatusLabel(slip.slip_status, historicalOutcomesMissing)}
+          </span>
           <span className="slip-pick-counter">
             {slip.picks_won}/{slip.picks_total} pick corrette
           </span>
@@ -263,6 +278,8 @@ function SlipCard({ slip, stake }: { slip: BettingSlip; stake: number }) {
                         ? "Presa"
                         : pick.pick_status === "lost"
                           ? "Persa"
+                          : historicalOutcomesMissing
+                            ? "Esito non disponibile"
                           : "In corso"
                     }
                   />
@@ -327,6 +344,8 @@ export function BettingSlipsPage() {
   const [dayStats, setDayStats] = useState<BettingSlipStatsResponse | null>(null);
   const [overallStats, setOverallStats] = useState<BettingSlipStatsResponse | null>(null);
   const [stake, setStake] = useState(10);
+  const [modelVersion, setModelVersion] = useState<MLModelVersion>(() => readStoredModelVersion());
+  const [modelName, setModelName] = useState<MLModelName>(() => readStoredModelName());
   const [loading, setLoading] = useState(true);
   const [loadingDay, setLoadingDay] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -340,29 +359,37 @@ export function BettingSlipsPage() {
 
   const loadDayData = useCallback(async (date: string) => {
     const [dailyData, dayStatsData, overallStatsData] = await Promise.all([
-      apiClient.getDailyBettingSlips({ model_version: "v2", stake, date }),
+      apiClient.getDailyBettingSlips({ model_version: modelVersion, model_name: modelName, stake, date }),
       apiClient.getBettingSlipStats({
-        model_version: "v2",
+        model_version: modelVersion,
+        model_name: modelName,
         from: date,
         to: date,
         stake
       }),
       apiClient.getBettingSlipStats({
-        model_version: "v2",
+        model_version: modelVersion,
+        model_name: modelName,
         all_time: true,
         stake
       })
     ]);
+    // #region agent log
+    fetch('http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8c43c3'},body:JSON.stringify({sessionId:'8c43c3',runId:'pre-fix',hypothesisId:'H4,H5',location:'frontend/src/pages/BettingSlipsPage.tsx:loadDayData',message:'Loaded betting slips day data in frontend',data:{date,modelVersion,modelName,responseModelName:dailyData.model_name,slipCount:dailyData.slips.length,slipStatusCounts:{won:dailyData.slips.filter((slip)=>slip.slip_status==='won').length,lost:dailyData.slips.filter((slip)=>slip.slip_status==='lost').length,pending:dailyData.slips.filter((slip)=>slip.slip_status==='pending').length},pickStatusCounts:{won:dailyData.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='won').length,0),lost:dailyData.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='lost').length,0),pending:dailyData.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='pending').length,0)}},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     setDaily(dailyData);
     setDayStats(dayStatsData);
     setOverallStats(overallStatsData);
-  }, [stake]);
+  }, [stake, modelVersion, modelName]);
 
   useEffect(() => {
     async function loadCalendar() {
       try {
         setLoading(true);
-        const calendarData = await apiClient.getBettingSlipCalendar({ model_version: "v2" });
+        const calendarData = await apiClient.getBettingSlipCalendar({
+          model_version: modelVersion,
+          model_name: modelName
+        });
         setCalendar(calendarData);
         const initialDate = calendarData.days.some((day) => day.is_today)
           ? calendarData.today
@@ -376,7 +403,7 @@ export function BettingSlipsPage() {
       }
     }
     void loadCalendar();
-  }, []);
+  }, [modelVersion, modelName]);
 
   useEffect(() => {
     if (!calendar) return;
@@ -399,20 +426,30 @@ export function BettingSlipsPage() {
       setRefreshing(true);
       setActionMessage(null);
       const [result, calendarData] = await Promise.all([
-        apiClient.refreshBettingSlips({ model_version: "v2", stake, date: selectedDate }),
-        apiClient.getBettingSlipCalendar({ model_version: "v2" })
+        apiClient.refreshBettingSlips({
+          model_version: modelVersion,
+          model_name: modelName,
+          stake,
+          date: selectedDate
+        }),
+        apiClient.getBettingSlipCalendar({ model_version: modelVersion, model_name: modelName })
       ]);
+      // #region agent log
+      fetch('http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8c43c3'},body:JSON.stringify({sessionId:'8c43c3',runId:'pre-fix',hypothesisId:'H1,H4,H5',location:'frontend/src/pages/BettingSlipsPage.tsx:handleRefresh',message:'Received betting slips refresh response in frontend',data:{selectedDate,modelVersion,modelName,responseModelName:result.model_name,slipCount:result.slips.length,refreshSummary:result.refresh_summary,calendarSelectedDay:calendarData.days.find((day)=>day.date===selectedDate)??null,slipStatusCounts:{won:result.slips.filter((slip)=>slip.slip_status==='won').length,lost:result.slips.filter((slip)=>slip.slip_status==='lost').length,pending:result.slips.filter((slip)=>slip.slip_status==='pending').length},pickStatusCounts:{won:result.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='won').length,0),lost:result.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='lost').length,0),pending:result.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='pending').length,0)}},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setCalendar(calendarData);
       setDaily(result);
       const [dayStatsData, overallStatsData] = await Promise.all([
         apiClient.getBettingSlipStats({
-          model_version: "v2",
+          model_version: modelVersion,
+          model_name: modelName,
           from: selectedDate,
           to: selectedDate,
           stake
         }),
         apiClient.getBettingSlipStats({
-          model_version: "v2",
+          model_version: modelVersion,
+          model_name: modelName,
           all_time: true,
           stake
         })
@@ -445,6 +482,9 @@ export function BettingSlipsPage() {
 
   const pastDays = calendar?.days.filter((day) => day.is_past) ?? [];
   const upcomingDays = calendar?.days.filter((day) => !day.is_past) ?? [];
+  const historicalOutcomesMissing =
+    Boolean(selectedCalendarDay?.is_past) &&
+    Boolean(daily?.slips.some((slip) => slip.picks_pending > 0));
 
   return (
     <section className="page">
@@ -452,7 +492,8 @@ export function BettingSlipsPage() {
         <div>
           <h2>Consiglio schedina</h2>
           <p>
-            {daily ? formatDate(daily.date) : "-"} · modello {daily?.model_name ?? "v2"} · pool{" "}
+            {daily ? formatDate(daily.date) : "-"} · versione {daily?.model_version ?? modelVersion} · modello{" "}
+            {daily?.model_name ?? "-"} · pool{" "}
             {daily?.candidate_pool_size ?? 0} partite
             {selectedCalendarDay
               ? ` · ${selectedCalendarDay.fixture_count} match in calendario`
@@ -460,6 +501,13 @@ export function BettingSlipsPage() {
           </p>
         </div>
         <div className="header-actions">
+          <ModelControls
+            modelVersion={modelVersion}
+            modelName={modelName}
+            onModelVersionChange={setModelVersion}
+            onModelNameChange={setModelName}
+            disabled={refreshing || loadingDay}
+          />
           <button
             type="button"
             className="action-button"
@@ -567,7 +615,12 @@ export function BettingSlipsPage() {
       {!loadingDay && daily?.slips.length ? (
         <div className="slip-list">
           {daily.slips.map((slip) => (
-            <SlipCard key={slip.slip_key} slip={slip} stake={stake} />
+            <SlipCard
+              key={slip.slip_key}
+              slip={slip}
+              stake={stake}
+              historicalOutcomesMissing={historicalOutcomesMissing}
+            />
           ))}
         </div>
       ) : null}

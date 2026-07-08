@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Literal
 
 from sqlalchemy import delete, func, select
@@ -15,8 +17,8 @@ from backend.src.app.ml.datasets.odds_builder import (
     average_match_winner_odds_from_record,
     no_vig_market_probabilities,
 )
-from backend.src.app.ml.model_selection import select_best_model
-from backend.src.app.ml.model_versioning import ModelVersion
+from backend.src.app.ml.model_versioning import MODEL_VERSIONS, ModelVersion
+from backend.src.app.ml.prediction.predictor import DEFAULT_MODEL_NAME
 from backend.src.app.models import (
     BettingSlip,
     BettingSlipDay,
@@ -28,6 +30,8 @@ from backend.src.app.models import (
 from backend.src.app.schemas.betting_slips import (
     BettingSlipCalendarDay,
     BettingSlipCalendarResponse,
+    BettingSlipModelStatsResponse,
+    BettingSlipModelStatsRow,
     BettingSlipPickRead,
     BettingSlipRead,
     BettingSlipRefreshSummary,
@@ -46,6 +50,23 @@ SlipStatus = Literal["pending", "won", "lost"]
 DEFAULT_STAKE = 10.0
 DEFAULT_SLIP_COUNT = 5
 DEFAULT_PICKS_PER_SLIP = 5
+
+#region agent log
+def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    payload = {
+        "sessionId": "8c43c3",
+        "runId": "pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(datetime.now().timestamp() * 1000),
+    }
+    try:
+        Path(r"c:\Users\trott\git\tennis_oracle\debug-8c43c3.log").open("a", encoding="utf-8").write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+#endregion
 
 SLIP_PROFILES: tuple[dict[str, str | int], ...] = (
     {
@@ -191,6 +212,22 @@ def _model_prob_for_winner(
     return None
 
 
+def _model_artifact_exists(model_version: ModelVersion, model_name: str) -> bool:
+    return (MODEL_VERSIONS[model_version].models_dir / f"{model_name}.pkl").exists()
+
+
+def _resolve_betting_model_name(
+    model_version: ModelVersion,
+    model_name: str | None,
+) -> tuple[str, str | None]:
+    if model_name is not None:
+        return model_name, None
+    resolved = _resolve_model_name(model_version, None)
+    if resolved is not None:
+        return resolved, None
+    return DEFAULT_MODEL_NAME, "model_selection_unavailable"
+
+
 def build_candidate_pool(
     db: Session,
     *,
@@ -198,13 +235,17 @@ def build_candidate_pool(
     model_version: ModelVersion,
     model_name: str,
 ) -> list[CandidatePick]:
+    fixture_filters = [
+        NextFixture.is_completed.is_(False),
+        NextFixture.event_date == slip_date,
+    ]
+    if model_version == "v3":
+        fixture_filters.append(NextFixture.odds.is_not(None))
+
     fixtures = list(
         db.scalars(
             select(NextFixture)
-            .where(
-                NextFixture.is_completed.is_(False),
-                NextFixture.event_date == slip_date,
-            )
+            .where(*fixture_filters)
             .order_by(
                 NextFixture.event_time.asc().nullslast(),
                 NextFixture.event_key.asc(),
@@ -235,6 +276,8 @@ def build_candidate_pool(
             if odds is not None
             else None
         )
+        if model_version == "v3" and (odds is None or winner_odds is None or market_prob is None):
+            continue
         confidence = _confidence(prediction.prob_player_1_win)
         if model_prob is None or confidence is None:
             continue
@@ -509,9 +552,7 @@ def get_betting_slip_calendar(
     model_name: str | None = None,
 ) -> BettingSlipCalendarResponse:
     today = date.today()
-    resolved_model_name = model_name or _resolve_model_name(model_version, None)
-    if resolved_model_name is None:
-        resolved_model_name = select_best_model(model_version).model_name
+    resolved_model_name, model_warning = _resolve_betting_model_name(model_version, model_name)
 
     window_end = _upcoming_window_end(db, today)
     slip_counts = _slip_counts_by_date(
@@ -674,6 +715,25 @@ def _load_outcome_context(
             select(Fixture).where(Fixture.event_key.in_(event_keys))
         ).all()
     }
+    #region agent log
+    _agent_debug_log(
+        "H2,H3",
+        "backend/src/app/services/betting_slips.py:_load_outcome_context",
+        "Loaded outcome context for betting slip picks",
+        {
+            "event_keys_count": len(event_keys),
+            "unique_event_keys_count": len(set(event_keys)),
+            "model_version": model_version,
+            "model_name": model_name,
+            "prediction_count": len(predictions),
+            "fixture_count": len(fixtures),
+            "missing_prediction_sample": [key for key in sorted(set(event_keys)) if key not in predictions][:10],
+            "missing_fixture_sample": [key for key in sorted(set(event_keys)) if key not in fixtures][:10],
+            "fixture_winner_values": sorted({fixture.event_winner for fixture in fixtures.values() if fixture.event_winner})[:10],
+            "prediction_winner_values": sorted({prediction.actual_winner for prediction in predictions.values() if prediction.actual_winner})[:10],
+        },
+    )
+    #endregion
     return predictions, fixtures
 
 
@@ -684,12 +744,54 @@ def _resolve_actual_winner(
 ) -> str | None:
     prediction = predictions.get(pick.event_key)
     if prediction is not None and prediction.actual_winner in COMPLETED_WINNERS:
+        #region agent log
+        _agent_debug_log(
+            "H2,H3",
+            "backend/src/app/services/betting_slips.py:_resolve_actual_winner",
+            "Resolved pick winner from prediction",
+            {
+                "event_key": pick.event_key,
+                "predicted_winner": pick.predicted_winner,
+                "actual_winner": prediction.actual_winner,
+                "source": "prediction",
+            },
+        )
+        #endregion
         return prediction.actual_winner
 
     fixture = fixtures.get(pick.event_key)
     if fixture is not None and fixture.event_winner in COMPLETED_WINNERS:
+        #region agent log
+        _agent_debug_log(
+            "H2,H3",
+            "backend/src/app/services/betting_slips.py:_resolve_actual_winner",
+            "Resolved pick winner from fixture",
+            {
+                "event_key": pick.event_key,
+                "predicted_winner": pick.predicted_winner,
+                "actual_winner": fixture.event_winner,
+                "source": "fixture",
+            },
+        )
+        #endregion
         return fixture.event_winner
 
+    #region agent log
+    _agent_debug_log(
+        "H2,H3",
+        "backend/src/app/services/betting_slips.py:_resolve_actual_winner",
+        "Could not resolve pick winner",
+        {
+            "event_key": pick.event_key,
+            "predicted_winner": pick.predicted_winner,
+            "prediction_found": prediction is not None,
+            "prediction_actual_winner": prediction.actual_winner if prediction is not None else None,
+            "fixture_found": fixture is not None,
+            "fixture_event_winner": fixture.event_winner if fixture is not None else None,
+            "completed_winners": sorted(COMPLETED_WINNERS),
+        },
+    )
+    #endregion
     return None
 
 
@@ -829,6 +931,38 @@ def _build_daily_response(
         )
         for slip in slips
     ]
+    pending_picks_count = sum(
+        pick.pick_status == "pending" for slip in slip_reads for pick in slip.picks
+    )
+    response_warnings = list(warnings)
+    if slip_date < date.today() and pending_picks_count:
+        response_warnings.append(
+            "historical_outcomes_missing: alcuni esiti non sono disponibili nel database; usa Aggiorna dopo aver ripristinato l'import API."
+        )
+    #region agent log
+    _agent_debug_log(
+        "H2,H3,H5",
+        "backend/src/app/services/betting_slips.py:_build_daily_response",
+        "Built betting slips daily response",
+        {
+            "slip_date": slip_date,
+            "model_version": model_version,
+            "model_name": model_name,
+            "slip_count": len(slip_reads),
+            "slip_status_counts": {
+                "won": sum(1 for slip in slip_reads if slip.slip_status == "won"),
+                "lost": sum(1 for slip in slip_reads if slip.slip_status == "lost"),
+                "pending": sum(1 for slip in slip_reads if slip.slip_status == "pending"),
+            },
+            "pick_status_counts": {
+                "won": sum(pick.pick_status == "won" for slip in slip_reads for pick in slip.picks),
+                "lost": sum(pick.pick_status == "lost" for slip in slip_reads for pick in slip.picks),
+                "pending": pending_picks_count,
+            },
+            "warnings": response_warnings,
+        },
+    )
+    #endregion
     return BettingSlipsDailyResponse(
         date=slip_date,
         model_version=model_version,
@@ -836,7 +970,7 @@ def _build_daily_response(
         stake=stake,
         candidate_pool_size=candidate_pool_size,
         slips=slip_reads,
-        warnings=warnings,
+        warnings=response_warnings,
     )
 
 
@@ -852,11 +986,9 @@ def get_daily_betting_slips(
     regenerate: bool = False,
 ) -> BettingSlipsDailyResponse:
     target_date = slip_date or date.today()
-    resolved_model_name = model_name or _resolve_model_name(model_version, None)
-    if resolved_model_name is None:
-        resolved_model_name = select_best_model(model_version).model_name
+    resolved_model_name, model_warning = _resolve_betting_model_name(model_version, model_name)
 
-    warnings: list[str] = []
+    warnings: list[str] = [model_warning] if model_warning else []
     candidate_pool_size = 0
 
     if regenerate and _slips_exist(
@@ -948,19 +1080,66 @@ def refresh_betting_slips(
     from backend.src.app.services.imports import import_played_fixtures, refresh_matches
 
     target_date = slip_date or date.today()
-    resolved_model_name = model_name or _resolve_model_name(model_version, None)
-    if resolved_model_name is None:
-        resolved_model_name = select_best_model(model_version).model_name
-
-    import_summary = import_played_fixtures(db, days_back=days_back)
-    refresh_summary = refresh_matches(
-        db,
-        days_forward=10,
-        days_back_next=3,
-        model_version=model_version,
-        model_name=resolved_model_name,
-        force_next_import=False,
+    resolved_model_name, model_warning = _resolve_betting_model_name(model_version, model_name)
+    #region agent log
+    _agent_debug_log(
+        "H1,H5",
+        "backend/src/app/services/betting_slips.py:refresh_betting_slips",
+        "Starting betting slip refresh",
+        {
+            "target_date": target_date,
+            "model_version": model_version,
+            "model_name": model_name,
+            "resolved_model_name": resolved_model_name,
+            "days_back": days_back,
+        },
     )
+    #endregion
+    effective_days_back = max(days_back, max((date.today() - target_date).days, 0))
+    #region agent log
+    _agent_debug_log(
+        "H1",
+        "backend/src/app/services/betting_slips.py:refresh_betting_slips",
+        "Resolved played fixtures import window for selected betting slip date",
+        {
+            "target_date": target_date,
+            "requested_days_back": days_back,
+            "effective_days_back": effective_days_back,
+        },
+    )
+    #endregion
+    import_summary = import_played_fixtures(db, days_back=effective_days_back)
+    #region agent log
+    _agent_debug_log(
+        "H1",
+        "backend/src/app/services/betting_slips.py:refresh_betting_slips",
+        "Finished played fixtures import for betting slip refresh",
+        {
+            "target_date": target_date,
+            "days_back": days_back,
+            "import_summary": import_summary,
+        },
+    )
+    #endregion
+    if _model_artifact_exists(model_version, resolved_model_name):
+        refresh_summary = refresh_matches(
+            db,
+            days_forward=10,
+            days_back_next=3,
+            model_version=model_version,
+            model_name=resolved_model_name,
+            force_next_import=False,
+        )
+    else:
+        refresh_summary = {
+            "next_fixtures_imported": False,
+            "predictions_summary": {
+                "model_version": model_version,
+                "model_name": resolved_model_name,
+                "skipped": True,
+                "reason": "model_artifact_missing",
+            },
+        }
 
     daily = get_daily_betting_slips(
         db,
@@ -970,6 +1149,10 @@ def refresh_betting_slips(
         stake=stake,
         regenerate=False,
     )
+    if model_warning:
+        daily.warnings.append(model_warning)
+    if not _model_artifact_exists(model_version, resolved_model_name):
+        daily.warnings.append("model_artifact_missing")
 
     predictions_resolved = sum(
         1
@@ -1008,16 +1191,19 @@ def compute_betting_slip_stats(
     db: Session,
     *,
     model_version: ModelVersion = "v2",
+    model_name: str | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
     stake: float = DEFAULT_STAKE,
     all_time: bool = False,
 ) -> BettingSlipStatsResponse:
     today = date.today()
+    resolved_model_name, _model_warning = _resolve_betting_model_name(model_version, model_name)
     if all_time:
         resolved_from = db.scalar(
             select(func.min(BettingSlip.slip_date)).where(
                 BettingSlip.model_version == model_version,
+                BettingSlip.model_name == resolved_model_name,
             )
         )
         resolved_to = today
@@ -1033,6 +1219,7 @@ def compute_betting_slip_stats(
             .options(selectinload(BettingSlip.picks))
             .where(
                 BettingSlip.model_version == model_version,
+                BettingSlip.model_name == resolved_model_name,
                 BettingSlip.slip_date >= resolved_from,
                 BettingSlip.slip_date <= resolved_to,
             )
@@ -1044,12 +1231,12 @@ def compute_betting_slip_stats(
     model_names = {slip.model_name for slip in slips}
     predictions: dict[int, MatchPrediction] = {}
     fixtures: dict[int, Fixture] = {}
-    for model_name in model_names or {select_best_model(model_version).model_name}:
+    for model_name_for_context in model_names or {resolved_model_name}:
         model_predictions, model_fixtures = _load_outcome_context(
             db,
             event_keys,
             model_version,
-            model_name,
+            model_name_for_context,
         )
         predictions.update(model_predictions)
         fixtures.update(model_fixtures)
@@ -1186,4 +1373,78 @@ def compute_betting_slip_stats(
             else None,
             by_profile=by_profile,
         ),
+    )
+
+
+def compute_betting_slip_model_stats(
+    db: Session,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    stake: float = DEFAULT_STAKE,
+    all_time: bool = False,
+) -> BettingSlipModelStatsResponse:
+    today = date.today()
+    if all_time:
+        resolved_from = db.scalar(select(func.min(BettingSlip.slip_date)))
+        resolved_to = today
+        if resolved_from is None:
+            resolved_from = today
+    else:
+        resolved_to = to_date or today
+        resolved_from = from_date or (today - timedelta(days=30))
+
+    combinations = db.execute(
+        select(
+            BettingSlip.model_version,
+            BettingSlip.model_name,
+            func.min(BettingSlip.slip_date),
+            func.max(BettingSlip.slip_date),
+        )
+        .where(
+            BettingSlip.slip_date >= resolved_from,
+            BettingSlip.slip_date <= resolved_to,
+        )
+        .group_by(BettingSlip.model_version, BettingSlip.model_name)
+        .order_by(BettingSlip.model_version.asc(), BettingSlip.model_name.asc())
+    ).all()
+
+    rows: list[BettingSlipModelStatsRow] = []
+    for model_version, model_name, first_date, last_date in combinations:
+        stats = compute_betting_slip_stats(
+            db,
+            model_version=model_version,
+            model_name=model_name,
+            from_date=resolved_from,
+            to_date=resolved_to,
+            stake=stake,
+            all_time=False,
+        )
+        summary = stats.summary
+        rows.append(
+            BettingSlipModelStatsRow(
+                model_version=model_version,
+                model_name=model_name,
+                slips_total=summary.slips_total,
+                slips_won=summary.slips_won,
+                slips_lost=summary.slips_lost,
+                slips_pending=summary.slips_pending,
+                slip_win_rate_pct=summary.slip_win_rate_pct,
+                picks_total=summary.picks_total,
+                picks_won=summary.picks_won,
+                picks_lost=summary.picks_lost,
+                picks_pending=summary.picks_pending,
+                pick_hit_rate_pct=summary.pick_hit_rate_pct,
+                theoretical_profit_units=summary.theoretical_profit_units,
+                theoretical_roi_pct=summary.theoretical_roi_pct,
+                first_date=first_date,
+                last_date=last_date,
+            )
+        )
+
+    return BettingSlipModelStatsResponse(
+        from_date=resolved_from,
+        to_date=resolved_to,
+        stake=stake,
+        rows=rows,
     )

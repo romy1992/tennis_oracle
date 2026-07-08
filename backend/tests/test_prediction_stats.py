@@ -201,6 +201,57 @@ class PredictionStatsTest(unittest.TestCase):
         self.assertEqual(summary.breakdown[0].predictions_with_odds, 2)
         self.assertAlmostEqual(summary.breakdown[0].theoretical_profit_units, 0.0)
 
+    def test_stats_can_filter_by_model_name(self):
+        today = date(2026, 6, 21)
+        with self.Session() as session:
+            session.add_all(
+                [
+                    Fixture(id_fixture=1, event_key=1, event_date=today),
+                    Fixture(id_fixture=2, event_key=2, event_date=today),
+                    MatchPrediction(
+                        event_key=1,
+                        model_version="v3",
+                        model_name="logistic_regression",
+                        predicted_at=datetime.now(timezone.utc),
+                        prob_player_1_win=0.6,
+                        predicted_winner="First Player",
+                        actual_winner="First Player",
+                        is_correct=True,
+                    ),
+                    MatchPrediction(
+                        event_key=2,
+                        model_version="v3",
+                        model_name="random_forest",
+                        predicted_at=datetime.now(timezone.utc),
+                        prob_player_1_win=0.4,
+                        predicted_winner="Second Player",
+                        actual_winner="First Player",
+                        is_correct=False,
+                    ),
+                ]
+            )
+            session.commit()
+
+            daily = compute_daily_prediction_stats(
+                db=session,
+                model_version="v3",
+                model_name="logistic_regression",
+                from_day=0,
+                to_day=0,
+                reference_date=today,
+            )
+            summary = compute_prediction_summary(
+                session,
+                model_version="v3",
+                model_name="logistic_regression",
+            )
+
+        self.assertEqual(daily.days[0].predictions_total, 1)
+        self.assertEqual(daily.days[0].predictions_correct, 1)
+        self.assertEqual(summary.predictions_total, 1)
+        self.assertEqual(summary.predictions_correct, 1)
+        self.assertEqual(summary.breakdown[0].model_name, "logistic_regression")
+
     def test_upcoming_predictions_are_read_from_db_only(self):
         today = date(2026, 6, 21)
         with self.Session() as session:

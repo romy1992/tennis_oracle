@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date
+import json
+import time
+from pathlib import Path
 from typing import Any
 
 
@@ -157,6 +160,36 @@ def format_fixtures_intro(items: list[dict[str, Any]], target_date: date | str) 
 
 
 def format_fixture_group_text(items: list[dict[str, Any]], *, start_index: int = 1) -> str:
+    # region agent log
+    _agent_log(
+        "H2,H3",
+        "backend/src/app/telegram/messages.py:format_fixture_group_text",
+        "telegram fixture formatter odds summary",
+        {
+            "item_count": len(items),
+            "null_prediction_odds": sum(
+                1
+                for item in items
+                if item.get("prediction") and item["prediction"].get("predicted_winner_odds") is None
+            ),
+            "examples_null_prediction_odds": [
+                {
+                    "event_key": item.get("event_key"),
+                    "event_date": item.get("event_date"),
+                    "match": _match_title(item),
+                    "has_raw_odds": item.get("odds") is not None,
+                    "prediction": {
+                        "model_version": item.get("prediction", {}).get("model_version"),
+                        "model_name": item.get("prediction", {}).get("model_name"),
+                        "predicted_winner": item.get("prediction", {}).get("predicted_winner"),
+                    },
+                }
+                for item in items
+                if item.get("prediction") and item["prediction"].get("predicted_winner_odds") is None
+            ][:5],
+        },
+    )
+    # endregion
     lines = []
     for index, item in enumerate(items, start=start_index):
         tournament_parts = [item.get("tournament_name"), item.get("tournament_round"), item.get("surface")]
@@ -209,6 +242,28 @@ def format_betting_slip_text(slip: dict[str, Any]) -> str:
     ]
 
     picks = slip.get("picks") or []
+    # region agent log
+    _agent_log(
+        "H4",
+        "backend/src/app/telegram/messages.py:format_betting_slip_text",
+        "telegram betting slip formatter odds summary",
+        {
+            "slip_key": slip.get("slip_key"),
+            "label": slip.get("label"),
+            "pick_count": len(picks),
+            "null_pick_odds": sum(1 for pick in picks if pick.get("odds") is None),
+            "examples_null_pick_odds": [
+                {
+                    "event_key": pick.get("event_key"),
+                    "match": _match_title(pick),
+                    "predicted_winner": pick.get("predicted_winner"),
+                }
+                for pick in picks
+                if pick.get("odds") is None
+            ][:5],
+        },
+    )
+    # endregion
     if not picks:
         lines.append("Nessun pick disponibile.")
         return "\n".join(lines)
@@ -245,3 +300,25 @@ def format_betting_slips(payload: dict[str, Any]) -> str:
         lines.append("")
         lines.append(format_betting_slip_text(slip))
     return "\n".join(lines)
+
+
+def _agent_log(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    try:
+        with (Path(__file__).resolve().parents[4] / "debug-1f0f81.log").open("a", encoding="utf-8") as log_file:
+            log_file.write(
+                json.dumps(
+                    {
+                        "sessionId": "1f0f81",
+                        "runId": "telegram-odds-nd-initial",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    default=str,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass

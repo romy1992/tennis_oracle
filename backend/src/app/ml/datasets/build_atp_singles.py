@@ -38,7 +38,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--version",
-        choices=["v1", "v2"],
+        choices=["v1", "v2", "v3"],
         default="v1",
         help="Versione dataset base/enriched da generare.",
     )

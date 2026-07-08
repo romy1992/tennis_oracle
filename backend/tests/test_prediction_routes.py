@@ -93,6 +93,55 @@ class PredictionRoutesTest(unittest.TestCase):
         self.assertIsNone(items[1]["prediction"])
         self.assertEqual(items[1]["prediction_warning"], "missing_persisted_prediction")
 
+    def test_v3_next_fixtures_predictions_route_filters_missing_odds(self):
+        today = date.today()
+        with self.Session() as session:
+            session.add_all(
+                [
+                    NextFixture(
+                        event_key=110,
+                        event_date=today,
+                        event_first_player="A",
+                        event_second_player="B",
+                        odds={
+                            "110": {
+                                "Home/Away": {
+                                    "Home": {"Book A": "2.00"},
+                                    "Away": {"Book A": "1.80"},
+                                }
+                            }
+                        },
+                        is_completed=False,
+                    ),
+                    NextFixture(
+                        event_key=111,
+                        event_date=today,
+                        event_first_player="C",
+                        event_second_player="D",
+                        is_completed=False,
+                    ),
+                    MatchPrediction(
+                        event_key=110,
+                        model_version="v3",
+                        model_name="random_forest",
+                        predicted_at=datetime(2026, 6, 20, 10, 0, 0),
+                        prob_player_1_win=0.7,
+                        predicted_winner="First Player",
+                    ),
+                ]
+            )
+            session.commit()
+
+        response = self.client.get(
+            "/api/next-fixtures/predictions",
+            params={"model_version": "v3", "model_name": "random_forest"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual([item["event_key"] for item in payload["items"]], [110])
+
     def test_next_fixtures_predictions_route_can_return_played_predictions(self):
         today = date.today()
         with self.Session() as session:

@@ -1,5 +1,7 @@
 import logging
+import json
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from backend.src.entity import Fixture
 from backend.src.repository.fixture_repository import FixtureRepository
@@ -11,6 +13,24 @@ tournaments_repo = TournamentsRepository()
 fixtures_repo = FixtureRepository()
 
 logging.basicConfig(level=logging.INFO)
+
+
+#region agent log
+def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    payload = {
+        "sessionId": "8c43c3",
+        "runId": "pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(datetime.now().timestamp() * 1000),
+    }
+    try:
+        Path(r"c:\Users\trott\git\tennis_oracle\debug-8c43c3.log").open("a", encoding="utf-8").write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+#endregion
 
 
 def import_all_fixtures(date_start="2000-01-01", date_stop=None, params=None):
@@ -98,15 +118,59 @@ def import_odds_full_by_tournament(params=None, tournament_key=None):
 
 
 def import_fixtures_by_params(params):
-    # Recupero prima tutti gli event_key univoci delle partite già presenti nel database per evitare di fare richieste API inutili
-    search_fixture_key = set(fixtures_repo.search_column_values("event_key"))
     try:
         # Chiamata esterna al servizio API per scaricare le partite del torneo
         response = request_api(method="get_fixtures", params=params)
         if response and len(response) > 0:
+            event_keys = [fixture.get("event_key") for fixture in response if fixture.get("event_key") is not None]
+            existing_rows = fixtures_repo.search_filter({"event_key": event_keys}) if event_keys else []
+            existing_by_key = {fixture.event_key: fixture for fixture in existing_rows}
+            search_fixture_key = set(existing_by_key)
+            existing_payloads = [
+                fixture for fixture in response if fixture.get("event_key") in search_fixture_key
+            ]
+            #region agent log
+            _agent_debug_log(
+                "H6",
+                "backend/src/service/import_fixtures.py:import_fixtures_by_params",
+                "Fetched played fixtures and compared them with existing rows",
+                {
+                    "params": params,
+                    "response_count": len(response),
+                    "existing_count": len(existing_payloads),
+                    "existing_with_winner_count": sum(1 for fixture in existing_payloads if fixture.get("event_winner")),
+                    "new_count": sum(1 for fixture in response if fixture.get("event_key") not in search_fixture_key),
+                    "existing_winner_sample": [
+                        {
+                            "event_key": fixture.get("event_key"),
+                            "event_winner": fixture.get("event_winner"),
+                            "event_status": fixture.get("event_status"),
+                        }
+                        for fixture in existing_payloads
+                        if fixture.get("event_winner")
+                    ][:10],
+                },
+            )
+            #endregion
             # Filtro le partite scaricate per evitare di inserire partite già presenti nel database e le salvo
             fixtures = [Fixture(**fixture) for fixture in response
                         if fixture.get("event_key") not in search_fixture_key]
+            fixture_updates = []
+            for fixture in existing_payloads:
+                existing = existing_by_key.get(fixture.get("event_key"))
+                if existing is None:
+                    continue
+                update = {
+                    key: value
+                    for key, value in fixture.items()
+                    if key in Fixture.__table__.columns and key != "id_fixture"
+                }
+                update["id_fixture"] = existing.id_fixture
+                fixture_updates.append(update)
+
+            if fixture_updates:
+                fixtures_repo.massive_update_bulk(fixture_updates)
+                logging.info(f"Updated {len(fixture_updates)} existing fixtures")
 
             if len(fixtures) > 0:
                 for fixture in fixtures:
@@ -123,6 +187,7 @@ def import_fixtures_by_params(params):
             logging.info(f"No new fixtures to import for params: {params}")
     except Exception as e:
         logging.error(f"Error in API request: {e} with params: {params}")
+        raise
 
 
 def calculate_date(days_back_start: int = 1, days_back_stop: int = 0):

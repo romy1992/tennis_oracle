@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 const navItems = [
   { to: "/predictions", label: "Partite" },
   { to: "/betting-slips", label: "Consiglio schedina" },
+  { to: "/betting-slip-model-stats", label: "Statistiche schedine" },
   { to: "/prediction-stats", label: "Statistiche previsioni" }
 ];
 

@@ -34,12 +34,16 @@ MODELS_DIR = ROOT_DIR / "data" / "models"
 REPORTS_DIR = ROOT_DIR / "data" / "reports"
 BASELINE_METRICS_PATH = REPORTS_DIR / "baseline_metrics.json"
 BASELINE_V2_METRICS_PATH = REPORTS_DIR / "baseline_v2_metrics.json"
+BASELINE_V3_METRICS_PATH = REPORTS_DIR / "baseline_v3_metrics.json"
 
-DatasetType = Literal["base", "atp_enriched", "v2", "v2_atp_enriched"]
-ModelVersion = Literal["v1", "v2"]
+DatasetType = Literal["base", "atp_enriched", "v2", "v2_atp_enriched", "v3", "v3_atp_enriched", "v3_with_odds"]
+ModelVersion = Literal["v1", "v2", "v3"]
 V2_DATASET_PATH = PROCESSED_DATA_DIR / DATASET_VERSIONS["v2"].base_dataset
 V2_ATP_DATASET_PATH = PROCESSED_DATA_DIR / DATASET_VERSIONS["v2"].atp_enriched_dataset
 V2_WITH_ODDS_PATH = PROCESSED_DATA_DIR / DATASET_VERSIONS["v2"].with_odds_dataset
+V3_DATASET_PATH = PROCESSED_DATA_DIR / DATASET_VERSIONS["v3"].base_dataset
+V3_ATP_DATASET_PATH = PROCESSED_DATA_DIR / DATASET_VERSIONS["v3"].atp_enriched_dataset
+V3_WITH_ODDS_PATH = PROCESSED_DATA_DIR / DATASET_VERSIONS["v3"].with_odds_dataset
 PREVIEW_COLUMNS = [
     "match_id",
     "match_date",
@@ -83,6 +87,12 @@ def _path_payload(path: Path) -> str:
 
 
 def _dataset_path(dataset_type: DatasetType) -> Path:
+    if dataset_type == "v3_with_odds":
+        return V3_WITH_ODDS_PATH
+    if dataset_type == "v3_atp_enriched":
+        return V3_ATP_DATASET_PATH
+    if dataset_type == "v3":
+        return V3_DATASET_PATH
     if dataset_type == "v2":
         return V2_DATASET_PATH
     if dataset_type == "v2_atp_enriched":
@@ -95,6 +105,8 @@ def _dataset_path(dataset_type: DatasetType) -> Path:
 def _select_dataset_type(dataset: DatasetType | None = None) -> DatasetType:
     if dataset:
         return dataset
+    if V3_WITH_ODDS_PATH.exists():
+        return "v3_with_odds"
     if V2_ATP_DATASET_PATH.exists():
         return "v2_atp_enriched"
     if ATP_DATASET_PATH.exists():
@@ -293,7 +305,7 @@ def _metrics_payload(metrics_path: Path) -> dict[str, Any]:
 @router.get("/pipeline/summary")
 def read_ml_pipeline_summary(db: Session = Depends(get_db)) -> dict[str, Any]:
     warnings = [
-        "Odds non ancora integrate nel dataset ML.",
+        "Odds escluse da v1/v2 e usate come feature solo da v3.",
         "Ranking legacy non usato perché non storico.",
     ]
 
@@ -468,9 +480,9 @@ def read_ml_odds_summary() -> dict[str, Any]:
 @router.get("/models")
 def read_ml_models() -> dict[str, Any]:
     versions = []
-    for version in ("v1", "v2"):
-        models_dir = _models_dir_for_version(version)  # type: ignore[arg-type]
-        metrics_path = _metrics_path_for_version(version)  # type: ignore[arg-type]
+    for version in MODEL_VERSIONS:
+        models_dir = _models_dir_for_version(version)
+        metrics_path = _metrics_path_for_version(version)
         model_specs = {
             "logistic_regression": models_dir / "logistic_regression.pkl",
             "random_forest": models_dir / "random_forest.pkl",
@@ -500,6 +512,8 @@ def read_ml_models() -> dict[str, Any]:
         "baseline_metrics_exists": BASELINE_METRICS_PATH.exists(),
         "baseline_v2_metrics_path": _path_payload(BASELINE_V2_METRICS_PATH),
         "baseline_v2_metrics_exists": BASELINE_V2_METRICS_PATH.exists(),
+        "baseline_v3_metrics_path": _path_payload(BASELINE_V3_METRICS_PATH),
+        "baseline_v3_metrics_exists": BASELINE_V3_METRICS_PATH.exists(),
         "model_registry_path": _path_payload(REGISTRY_PATH),
         "model_registry_exists": REGISTRY_PATH.exists(),
         "model_comparison_path": _path_payload(COMPARISON_PATH),

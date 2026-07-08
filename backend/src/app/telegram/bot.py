@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
+import time
 from datetime import timedelta
+from pathlib import Path
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from .client import BackendApiClient, BackendApiError
 from .config import TelegramSettings, get_telegram_settings
@@ -38,12 +41,52 @@ Comandi attivi:
 Pronostici a scopo informativo/statistico, non garanzie di risultato."""
 
 
+def _agent_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    try:
+        with (Path(__file__).resolve().parents[4] / "debug-1f0f81.log").open("a", encoding="utf-8") as log_file:
+            log_file.write(
+                json.dumps(
+                    {
+                        "sessionId": "1f0f81",
+                        "runId": "telegram-odds-nd-initial",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    default=str,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update, WELCOME_TEXT)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update, WELCOME_TEXT)
+
+
+async def log_unhandled_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    text = message.text if message and message.text else None
+    command = text.split()[0] if text and text.startswith("/") else None
+    # region agent log
+    _agent_log(
+        "H5",
+        "backend/src/app/telegram/bot.py:log_unhandled_update",
+        "telegram unhandled update",
+        {
+            "has_message": message is not None,
+            "has_text": text is not None,
+            "command": command,
+        },
+    )
+    # endregion
 
 
 async def pronostici(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -105,6 +148,19 @@ async def ten_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     target_date = today_rome()
     settings = _settings(context)
+    # region agent log
+    _agent_log(
+        "H1,H4",
+        "backend/src/app/telegram/bot.py:schedine",
+        "telegram schedine handler settings",
+        {
+            "target_date": target_date,
+            "telegram_model_version": settings.telegram_model_version,
+            "telegram_model_name": settings.telegram_model_name,
+            "stake": settings.telegram_default_stake,
+        },
+    )
+    # endregion
     try:
         payload = await _api(context).daily_betting_slips(
             slip_date=target_date,
@@ -122,6 +178,18 @@ async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def partite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     target_date = today_rome()
     settings = _settings(context)
+    # region agent log
+    _agent_log(
+        "H1,H2,H3",
+        "backend/src/app/telegram/bot.py:partite",
+        "telegram partite handler settings",
+        {
+            "target_date": target_date,
+            "telegram_model_version": settings.telegram_model_version,
+            "telegram_model_name": settings.telegram_model_name,
+        },
+    )
+    # endregion
     try:
         items = await _api(context).predictions(
             model_version=settings.telegram_model_version,
@@ -243,6 +311,19 @@ def _api(context: ContextTypes.DEFAULT_TYPE) -> BackendApiClient:
 
 async def _post_init(application: Application) -> None:
     settings = application.bot_data["settings"]
+    # region agent log
+    _agent_log(
+        "H1",
+        "backend/src/app/telegram/bot.py:_post_init",
+        "telegram bot startup settings",
+        {
+            "telegram_api_base_url": settings.telegram_api_base_url,
+            "telegram_model_version": settings.telegram_model_version,
+            "telegram_model_name": settings.telegram_model_name,
+            "stake": settings.telegram_default_stake,
+        },
+    )
+    # endregion
     application.bot_data["api_client"] = BackendApiClient(settings.telegram_api_base_url)
 
 
@@ -269,6 +350,7 @@ def build_application(settings: TelegramSettings | None = None) -> Application:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("schedine", schedine))
     application.add_handler(CommandHandler("partite", partite))
+    application.add_handler(MessageHandler(filters.ALL, log_unhandled_update))
     # Comandi temporaneamente disabilitati. Lasciare il codice degli handler
     # pronto per riattivazione futura.
     # application.add_handler(CommandHandler("pronostici", pronostici))

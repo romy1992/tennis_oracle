@@ -38,7 +38,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--version",
-        choices=["v1", "v2"],
+        choices=["v1", "v2", "v3"],
         default="v1",
         help="Versione dataset da generare (v1 placeholder rank/elo, v2 reali).",
     )
@@ -51,7 +51,7 @@ def main() -> None:
     logger.info("Avvio dataset builder tennis_oracle (%s)", version)
 
     with SessionLocal() as db:
-        if version == "v2":
+        if version in {"v2", "v3"}:
             result = build_and_export_dataset_report_v2(
                 db=db,
                 output_dir=args.output_dir,

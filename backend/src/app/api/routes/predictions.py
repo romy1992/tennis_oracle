@@ -84,6 +84,7 @@ def read_next_fixtures_predictions(
 @predictions_stats_router.get("/daily", response_model=DailyPredictionStatsResponse)
 def read_daily_prediction_stats(
     model_version: ModelVersion = Query(default="v2"),
+    model_name: str | None = Query(default=None),
     from_day: int = Query(default=0, ge=0),
     to_day: int | None = Query(default=None, ge=0),
     db: Session = Depends(get_db),
@@ -94,6 +95,7 @@ def read_daily_prediction_stats(
         return compute_daily_prediction_stats(
             db=db,
             model_version=model_version,
+            model_name=model_name,
             from_day=from_day,
             to_day=to_day,
         )
@@ -107,10 +109,11 @@ def read_daily_prediction_stats(
 @predictions_stats_router.get("/summary", response_model=PredictionSummaryResponse)
 def read_prediction_summary(
     model_version: ModelVersion = Query(default="v2"),
+    model_name: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> PredictionSummaryResponse:
     try:
-        return compute_prediction_summary(db=db, model_version=model_version)
+        return compute_prediction_summary(db=db, model_version=model_version, model_name=model_name)
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=503,

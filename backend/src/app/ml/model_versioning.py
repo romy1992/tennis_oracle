@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-ModelVersion = Literal["v1", "v2"]
+ModelVersion = Literal["v1", "v2", "v3"]
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PROCESSED_DATA_DIR = REPO_ROOT / "backend" / "data" / "processed"
@@ -43,6 +43,11 @@ DATASET_VERSIONS: dict[ModelVersion, DatasetVersionPaths] = {
         atp_enriched_dataset="tennis_winner_dataset_atp_enriched_v2.csv",
         with_odds_dataset="tennis_winner_dataset_with_odds_v2.csv",
     ),
+    "v3": DatasetVersionPaths(
+        base_dataset="tennis_winner_dataset_v3.csv",
+        atp_enriched_dataset="tennis_winner_dataset_atp_enriched_v3.csv",
+        with_odds_dataset="tennis_winner_dataset_with_odds_v3.csv",
+    ),
 }
 
 MODEL_VERSIONS: dict[ModelVersion, ModelVersionPaths] = {
@@ -61,6 +66,16 @@ MODEL_VERSIONS: dict[ModelVersion, ModelVersionPaths] = {
         rank_features_note=(
             "Uses historical ATP rank columns player_*_rank and rank_diff/rank_points_diff. "
             "ATP enrichment rank columns are excluded from v2 training."
+        ),
+    ),
+    "v3": ModelVersionPaths(
+        version="v3",
+        datasets=DATASET_VERSIONS["v3"],
+        models_dir=MODELS_DIR / "v3",
+        metrics_filename="baseline_v3_metrics.json",
+        rank_features_note=(
+            "Uses v2 historical ATP rank/Elo/form/H2H features plus pre-match "
+            "match-winner odds aggregates. Trains and predicts only when odds are available."
         ),
     ),
 }
