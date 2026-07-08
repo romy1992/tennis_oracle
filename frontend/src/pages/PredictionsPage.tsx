@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { ModelControls } from "../components/ModelControls";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
-import type { ImportStatusResponse, NextFixtureWithPrediction } from "../types/api";
+import type { ImportStatusResponse, MLModelName, MLModelVersion, NextFixtureWithPrediction } from "../types/api";
+import { readStoredModelName, readStoredModelVersion } from "../utils/modelVersion";
 import { formatDate } from "../utils/tennis";
 
 type FixtureStatusFilter = "upcoming" | "played" | "all";
@@ -115,6 +117,7 @@ export function PredictionsPage() {
   const [importStatus, setImportStatus] = useState<ImportStatusResponse | null>(null);
   const [statusFilter, setStatusFilter] = useState<FixtureStatusFilter>("upcoming");
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
+  const [modelVersion, setModelVersion] = useState<MLModelVersion>(() => readStoredModelVersion());
   const [page, setPage] = useState(1);
   const [daysBack, setDaysBack] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -123,6 +126,7 @@ export function PredictionsPage() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [playerSearch, setPlayerSearch] = useState("");
   const [playerQuery, setPlayerQuery] = useState("");
+  const [modelName, setModelName] = useState<MLModelName>(() => readStoredModelName());
   const [error, setError] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(totalFixtures / PAGE_SIZE));
@@ -130,14 +134,15 @@ export function PredictionsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, outcomeFilter, playerQuery]);
+  }, [statusFilter, outcomeFilter, playerQuery, modelVersion, modelName]);
 
   const loadPageData = useCallback(async () => {
     const offset = (page - 1) * PAGE_SIZE;
     const trimmedPlayer = playerQuery.trim();
     const [fixturesPage, statusData] = await Promise.all([
       apiClient.getUpcomingPredictions({
-        model_version: "v2",
+        model_version: modelVersion,
+        model_name: modelName,
         status: statusFilter,
         outcome: statusFilter === "played" ? outcomeFilter : undefined,
         limit: PAGE_SIZE,
@@ -149,7 +154,7 @@ export function PredictionsPage() {
     setFixtures(fixturesPage.items);
     setTotalFixtures(fixturesPage.total);
     setImportStatus(statusData);
-  }, [statusFilter, outcomeFilter, page, playerQuery]);
+  }, [statusFilter, outcomeFilter, page, playerQuery, modelVersion, modelName]);
 
   useEffect(() => {
     async function load() {
@@ -176,7 +181,8 @@ export function PredictionsPage() {
         statusBefore.next_fixtures_window_until !== null &&
         statusBefore.next_fixtures_max_date < statusBefore.next_fixtures_window_until;
       const result = await apiClient.refreshMatches({
-        model_version: "v2",
+        model_version: modelVersion,
+        model_name: modelName,
         force_next_import: coverageIncomplete || !statusBefore.next_fixtures_imported_today
       });
       setPage(1);
@@ -247,14 +253,23 @@ export function PredictionsPage() {
             sincronizzare next_fixture e rigenerare le prediction del giorno.
           </p>
         </div>
-        <button
-          type="button"
-          className="action-button primary"
-          onClick={() => void handleRefresh()}
-          disabled={refreshing || importingFixtures}
-        >
-          {refreshing ? "Aggiornamento..." : "Aggiorna"}
-        </button>
+        <div className="header-actions">
+          <ModelControls
+            modelVersion={modelVersion}
+            modelName={modelName}
+            onModelVersionChange={setModelVersion}
+            onModelNameChange={setModelName}
+            disabled={refreshing || importingFixtures}
+          />
+          <button
+            type="button"
+            className="action-button primary"
+            onClick={() => void handleRefresh()}
+            disabled={refreshing || importingFixtures}
+          >
+            {refreshing ? "Aggiornamento..." : "Aggiorna"}
+          </button>
+        </div>
       </header>
 
       <article className="panel">

@@ -53,7 +53,8 @@ export type ListParams = {
   offset?: number;
 };
 
-export type MLModelVersion = "v1" | "v2";
+export type MLModelVersion = "v1" | "v2" | "v3";
+export type MLModelName = "logistic_regression" | "random_forest";
 
 export type NextFixture = {
   id: number;
@@ -174,6 +175,7 @@ export type PredictionQueryParams = {
 
 export type DailyStatsParams = {
   model_version?: MLModelVersion;
+  model_name?: string;
   from_day?: number;
   to_day?: number;
 };
@@ -200,7 +202,14 @@ export type ImportFixturesResponse = {
   import_status: ImportStatusResponse;
 };
 
-export type MLDatasetType = "base" | "atp_enriched" | "v2" | "v2_atp_enriched";
+export type MLDatasetType =
+  | "base"
+  | "atp_enriched"
+  | "v2"
+  | "v2_atp_enriched"
+  | "v3"
+  | "v3_atp_enriched"
+  | "v3_with_odds";
 
 export type MLPipelineSummary = {
   fixture_total: number | null;
@@ -285,6 +294,8 @@ export type MLModelsSummary = {
   baseline_metrics_exists: boolean;
   baseline_v2_metrics_path: string;
   baseline_v2_metrics_exists: boolean;
+  baseline_v3_metrics_path?: string;
+  baseline_v3_metrics_exists?: boolean;
   model_registry_path: string;
   model_registry_exists: boolean;
   model_comparison_path: string;
@@ -510,6 +521,32 @@ export type BettingSlipStatsResponse = {
   summary: BettingSlipStatsSummary;
 };
 
+export type BettingSlipModelStatsRow = {
+  model_version: string;
+  model_name: string;
+  slips_total: number;
+  slips_won: number;
+  slips_lost: number;
+  slips_pending: number;
+  slip_win_rate_pct: number | null;
+  picks_total: number;
+  picks_won: number;
+  picks_lost: number;
+  picks_pending: number;
+  pick_hit_rate_pct: number | null;
+  theoretical_profit_units: number;
+  theoretical_roi_pct: number | null;
+  first_date: string;
+  last_date: string;
+};
+
+export type BettingSlipModelStatsResponse = {
+  from_date: string;
+  to_date: string;
+  stake: number;
+  rows: BettingSlipModelStatsRow[];
+};
+
 export type BettingSlipsQueryParams = {
   date?: string;
   model_version?: MLModelVersion;
@@ -522,6 +559,14 @@ export type BettingSlipStatsParams = {
   from?: string;
   to?: string;
   model_version?: MLModelVersion;
+  model_name?: string;
+  stake?: number;
+  all_time?: boolean;
+};
+
+export type BettingSlipModelStatsParams = {
+  from?: string;
+  to?: string;
   stake?: number;
   all_time?: boolean;
 };

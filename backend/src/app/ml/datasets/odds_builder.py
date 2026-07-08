@@ -444,7 +444,14 @@ def select_source_dataset_path(
     version: str = "v1",
 ) -> Path | None:
     output_path = Path(output_dir)
-    if version == "v2":
+    if version == "v3":
+        candidates = (
+            "tennis_winner_dataset_atp_enriched_v3.csv",
+            "tennis_winner_dataset_v3.csv",
+            "tennis_winner_dataset_atp_enriched_v2.csv",
+            "tennis_winner_dataset_v2.csv",
+        )
+    elif version == "v2":
         candidates = (
             "tennis_winner_dataset_atp_enriched_v2.csv",
             "tennis_winner_dataset_v2.csv",

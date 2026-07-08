@@ -162,6 +162,36 @@ correnti e non storiche, quindi non vengono usate come ranking pre-match per
 evitare data leakage. Per il training usa uno split temporale, ad esempio train
 sulle date più vecchie e validation/test sulle date più recenti.
 
+### Versioni modello ML
+
+Le versioni restano separate per dataset, cartella modelli, report metriche e
+predizioni persistite (`event_key + model_version + model_name`):
+
+- `v1`: baseline storico/form/H2H/ATP parziale, indipendente dalle odds.
+- `v2`: ranking storico, Elo, forma recente, H2H e feature ATP, indipendente
+  dalle odds. Le odds sono usate solo dopo la predizione per benchmark, edge,
+  value bet e schedine.
+- `v3`: modello odds-aware. Usa le feature di `v2` più aggregate pre-match
+  (`avg_player_1_odds`, `avg_player_2_odds`, probabilità mercato medie,
+  margine bookmaker e numero bookmaker). Training, inferenza, liste FE e
+  schedine `v3` includono solo match con odds disponibili.
+
+Pipeline consigliata per generare `v3` senza toccare artefatti `v1`/`v2`:
+
+```bash
+cd backend/src
+python -m app.ml.datasets.build_dataset --version v3
+python -m app.ml.datasets.build_atp_singles --version v3
+python -m app.ml.datasets.build_odds_dataset --version v3
+python -m app.ml.training.train_baseline --model-version v3
+python -m jobs.generate_upcoming_predictions --model-version v3
+```
+
+Le metriche `v3` vengono salvate in
+`backend/data/reports/baseline_v3_metrics.json` e i modelli in
+`backend/data/models/v3/`. Le API e il frontend continuano a usare `v2` come
+default; passa `model_version=v3` per pronostici o schedine odds-aware.
+
 ## Comandi import esistenti
 
 Esegui dalla cartella `backend/`:

@@ -34,6 +34,7 @@ from backend.src.app.ml.datasets.dataset_builder import (
     load_legacy_match_rows,
 )
 from backend.src.app.ml.datasets.elo_builder import EloTracker
+from backend.src.app.ml.datasets.odds_builder import FixtureOddsRecord, match_winner_rows_from_record
 from backend.src.app.ml.datasets.ranking_history import HistoricalRankingLookup
 from backend.src.app.ml.model_versioning import (
     ATP_DATA_DIR,
@@ -69,6 +70,14 @@ ATP_DEFAULTS: dict[str, Any] = {
     "atp_round": "unknown",
     "atp_best_of": 3,
 }
+ODDS_FEATURE_COLUMNS = (
+    "avg_player_1_odds",
+    "avg_player_2_odds",
+    "avg_market_prob_player_1",
+    "avg_market_prob_player_2",
+    "avg_bookmaker_margin",
+    "odds_bookmaker_count",
+)
 
 
 def _ensure_logistic_regression_compat(obj: Any) -> bool:
@@ -121,11 +130,18 @@ class PreMatchFeatureBuilder:
         builder = cls()
         matches = load_legacy_match_rows(db)
         builder._ingest_history(matches)
-        if model_version == "v2":
+        if model_version in {"v2", "v3"}:
             try:
-                base_path = select_training_dataset_path(PROCESSED_DATA_DIR, version="v2")
+                base_path = select_training_dataset_path(PROCESSED_DATA_DIR, version=model_version)
             except FileNotFoundError:
-                base_path = None
+                try:
+                    base_path = (
+                        select_training_dataset_path(PROCESSED_DATA_DIR, version="v2")
+                        if model_version == "v3"
+                        else None
+                    )
+                except FileNotFoundError:
+                    base_path = None
             builder.ranking_lookup = build_historical_ranking_lookup(
                 ATP_DATA_DIR,
                 MATCH_MAPPING_PATH,
@@ -183,6 +199,7 @@ class PreMatchFeatureBuilder:
         player_1_id: int,
         player_2_id: int,
         model_version: ModelVersion,
+        odds: Any = None,
     ) -> tuple[dict[str, Any], list[str], bool]:
         normalised_surface = _normalise_surface(surface)
         player_1_history = self.player_history.get(player_1_id, [])
@@ -239,7 +256,7 @@ class PreMatchFeatureBuilder:
         warnings: list[str] = []
         features_available = bool(player_1_history or player_2_history)
 
-        if model_version == "v2":
+        if model_version in {"v2", "v3"}:
             rank_features = (self.ranking_lookup or HistoricalRankingLookup(pd.DataFrame(), {})).pre_match_features(
                 player_1_id,
                 player_2_id,
@@ -286,6 +303,20 @@ class PreMatchFeatureBuilder:
         row.update(ATP_DEFAULTS)
         row["atp_surface"] = normalised_surface
 
+        if model_version == "v3":
+            odds_features = odds_feature_row(
+                event_key=event_key,
+                match_date=match_date,
+                player_1_id=player_1_id,
+                player_2_id=player_2_id,
+                odds=odds,
+            )
+            if odds_features is None:
+                warnings.append("missing_odds")
+                features_available = False
+            else:
+                row.update(odds_features)
+
         if not player_1_history:
             warnings.append("player_1_no_history")
         if not player_2_history:
@@ -296,9 +327,47 @@ class PreMatchFeatureBuilder:
 
 def _clean_features(row: dict[str, Any], model_version: ModelVersion) -> pd.DataFrame:
     dataframe = pd.DataFrame([row])
-    if model_version == "v2":
+    if model_version == "v3":
+        cleaned = clean_dataset_dataframe_v2(dataframe)
+        for column in ODDS_FEATURE_COLUMNS:
+            if column in dataframe.columns and not cleaned.empty:
+                cleaned[column] = pd.to_numeric(dataframe[column], errors="coerce").values
+        return cleaned
+    if model_version in {"v2", "v3"}:
         return clean_dataset_dataframe_v2(dataframe)
     return clean_dataset_dataframe(dataframe)
+
+
+def odds_feature_row(
+    *,
+    event_key: int,
+    match_date: date,
+    player_1_id: int,
+    player_2_id: int,
+    odds: Any,
+) -> dict[str, Any] | None:
+    rows = match_winner_rows_from_record(
+        FixtureOddsRecord(
+            match_id=event_key,
+            match_date=match_date,
+            player_1_id=player_1_id,
+            player_2_id=player_2_id,
+            player_1_name=None,
+            player_2_name=None,
+            odds=odds,
+        )
+    )
+    if not rows:
+        return None
+    bookmakers = {row["bookmaker"] for row in rows}
+    return {
+        "avg_player_1_odds": sum(row["player_1_odds"] for row in rows) / len(rows),
+        "avg_player_2_odds": sum(row["player_2_odds"] for row in rows) / len(rows),
+        "avg_market_prob_player_1": sum(row["market_prob_player_1"] for row in rows) / len(rows),
+        "avg_market_prob_player_2": sum(row["market_prob_player_2"] for row in rows) / len(rows),
+        "avg_bookmaker_margin": sum(row["bookmaker_margin"] for row in rows) / len(rows),
+        "odds_bookmaker_count": len(bookmakers),
+    }
 
 
 def _alias_numpy_pickle_modules() -> bool:
@@ -365,13 +434,38 @@ def predict_fixture(
         player_1_id=fixture.first_player_key,
         player_2_id=fixture.second_player_key,
         model_version=model_version,
+        odds=fixture.odds,
     )
+    if model_version == "v3" and "missing_odds" in warnings:
+        return {
+            "event_key": fixture.event_key,
+            "model_version": model_version,
+            "model_name": model_name,
+            "prob_player_1_win": None,
+            "predicted_winner": None,
+            "confidence": None,
+            "features_available": False,
+            "warnings": warnings,
+        }
     cleaned = _clean_features(raw_row, model_version)
     artifact = _load_model_artifact(model_version, model_name)
     feature_columns = artifact["feature_columns"]
     pipeline = artifact["pipeline"]
 
     missing_columns = [column for column in feature_columns if column not in cleaned.columns]
+    if model_version == "v3":
+        missing_odds_columns = [column for column in ODDS_FEATURE_COLUMNS if column in feature_columns and column not in cleaned.columns]
+        if missing_odds_columns:
+            return {
+                "event_key": fixture.event_key,
+                "model_version": model_version,
+                "model_name": model_name,
+                "prob_player_1_win": None,
+                "predicted_winner": None,
+                "confidence": None,
+                "features_available": False,
+                "warnings": [*warnings, f"missing_odds_features:{','.join(missing_odds_columns)}"],
+            }
     for column in missing_columns:
         cleaned[column] = 0
     if missing_columns:

@@ -8,11 +8,13 @@ from backend.src.app.db.session import get_db
 from backend.src.app.ml.model_versioning import ModelVersion
 from backend.src.app.schemas.betting_slips import (
     BettingSlipCalendarResponse,
+    BettingSlipModelStatsResponse,
     BettingSlipsDailyResponse,
     BettingSlipsRefreshResponse,
     BettingSlipStatsResponse,
 )
 from backend.src.app.services.betting_slips import (
+    compute_betting_slip_model_stats,
     compute_betting_slip_stats,
     get_betting_slip_calendar,
     get_daily_betting_slips,
@@ -103,6 +105,7 @@ def read_betting_slip_stats(
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
     model_version: ModelVersion = Query(default="v2"),
+    model_name: str | None = Query(default=None),
     stake: float = Query(default=10.0, ge=0.01),
     all_time: bool = Query(default=False),
     db: Session = Depends(get_db),
@@ -118,6 +121,37 @@ def read_betting_slip_stats(
         return compute_betting_slip_stats(
             db=db,
             model_version=model_version,
+            model_name=model_name,
+            from_date=from_date,
+            to_date=to_date,
+            stake=stake,
+            all_time=all_time,
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Database table for betting slips is not available.",
+        ) from exc
+
+
+@router.get("/stats/by-model", response_model=BettingSlipModelStatsResponse)
+def read_betting_slip_stats_by_model(
+    from_date: date | None = Query(default=None, alias="from"),
+    to_date: date | None = Query(default=None, alias="to"),
+    stake: float = Query(default=10.0, ge=0.01),
+    all_time: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> BettingSlipModelStatsResponse:
+    if (
+        not all_time
+        and from_date is not None
+        and to_date is not None
+        and to_date < from_date
+    ):
+        raise HTTPException(status_code=400, detail="to_date must be >= from_date.")
+    try:
+        return compute_betting_slip_model_stats(
+            db=db,
             from_date=from_date,
             to_date=to_date,
             stake=stake,

@@ -1,5 +1,7 @@
 import type {
   BettingSlipCalendarResponse,
+  BettingSlipModelStatsParams,
+  BettingSlipModelStatsResponse,
   BettingSlipStatsParams,
   BettingSlipStatsResponse,
   BettingSlipsDailyResponse,
@@ -90,13 +92,14 @@ export const apiClient = {
     request<DailyPredictionStatsResponse>(
       withQuery("/api/predictions/stats/daily", params)
     ),
-  getPredictionSummary: (params: { model_version?: MLModelVersion } = {}) =>
+  getPredictionSummary: (params: { model_version?: MLModelVersion; model_name?: string } = {}) =>
     request<PredictionSummaryResponse>(
       withQuery("/api/predictions/stats/summary", params)
     ),
   getImportStatus: () => request<ImportStatusResponse>("/api/imports/status"),
   refreshMatches: (params: {
     model_version?: MLModelVersion;
+    model_name?: string;
     force_next_import?: boolean;
   } = {}) =>
     post<RefreshMatchesResponse>(
@@ -110,6 +113,10 @@ export const apiClient = {
     post<BettingSlipsRefreshResponse>(withQuery("/api/betting-slips/refresh", params)),
   getBettingSlipStats: (params: BettingSlipStatsParams = {}) =>
     request<BettingSlipStatsResponse>(withQuery("/api/betting-slips/stats", params)),
+  getBettingSlipModelStats: (params: BettingSlipModelStatsParams = {}) =>
+    request<BettingSlipModelStatsResponse>(
+      withQuery("/api/betting-slips/stats/by-model", params)
+    ),
   getBettingSlipCalendar: (params: { model_version?: MLModelVersion; model_name?: string } = {}) =>
     request<BettingSlipCalendarResponse>(withQuery("/api/betting-slips/calendar", params))
 };

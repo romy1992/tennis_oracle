@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import date
+import json
+import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -25,7 +28,20 @@ class BackendApiClient:
         try:
             response = await self._client.get(f"{self.base_url}{path}", params=clean_params)
             response.raise_for_status()
-            return response.json()
+            payload = response.json()
+            # region agent log
+            _agent_log(
+                "H2,H3,H4",
+                "backend/src/app/telegram/client.py:_get",
+                "telegram backend response summary",
+                {
+                    "path": path,
+                    "params": clean_params,
+                    "summary": _payload_summary(payload),
+                },
+            )
+            # endregion
+            return payload
         except httpx.HTTPStatusError as exc:
             detail = _extract_error_detail(exc.response)
             raise BackendApiError(
@@ -113,3 +129,93 @@ def _extract_error_detail(response: httpx.Response) -> str:
         return response.text or "errore non specificato"
     detail = payload.get("detail") if isinstance(payload, dict) else None
     return str(detail or "errore non specificato")
+
+
+def _payload_summary(payload: dict[str, Any] | list[dict[str, Any]]) -> dict[str, Any]:
+    if isinstance(payload, dict) and isinstance(payload.get("items"), list):
+        items = payload["items"]
+        return {
+            "item_count": len(items),
+            "items_with_raw_odds": sum(1 for item in items if item.get("odds") is not None),
+            "items_with_prediction": sum(1 for item in items if item.get("prediction")),
+            "null_prediction_odds": sum(
+                1
+                for item in items
+                if item.get("prediction") and item["prediction"].get("predicted_winner_odds") is None
+            ),
+            "model_versions": sorted(
+                str(value)
+                for value in {
+                    item["prediction"].get("model_version")
+                    for item in items
+                    if item.get("prediction")
+                }
+                if value is not None
+            ),
+            "model_names": sorted(
+                str(value)
+                for value in {
+                    item["prediction"].get("model_name")
+                    for item in items
+                    if item.get("prediction")
+                }
+                if value is not None
+            ),
+            "examples_null_odds": [
+                {
+                    "event_key": item.get("event_key"),
+                    "event_date": item.get("event_date"),
+                    "prediction_model_version": item.get("prediction", {}).get("model_version"),
+                    "prediction_model_name": item.get("prediction", {}).get("model_name"),
+                    "predicted_winner": item.get("prediction", {}).get("predicted_winner"),
+                    "has_raw_odds": item.get("odds") is not None,
+                }
+                for item in items
+                if item.get("prediction") and item["prediction"].get("predicted_winner_odds") is None
+            ][:5],
+        }
+    if isinstance(payload, dict) and isinstance(payload.get("slips"), list):
+        slips = payload["slips"]
+        picks = [pick for slip in slips for pick in (slip.get("picks") or [])]
+        return {
+            "model_version": payload.get("model_version"),
+            "model_name": payload.get("model_name"),
+            "slip_count": len(slips),
+            "pick_count": len(picks),
+            "null_pick_odds": sum(1 for pick in picks if pick.get("odds") is None),
+            "candidate_pool_size": payload.get("candidate_pool_size"),
+            "warnings": payload.get("warnings"),
+            "examples_null_pick_odds": [
+                {
+                    "event_key": pick.get("event_key"),
+                    "player_1": pick.get("player_1"),
+                    "player_2": pick.get("player_2"),
+                    "predicted_winner": pick.get("predicted_winner"),
+                }
+                for pick in picks
+                if pick.get("odds") is None
+            ][:5],
+        }
+    return {"payload_type": type(payload).__name__}
+
+
+def _agent_log(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    try:
+        with (Path(__file__).resolve().parents[4] / "debug-1f0f81.log").open("a", encoding="utf-8") as log_file:
+            log_file.write(
+                json.dumps(
+                    {
+                        "sessionId": "1f0f81",
+                        "runId": "telegram-odds-nd-initial",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    default=str,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass

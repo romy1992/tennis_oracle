@@ -20,13 +20,18 @@
       "metrics_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\baseline_v2_metrics.json",
       "created_at": "2026-06-21T08:57:25.265601+00:00",
       "updated_at": "2026-06-21T08:57:25.265601+00:00"
-    }
-  ],
-  "planned_versions": [
+    },
     {
       "id": "v3",
-      "label": "Boosting/tuning",
-      "status": "planned"
+      "label": "Odds-aware",
+      "description": "Elo/rank/form/H2H come v2 con odds match-winner aggregate come feature ML. Training e inferenza solo su match con odds.",
+      "dataset": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\processed\\tennis_winner_dataset_with_odds_v3.csv",
+      "features_summary": "Uses v2 historical ATP rank/Elo/form/H2H features plus pre-match match-winner odds aggregates. Trains and predicts only when odds are available.",
+      "models_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\models\\v3",
+      "metrics_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\baseline_v3_metrics.json",
+      "created_at": "2026-07-05T10:20:28.606280+00:00",
+      "updated_at": "2026-07-05T10:20:28.606280+00:00"
     }
-  ]
+  ],
+  "planned_versions": []
 }

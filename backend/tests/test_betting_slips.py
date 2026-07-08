@@ -13,6 +13,7 @@ from backend.src.app.services.betting_slips import (
     _resolve_pick_status,
     _resolve_slip_status,
     build_candidate_pool,
+    compute_betting_slip_model_stats,
     generate_slips,
     get_betting_slip_calendar,
     get_daily_betting_slips,
@@ -43,6 +44,9 @@ class BettingSlipsServiceTest(unittest.TestCase):
         self.Session = sessionmaker(bind=self.engine)
         self.today = date(2026, 6, 28)
 
+    def tearDown(self):
+        self.engine.dispose()
+
     def _seed_candidates(self, session, count: int = 6, start_key: int = 100):
         rows = []
         for index in range(count):
@@ -71,6 +75,60 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 )
             )
         session.add_all(rows)
+        session.commit()
+
+    def _seed_stats_slip(
+        self,
+        session,
+        *,
+        event_key: int,
+        slip_date: date,
+        model_version: str,
+        model_name: str,
+        actual_winner: str | None,
+        predicted_winner: str = "First Player",
+        combined_odds: float = 2.0,
+    ):
+        slip = BettingSlip(
+            slip_date=slip_date,
+            slip_key=f"safe-{event_key}",
+            label="Sicura",
+            description="Stats test",
+            model_version=model_version,
+            model_name=model_name,
+            pick_count=1,
+            combined_odds=combined_odds,
+            generated_at=datetime(2026, 6, 28, 9, 0, 0),
+        )
+        session.add(slip)
+        session.flush()
+        session.add(
+            BettingSlipPick(
+                betting_slip_id=slip.id,
+                event_key=event_key,
+                event_date=slip_date,
+                event_time=time(14, 0),
+                tournament_name="Stats Open",
+                surface="Hard",
+                player_1_name="Player A",
+                player_2_name="Player B",
+                predicted_winner=predicted_winner,
+                predicted_winner_label="Player A",
+                odds=combined_odds,
+                sort_order=0,
+            )
+        )
+        if actual_winner is not None:
+            session.add(
+                Fixture(
+                    id_fixture=event_key,
+                    event_key=event_key,
+                    event_date=slip_date,
+                    event_first_player="Player A",
+                    event_second_player="Player B",
+                    event_winner=actual_winner,
+                )
+            )
         session.commit()
 
     def test_build_candidate_pool_includes_missing_odds(self):
@@ -107,6 +165,50 @@ class BettingSlipsServiceTest(unittest.TestCase):
             by_key = {candidate.event_key: candidate for candidate in candidates}
             self.assertEqual(by_key[999].odds, None)
             self.assertEqual(by_key[100].odds, 1.525)
+
+    def test_v3_candidate_pool_excludes_missing_odds(self):
+        with self.Session() as session:
+            self._seed_candidates(session, count=1)
+            session.add(
+                NextFixture(
+                    event_key=999,
+                    event_date=self.today,
+                    event_first_player="No Odds",
+                    event_second_player="Also None",
+                    is_completed=False,
+                )
+            )
+            session.add_all(
+                [
+                    MatchPrediction(
+                        event_key=100,
+                        model_version="v3",
+                        model_name="random_forest",
+                        predicted_at=datetime(2026, 6, 28, 8, 0, 0),
+                        prob_player_1_win=0.74,
+                        predicted_winner="First Player",
+                    ),
+                    MatchPrediction(
+                        event_key=999,
+                        model_version="v3",
+                        model_name="random_forest",
+                        predicted_at=datetime(2026, 6, 28, 8, 0, 0),
+                        prob_player_1_win=0.8,
+                        predicted_winner="First Player",
+                    ),
+                ]
+            )
+            session.commit()
+
+            candidates = build_candidate_pool(
+                session,
+                slip_date=self.today,
+                model_version="v3",
+                model_name="random_forest",
+            )
+
+            self.assertEqual([candidate.event_key for candidate in candidates], [100])
+            self.assertIsNotNone(candidates[0].odds)
 
     def test_build_candidate_pool_includes_heavy_favorite(self):
         heavy_favorite_odds = {
@@ -206,11 +308,12 @@ class BettingSlipsServiceTest(unittest.TestCase):
         self.assertEqual(_resolve_slip_status(["won", "won"]), "won")
 
     def test_calendar_includes_history_and_upcoming_window(self):
+        future_date = date.today() + timedelta(days=3)
         with self.Session() as session:
             session.add(
                 NextFixture(
                     event_key=500,
-                    event_date=self.today + timedelta(days=3),
+                    event_date=future_date,
                     event_first_player="A",
                     event_second_player="B",
                     is_completed=False,
@@ -241,13 +344,118 @@ class BettingSlipsServiceTest(unittest.TestCase):
             )
             dates = [day.date for day in calendar.days]
             self.assertIn(self.today, dates)
-            self.assertIn(self.today + timedelta(days=3), dates)
-            self.assertGreaterEqual(calendar.window_to, self.today + timedelta(days=3))
+            self.assertIn(future_date, dates)
+            self.assertGreaterEqual(calendar.window_to, future_date)
             slip_day = session.scalar(
                 select(BettingSlipDay).where(BettingSlipDay.slip_date == self.today)
             )
             self.assertIsNotNone(slip_day)
             self.assertGreater(slip_day.slip_count, 0)
+
+    def test_model_stats_groups_versions_models_and_excludes_pending_from_rates(self):
+        with self.Session() as session:
+            self._seed_stats_slip(
+                session,
+                event_key=900,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                actual_winner="First Player",
+                combined_odds=2.0,
+            )
+            self._seed_stats_slip(
+                session,
+                event_key=901,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                actual_winner="Second Player",
+                combined_odds=2.0,
+            )
+            self._seed_stats_slip(
+                session,
+                event_key=902,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                actual_winner=None,
+                combined_odds=2.0,
+            )
+            self._seed_stats_slip(
+                session,
+                event_key=903,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="logistic_regression",
+                actual_winner="First Player",
+                combined_odds=1.5,
+            )
+            self._seed_stats_slip(
+                session,
+                event_key=904,
+                slip_date=self.today,
+                model_version="v3",
+                model_name="random_forest",
+                actual_winner="Second Player",
+                combined_odds=1.8,
+            )
+
+            response = compute_betting_slip_model_stats(
+                session,
+                from_date=self.today,
+                to_date=self.today,
+                stake=10.0,
+            )
+
+            rows = {(row.model_version, row.model_name): row for row in response.rows}
+            self.assertEqual(set(rows), {
+                ("v2", "logistic_regression"),
+                ("v2", "random_forest"),
+                ("v3", "random_forest"),
+            })
+            random_forest = rows[("v2", "random_forest")]
+            self.assertEqual(random_forest.slips_total, 3)
+            self.assertEqual(random_forest.slips_won, 1)
+            self.assertEqual(random_forest.slips_lost, 1)
+            self.assertEqual(random_forest.slips_pending, 1)
+            self.assertEqual(random_forest.slip_win_rate_pct, 50.0)
+            self.assertEqual(random_forest.picks_total, 3)
+            self.assertEqual(random_forest.picks_won, 1)
+            self.assertEqual(random_forest.picks_lost, 1)
+            self.assertEqual(random_forest.picks_pending, 1)
+            self.assertEqual(random_forest.pick_hit_rate_pct, 50.0)
+            self.assertEqual(random_forest.theoretical_profit_units, 0.0)
+            self.assertEqual(random_forest.theoretical_roi_pct, 0.0)
+
+    def test_model_stats_respects_date_filter(self):
+        with self.Session() as session:
+            self._seed_stats_slip(
+                session,
+                event_key=910,
+                slip_date=self.today - timedelta(days=2),
+                model_version="v2",
+                model_name="logistic_regression",
+                actual_winner="First Player",
+            )
+            self._seed_stats_slip(
+                session,
+                event_key=911,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                actual_winner="First Player",
+            )
+
+            response = compute_betting_slip_model_stats(
+                session,
+                from_date=self.today,
+                to_date=self.today,
+            )
+
+            self.assertEqual(len(response.rows), 1)
+            self.assertEqual(response.rows[0].model_name, "random_forest")
+            self.assertEqual(response.rows[0].first_date, self.today)
+            self.assertEqual(response.rows[0].last_date, self.today)
 
 
 class BettingSlipsRoutesTest(unittest.TestCase):
@@ -414,6 +622,38 @@ class BettingSlipsRoutesTest(unittest.TestCase):
         dates = [day["date"] for day in payload["days"]]
         self.assertIn(today.isoformat(), dates)
         self.assertIn(tomorrow.isoformat(), dates)
+
+    def test_stats_by_model_route_returns_grouped_rows(self):
+        with self.Session() as session:
+            self._seed_slip_with_pick(session)
+            session.add(
+                Fixture(
+                    id_fixture=200,
+                    event_key=200,
+                    event_date=self.today,
+                    event_first_player="Sinner J.",
+                    event_second_player="Alcaraz C.",
+                    event_winner="First Player",
+                )
+            )
+            session.commit()
+
+        response = self.client.get(
+            "/api/betting-slips/stats/by-model",
+            params={"from": self.today.isoformat(), "to": self.today.isoformat(), "stake": 10},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["from_date"], self.today.isoformat())
+        self.assertEqual(payload["to_date"], self.today.isoformat())
+        self.assertEqual(len(payload["rows"]), 1)
+        row = payload["rows"][0]
+        self.assertEqual(row["model_version"], "v2")
+        self.assertEqual(row["model_name"], "random_forest")
+        self.assertEqual(row["slips_total"], 1)
+        self.assertEqual(row["slips_won"], 1)
+        self.assertEqual(row["slip_win_rate_pct"], 100.0)
 
 
 if __name__ == "__main__":

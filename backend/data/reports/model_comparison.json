@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-21T08:57:25.261173+00:00",
+  "generated_at": "2026-07-05T10:20:28.603985+00:00",
   "versions": {
     "v1": {
       "metrics_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\baseline_metrics.json",
@@ -246,6 +246,154 @@
         "market_roi_if_bet_player_1_all": -0.110071,
         "odds_coverage_rows": 48737,
         "odds_coverage_pct": 71.975839
+      }
+    },
+    "v3": {
+      "metrics_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\baseline_v3_metrics.json",
+      "dataset_used": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\processed\\tennis_winner_dataset_with_odds_v3.csv",
+      "features_used": [
+        "surface",
+        "rank_diff",
+        "rank_points_diff",
+        "elo_diff",
+        "surface_elo_diff",
+        "player_1_last_5_win_rate",
+        "player_2_last_5_win_rate",
+        "player_1_last_10_win_rate",
+        "player_2_last_10_win_rate",
+        "player_1_surface_last_10_win_rate",
+        "player_2_surface_last_10_win_rate",
+        "player_1_matches_last_14_days",
+        "player_2_matches_last_14_days",
+        "player_1_days_since_last_match",
+        "player_2_days_since_last_match",
+        "h2h_player_1_wins",
+        "h2h_player_2_wins",
+        "h2h_surface_player_1_wins",
+        "h2h_surface_player_2_wins",
+        "player_1_age",
+        "player_2_age",
+        "age_diff",
+        "player_1_height",
+        "player_2_height",
+        "height_diff",
+        "player_1_hand",
+        "player_2_hand",
+        "atp_surface",
+        "atp_tourney_level",
+        "atp_round",
+        "atp_best_of",
+        "atp_match_found",
+        "avg_player_1_odds",
+        "avg_player_2_odds",
+        "avg_market_prob_player_1",
+        "avg_market_prob_player_2",
+        "avg_bookmaker_margin",
+        "odds_bookmaker_count"
+      ],
+      "rank_features_note": "Uses v2 historical ATP rank/Elo/form/H2H features plus pre-match match-winner odds aggregates. Trains and predicts only when odds are available.",
+      "models": {
+        "logistic_regression": {
+          "accuracy": 0.710757,
+          "precision": 0.716328,
+          "recall": 0.725374,
+          "f1": 0.720822,
+          "roc_auc": 0.789258,
+          "log_loss": 0.550111,
+          "confusion_matrix": [
+            [
+              6746,
+              2957
+            ],
+            [
+              2827,
+              7467
+            ]
+          ],
+          "class_distribution_train": {
+            "1": 41016,
+            "0": 38969
+          },
+          "class_distribution_test": {
+            "1": 10294,
+            "0": 9703
+          },
+          "value_bet_overall": {
+            "edge_threshold": 0.03,
+            "bets_count": 3318,
+            "hit_rate": 0.831826,
+            "total_profit": -78.645831,
+            "roi": -0.023703,
+            "yield": -0.023703,
+            "odds_coverage_rows": 19997,
+            "odds_coverage_pct": 100.0
+          },
+          "value_bet_with_odds": {
+            "edge_threshold": 0.03,
+            "bets_count": 3318,
+            "hit_rate": 0.831826,
+            "total_profit": -78.645831,
+            "roi": -0.023703,
+            "yield": -0.023703,
+            "odds_coverage_rows": 19997,
+            "odds_coverage_pct": 100.0
+          }
+        },
+        "random_forest": {
+          "accuracy": 0.711307,
+          "precision": 0.715142,
+          "recall": 0.72994,
+          "f1": 0.722465,
+          "roc_auc": 0.788731,
+          "log_loss": 0.55131,
+          "confusion_matrix": [
+            [
+              6710,
+              2993
+            ],
+            [
+              2780,
+              7514
+            ]
+          ],
+          "class_distribution_train": {
+            "1": 41016,
+            "0": 38969
+          },
+          "class_distribution_test": {
+            "1": 10294,
+            "0": 9703
+          },
+          "value_bet_overall": {
+            "edge_threshold": 0.03,
+            "bets_count": 4168,
+            "hit_rate": 0.743762,
+            "total_profit": -227.403799,
+            "roi": -0.054559,
+            "yield": -0.054559,
+            "odds_coverage_rows": 19997,
+            "odds_coverage_pct": 100.0
+          },
+          "value_bet_with_odds": {
+            "edge_threshold": 0.03,
+            "bets_count": 4168,
+            "hit_rate": 0.743762,
+            "total_profit": -227.403799,
+            "roi": -0.054559,
+            "yield": -0.054559,
+            "odds_coverage_rows": 19997,
+            "odds_coverage_pct": 100.0
+          }
+        }
+      },
+      "market_benchmark": {
+        "market_accuracy": 0.711857,
+        "market_log_loss": 0.552517,
+        "market_roc_auc": 0.78994,
+        "market_profit_if_bet_player_1_all": -2190.771184,
+        "market_roi_if_bet_player_1_all": -0.109555,
+        "odds_coverage_rows": 19997,
+        "odds_coverage_pct": 100.0
       }
     }
   }

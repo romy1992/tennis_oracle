@@ -20,8 +20,10 @@ def request_api(method: str, params: dict = None):
         response_json = response.json().get("result")
         if isinstance(response_json, list) and response_json and response_json[0].get("cod"):
             logging.error(f"Error in API request: {response_json}")
-            response.raise_for_status()
-            return None
+            error = response_json[0]
+            raise RuntimeError(
+                f"API Tennis error {error.get('cod')}: {error.get('msg')}"
+            )
         return response_json
     else:
         logging.error(f"Error in API request: {response.status_code} - {response.text}")
