@@ -173,6 +173,81 @@ export type PredictionQueryParams = {
   player?: string;
 };
 
+export type SingleMatchValueDecision = "PLAY" | "NO BET" | "BORDERLINE";
+
+export type SingleMatchValueItem = {
+  match_id: number;
+  event_date: string | null;
+  event_time: string | null;
+  tournament_name: string | null;
+  competition: string | null;
+  player_a: string | null;
+  player_b: string | null;
+  market: string;
+  selection: string;
+  selection_code: string;
+  model_probability: number;
+  market_odds: number;
+  void_odds: number;
+  edge_absolute: number;
+  edge_percent: number;
+  expected_roi: number;
+  stake: number;
+  decision: SingleMatchValueDecision;
+  value_label: string;
+  edge_label: string;
+  explanation: string;
+  bookmaker_count: number | null;
+  actual_winner: string | null;
+  is_correct: boolean | null;
+  profit_loss: number | null;
+};
+
+export type SingleMatchValueSimulationBucket = {
+  bets_count: number;
+  resolved_count: number;
+  profit_loss_units: number;
+  roi_pct: number | null;
+  hit_rate_pct: number | null;
+  avg_market_odds: number | null;
+  avg_void_odds: number | null;
+};
+
+export type SingleMatchValueSimulation = {
+  stake: number;
+  play_bets: SingleMatchValueSimulationBucket;
+  above_void: SingleMatchValueSimulationBucket;
+  below_void: SingleMatchValueSimulationBucket;
+  borderline_count: number;
+};
+
+export type SingleMatchValueSummary = {
+  total: number;
+  play_count: number;
+  no_bet_count: number;
+  borderline_count: number;
+  avg_market_odds: number | null;
+  avg_void_odds: number | null;
+  avg_expected_roi: number | null;
+};
+
+export type SingleMatchValueResponse = {
+  model_version: MLModelVersion;
+  model_name: string | null;
+  min_edge_percent: number;
+  items: SingleMatchValueItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  summary: SingleMatchValueSummary;
+  simulation: SingleMatchValueSimulation;
+  warnings: string[];
+};
+
+export type SingleMatchValueQueryParams = PredictionQueryParams & {
+  min_edge_percent?: number;
+};
+
 export type DailyStatsParams = {
   model_version?: MLModelVersion;
   model_name?: string;

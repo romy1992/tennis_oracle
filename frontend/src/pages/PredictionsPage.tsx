@@ -3,7 +3,14 @@ import { useCallback, useEffect, useState } from "react";
 import { ModelControls } from "../components/ModelControls";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
-import type { ImportStatusResponse, MLModelName, MLModelVersion, NextFixtureWithPrediction } from "../types/api";
+import type {
+  ImportStatusResponse,
+  MLModelName,
+  MLModelVersion,
+  NextFixtureWithPrediction,
+  SingleMatchValueDecision,
+  SingleMatchValueResponse
+} from "../types/api";
 import { readStoredModelName, readStoredModelVersion } from "../utils/modelVersion";
 import { formatDate } from "../utils/tennis";
 
@@ -42,6 +49,18 @@ function formatOdds(value: number | null | undefined) {
   });
 }
 
+function formatSignedPercent(value: number | null | undefined) {
+  if (value === null || value === undefined) return "-";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${(value * 100).toLocaleString("it-IT", { maximumFractionDigits: 2 })}%`;
+}
+
+function formatSignedPercentValue(value: number | null | undefined) {
+  if (value === null || value === undefined) return "-";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toLocaleString("it-IT", { maximumFractionDigits: 2 })}%`;
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -71,6 +90,10 @@ function resultDot(fixture: NextFixtureWithPrediction, show: boolean) {
     return null;
   }
   return fixture.prediction.is_correct ? "win" : "loss";
+}
+
+function decisionClass(decision: SingleMatchValueDecision) {
+  return decision.toLowerCase().replace(/\s+/g, "-");
 }
 
 function PaginationControls({
@@ -114,6 +137,7 @@ function PaginationControls({
 export function PredictionsPage() {
   const [fixtures, setFixtures] = useState<NextFixtureWithPrediction[]>([]);
   const [totalFixtures, setTotalFixtures] = useState(0);
+  const [singleValue, setSingleValue] = useState<SingleMatchValueResponse | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatusResponse | null>(null);
   const [statusFilter, setStatusFilter] = useState<FixtureStatusFilter>("upcoming");
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
@@ -126,6 +150,7 @@ export function PredictionsPage() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [playerSearch, setPlayerSearch] = useState("");
   const [playerQuery, setPlayerQuery] = useState("");
+  const [minEdgePercent, setMinEdgePercent] = useState(3);
   const [modelName, setModelName] = useState<MLModelName>(() => readStoredModelName());
   const [error, setError] = useState<string | null>(null);
 
@@ -134,12 +159,12 @@ export function PredictionsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, outcomeFilter, playerQuery, modelVersion, modelName]);
+  }, [statusFilter, outcomeFilter, playerQuery, modelVersion, modelName, minEdgePercent]);
 
   const loadPageData = useCallback(async () => {
     const offset = (page - 1) * PAGE_SIZE;
     const trimmedPlayer = playerQuery.trim();
-    const [fixturesPage, statusData] = await Promise.all([
+    const [fixturesPage, valueData, statusData] = await Promise.all([
       apiClient.getUpcomingPredictions({
         model_version: modelVersion,
         model_name: modelName,
@@ -149,12 +174,23 @@ export function PredictionsPage() {
         offset,
         player: trimmedPlayer || undefined
       }),
+      apiClient.getSingleMatchValueAnalysis({
+        model_version: modelVersion,
+        model_name: modelName,
+        status: statusFilter,
+        outcome: statusFilter === "played" ? outcomeFilter : undefined,
+        limit: PAGE_SIZE,
+        offset,
+        player: trimmedPlayer || undefined,
+        min_edge_percent: minEdgePercent
+      }),
       apiClient.getImportStatus()
     ]);
     setFixtures(fixturesPage.items);
     setTotalFixtures(fixturesPage.total);
+    setSingleValue(valueData);
     setImportStatus(statusData);
-  }, [statusFilter, outcomeFilter, page, playerQuery, modelVersion, modelName]);
+  }, [statusFilter, outcomeFilter, page, playerQuery, modelVersion, modelName, minEdgePercent]);
 
   useEffect(() => {
     async function load() {
@@ -335,6 +371,140 @@ export function PredictionsPage() {
 
         {actionMessage ? <p className="note action-note">{actionMessage}</p> : null}
         {error ? <p className="note action-error">{error}</p> : null}
+      </article>
+
+      <article className="panel single-value-panel">
+        <div className="section-header">
+          <div>
+            <h3>Single Match Value Analysis</h3>
+            <p>
+              Analisi da investitore sulla singola partita: una giocata non basta che sia
+              probabile, deve superare la quota void.
+            </p>
+          </div>
+          <label className="min-edge-field">
+            <span>Margine sicurezza</span>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.5"
+              value={minEdgePercent}
+              onChange={(event) => setMinEdgePercent(Number(event.target.value))}
+              disabled={refreshing || importingFixtures}
+            />
+            <small>% sopra quota void</small>
+          </label>
+        </div>
+
+        {singleValue ? (
+          <>
+            <div className="single-value-summary">
+              <div>
+                <span>PLAY</span>
+                <strong>{singleValue.summary.play_count}</strong>
+                <small>Valore reale intercettato</small>
+              </div>
+              <div>
+                <span>BORDERLINE</span>
+                <strong>{singleValue.summary.borderline_count}</strong>
+                <small>Quota in area void</small>
+              </div>
+              <div>
+                <span>NO BET</span>
+                <strong>{singleValue.summary.no_bet_count}</strong>
+                <small>Quota sotto valore</small>
+              </div>
+              <div>
+                <span>ROI medio atteso</span>
+                <strong>{formatSignedPercent(singleValue.summary.avg_expected_roi)}</strong>
+                <small>Stake simulato 1 unita</small>
+              </div>
+            </div>
+
+            {singleValue.simulation.play_bets.resolved_count > 0 ? (
+              <p className="note">
+                Simulazione storica PLAY: {singleValue.simulation.play_bets.resolved_count} giocate
+                risolte, ROI {formatSignedPercentValue(singleValue.simulation.play_bets.roi_pct)},
+                hit rate {formatSignedPercentValue(singleValue.simulation.play_bets.hit_rate_pct)},
+                P/L {singleValue.simulation.play_bets.profit_loss_units.toLocaleString("it-IT", {
+                  maximumFractionDigits: 2
+                })}{" "}
+                unita.
+              </p>
+            ) : (
+              <p className="note">
+                La simulazione storica si popola quando ci sono partite risolte classificate PLAY.
+              </p>
+            )}
+
+            {singleValue.items.length === 0 ? (
+              <EmptyState
+                title="Nessuna singola analizzabile"
+                message="Servono prediction AI e quote bookmaker disponibili per calcolare quota void e valore."
+              />
+            ) : (
+              <div className="single-value-list">
+                {singleValue.items.map((item) => (
+                  <section key={item.match_id} className="single-value-card">
+                    <div className="single-value-card-header">
+                      <div>
+                        <span className="single-value-market">{item.market}</span>
+                        <h4>
+                          {item.player_a ?? "?"} vs {item.player_b ?? "?"}
+                        </h4>
+                        <p>
+                          {item.tournament_name ?? "Torneo non disponibile"} · Selezione:{" "}
+                          <strong>{item.selection}</strong>
+                        </p>
+                      </div>
+                      <span className={`value-decision-badge ${decisionClass(item.decision)}`}>
+                        {item.decision}
+                      </span>
+                    </div>
+
+                    <div className="single-value-metrics">
+                      <div>
+                        <span>Probabilita AI</span>
+                        <strong>{formatProb(item.model_probability)}</strong>
+                      </div>
+                      <div>
+                        <span>Quota mercato</span>
+                        <strong>{formatOdds(item.market_odds)}</strong>
+                      </div>
+                      <div>
+                        <span>Quota void</span>
+                        <strong>{formatOdds(item.void_odds)}</strong>
+                      </div>
+                      <div>
+                        <span>Margine</span>
+                        <strong className={item.edge_percent >= 0 ? "positive-value" : "negative-value"}>
+                          {formatSignedPercentValue(item.edge_percent)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>ROI atteso</span>
+                        <strong className={item.expected_roi >= 0 ? "positive-value" : "negative-value"}>
+                          {formatSignedPercent(item.expected_roi)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Stake simulato</span>
+                        <strong>{item.stake.toLocaleString("it-IT")} unita</strong>
+                      </div>
+                    </div>
+
+                    <p className="single-value-explanation">
+                      <strong>{item.value_label}.</strong> {item.explanation}
+                    </p>
+                  </section>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <LoadingState title="Caricamento analisi valore..." />
+        )}
       </article>
 
       <article className="panel">

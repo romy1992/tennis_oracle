@@ -16,7 +16,9 @@ import type {
   NextFixtureWithPrediction,
   PredictionQueryParams,
   PredictionSummaryResponse,
-  RefreshMatchesResponse
+  RefreshMatchesResponse,
+  SingleMatchValueQueryParams,
+  SingleMatchValueResponse
 } from "../types/api";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -95,6 +97,10 @@ export const apiClient = {
   getPredictionSummary: (params: { model_version?: MLModelVersion; model_name?: string } = {}) =>
     request<PredictionSummaryResponse>(
       withQuery("/api/predictions/stats/summary", params)
+    ),
+  getSingleMatchValueAnalysis: (params: SingleMatchValueQueryParams = {}) =>
+    request<SingleMatchValueResponse>(
+      withQuery("/api/single-match-value", params)
     ),
   getImportStatus: () => request<ImportStatusResponse>("/api/imports/status"),
   refreshMatches: (params: {
