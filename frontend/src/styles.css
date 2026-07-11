@@ -680,6 +680,127 @@ input {
   margin: 0;
 }
 
+.min-edge-field {
+  min-width: 160px;
+}
+
+.min-edge-field input {
+  max-width: 120px;
+}
+
+.min-edge-field small {
+  color: #65738a;
+}
+
+.single-value-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.single-value-summary {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.single-value-summary div,
+.single-value-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+}
+
+.single-value-summary div {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+}
+
+.single-value-summary span,
+.single-value-summary small,
+.single-value-metrics span,
+.single-value-market {
+  color: #65738a;
+}
+
+.single-value-summary span,
+.single-value-metrics span,
+.single-value-market {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.single-value-summary strong {
+  font-size: 24px;
+}
+
+.single-value-list {
+  display: grid;
+  gap: 14px;
+}
+
+.single-value-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.single-value-card-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.single-value-card h4 {
+  font-size: 20px;
+  margin: 4px 0;
+}
+
+.single-value-card p {
+  margin: 0;
+}
+
+.single-value-metrics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.single-value-metrics div {
+  display: grid;
+  gap: 4px;
+}
+
+.value-decision-badge {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 7px 11px;
+  white-space: nowrap;
+}
+
+.value-decision-badge.play {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.value-decision-badge.borderline {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.value-decision-badge.no-bet {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.single-value-explanation {
+  color: #475569;
+}
+
 .table-total-row {
   font-weight: 700;
 }
@@ -805,7 +926,9 @@ th {
   .metrics-grid,
   .filters-grid,
   .two-columns,
-  .import-status-grid {
+  .import-status-grid,
+  .single-value-summary,
+  .single-value-metrics {
     grid-template-columns: 1fr;
   }
 
