@@ -25,6 +25,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 COMPLETED_WINNERS = {"First Player", "Second Player"}
+# api-tennis.com rejects get_fixtures windows wider than 7 days
+# (returns result="Maximum date range for odds is 7 days.").
+API_FIXTURES_MAX_RANGE_DAYS = 7
 FIXTURE_FIELDS = {column.name for column in Fixture.__table__.columns}
 NEXT_FIXTURE_API_FIELDS = {
     "event_key",
@@ -64,13 +67,57 @@ def iso_week_bounds(event_date: date) -> tuple[date, date]:
     return week_start, week_end
 
 
-def is_singles_match(payload: dict[str, Any]) -> bool:
+def is_singles_match(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
     event_type = (payload.get("event_type_type") or "").lower()
     return (
         "singles" in event_type
         and "doubles" not in event_type
         and "teams" not in event_type
     )
+
+
+def _normalize_fixtures_response(raw: Any, context: str) -> list[dict[str, Any]]:
+    """Best-effort normalization for upstream API shape drift."""
+    if raw is None:
+        return []
+
+    if isinstance(raw, str):
+        raise RuntimeError(f"API Tennis error for {context}: {raw}")
+
+    if isinstance(raw, dict):
+        nested = raw.get("result") or raw.get("results") or raw.get("data") or []
+        if isinstance(nested, str):
+            raise RuntimeError(f"API Tennis error for {context}: {nested}")
+        raw = nested
+
+    if not isinstance(raw, list):
+        logger.warning("Unexpected fixtures response type for %s: %s", context, type(raw).__name__)
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    skipped = 0
+    for item in raw:
+        if isinstance(item, dict):
+            normalized.append(item)
+        else:
+            skipped += 1
+
+    if skipped:
+        logger.warning("Skipped %s non-dict fixture payload(s) for %s", skipped, context)
+    return normalized
+
+
+def iter_date_chunks(start: date, end: date, max_span_days: int = API_FIXTURES_MAX_RANGE_DAYS):
+    """Yield inclusive (chunk_start, chunk_end) spans of at most max_span_days."""
+    if end < start:
+        return
+    current = start
+    while current <= end:
+        chunk_end = min(current + timedelta(days=max_span_days), end)
+        yield current, chunk_end
+        current = chunk_end + timedelta(days=1)
 
 
 def is_match_completed(payload: dict[str, Any]) -> bool:
@@ -208,6 +255,29 @@ def fetch_odds_for_match(event_key: int) -> dict | None:
         return None
 
 
+def _ingest_upcoming_payloads(
+    payloads: list[dict[str, Any]],
+    summary: dict[str, int],
+    *,
+    import_odds: bool,
+) -> None:
+    for payload in payloads:
+        if not is_singles_match(payload):
+            summary["skipped_non_singles"] += 1
+            continue
+
+        if is_match_completed(payload):
+            promoted = promote_completed_match(payload)
+            summary["promoted_inserted"] += promoted["fixtures_inserted"]
+            summary["promoted_updated"] += promoted["fixtures_updated"]
+            summary["predictions_resolved"] += promoted["predictions_resolved"]
+            continue
+
+        odds = fetch_odds_for_match(payload["event_key"]) if import_odds else None
+        action = upsert_next_fixture(payload, odds=odds)
+        summary[action] += 1
+
+
 def import_next_fixtures(
     days_forward: int = 10,
     days_back: int = 3,
@@ -218,10 +288,13 @@ def import_next_fixtures(
 
     Window: [today, today + days_forward] for upcoming; [today - days_back, today]
     for completion refresh.
+
+    Upcoming fetches are chunked to respect the API max range (7 days).
+    Cleanup runs only after a successful upcoming fetch so a failed API call
+    cannot wipe an existing calendar.
     """
     today = today_local()
-    date_start = today.strftime("%Y-%m-%d")
-    date_stop = (today + timedelta(days=days_forward)).strftime("%Y-%m-%d")
+    window_end = today + timedelta(days=days_forward)
 
     summary = {
         "inserted": 0,
@@ -232,67 +305,81 @@ def import_next_fixtures(
         "promoted_updated": 0,
         "predictions_resolved": 0,
         "skipped_non_singles": 0,
+        "api_chunks": 0,
     }
 
     logger.info(
         "Import next fixtures: date_start=%s date_stop=%s (local timezone)",
-        date_start,
-        date_stop,
+        today.isoformat(),
+        window_end.isoformat(),
     )
 
+    upcoming_ok = False
     try:
-        response = request_api(
-            method="get_fixtures",
-            params={"date_start": date_start, "date_stop": date_stop},
-        )
+        for chunk_start, chunk_end in iter_date_chunks(today, window_end):
+            summary["api_chunks"] += 1
+            response = request_api(
+                method="get_fixtures",
+                params={
+                    "date_start": chunk_start.strftime("%Y-%m-%d"),
+                    "date_stop": chunk_end.strftime("%Y-%m-%d"),
+                },
+            )
+            response_items = _normalize_fixtures_response(
+                response,
+                context=f"upcoming_window[{chunk_start}..{chunk_end}]",
+            )
+            if not response_items:
+                logger.info(
+                    "No fixtures returned for upcoming chunk %s -> %s",
+                    chunk_start,
+                    chunk_end,
+                )
+            else:
+                _ingest_upcoming_payloads(
+                    response_items,
+                    summary,
+                    import_odds=import_odds,
+                )
+        upcoming_ok = True
     except Exception as exc:
         logger.error("get_fixtures failed: %s", exc)
         raise
 
-    if not response:
-        logger.info("No fixtures returned for upcoming window.")
-    else:
-        for payload in response:
-            if not is_singles_match(payload):
-                summary["skipped_non_singles"] += 1
-                continue
-
-            if is_match_completed(payload):
+    refresh_start = today - timedelta(days=days_back)
+    logger.info("Refresh recent matches: %s -> %s", refresh_start, today)
+    try:
+        for chunk_start, chunk_end in iter_date_chunks(refresh_start, today):
+            recent = request_api(
+                method="get_fixtures",
+                params={
+                    "date_start": chunk_start.strftime("%Y-%m-%d"),
+                    "date_stop": chunk_end.strftime("%Y-%m-%d"),
+                },
+            )
+            recent_items = _normalize_fixtures_response(
+                recent,
+                context=f"recent_window[{chunk_start}..{chunk_end}]",
+            )
+            for payload in recent_items:
+                if not is_singles_match(payload) or not is_match_completed(payload):
+                    continue
                 promoted = promote_completed_match(payload)
                 summary["promoted_inserted"] += promoted["fixtures_inserted"]
                 summary["promoted_updated"] += promoted["fixtures_updated"]
                 summary["predictions_resolved"] += promoted["predictions_resolved"]
-                continue
-
-            odds = fetch_odds_for_match(payload["event_key"]) if import_odds else None
-            action = upsert_next_fixture(payload, odds=odds)
-            summary[action] += 1
-
-    refresh_start = (today - timedelta(days=days_back)).strftime("%Y-%m-%d")
-    refresh_stop = today.strftime("%Y-%m-%d")
-    logger.info("Refresh recent matches: %s -> %s", refresh_start, refresh_stop)
-    try:
-        recent = request_api(
-            method="get_fixtures",
-            params={"date_start": refresh_start, "date_stop": refresh_stop},
-        )
     except Exception as exc:
         logger.warning("Recent fixtures refresh failed: %s", exc)
-        recent = []
 
-    for payload in recent or []:
-        if not is_singles_match(payload) or not is_match_completed(payload):
-            continue
-        promoted = promote_completed_match(payload)
-        summary["promoted_inserted"] += promoted["fixtures_inserted"]
-        summary["promoted_updated"] += promoted["fixtures_updated"]
-        summary["predictions_resolved"] += promoted["predictions_resolved"]
+    if upcoming_ok:
+        summary["removed_outside_window"] = next_fixtures_repo.delete_outside_date_range(
+            from_date=today,
+            to_date=window_end,
+        )
+        summary["removed_completed"] = next_fixtures_repo.delete_completed()
+    else:
+        logger.warning("Skipping next_fixture cleanup because upcoming fetch did not complete.")
 
-    summary["removed_outside_window"] = next_fixtures_repo.delete_outside_date_range(
-        from_date=today,
-        to_date=today + timedelta(days=days_forward),
-    )
-    summary["removed_completed"] = next_fixtures_repo.delete_completed()
     logger.info("Import next fixtures summary: %s", summary)
     return summary
 

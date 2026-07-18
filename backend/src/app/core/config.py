@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     debug: bool = False
     database_url: str = "postgresql://postgres:postgres@localhost:5432/tennis_db"
     api_prefix: str = "/api"
+    global_update_cron_enabled: bool = False
+    global_update_cron_time: str = "02:00"
+    global_update_cron_timezone: str = "Europe/Rome"
+    global_update_allow_concurrent_runs: bool = False
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://localhost:5174",

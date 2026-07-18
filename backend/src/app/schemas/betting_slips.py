@@ -22,6 +22,12 @@ class BettingSlipPickRead(BaseModel):
     market_prob: float | None = None
     edge: float | None = None
     odds: float | None = None
+    void_odds: float | None = None
+    edge_absolute: float | None = None
+    edge_percent: float | None = None
+    expected_roi: float | None = None
+    value_decision: str | None = None
+    value_label: str | None = None
     confidence: float | None = None
     pick_score: float | None = None
     pick_status: PickStatus = "pending"

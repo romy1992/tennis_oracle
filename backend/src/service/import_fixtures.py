@@ -121,7 +121,26 @@ def import_fixtures_by_params(params):
     try:
         # Chiamata esterna al servizio API per scaricare le partite del torneo
         response = request_api(method="get_fixtures", params=params)
+        if not isinstance(response, list):
+            logging.warning(
+                "Unexpected get_fixtures payload type for params=%s: %s",
+                params,
+                type(response).__name__,
+            )
+            return
         if response and len(response) > 0:
+            # Historical fixture table should not absorb unfinished/future rows.
+            today = datetime.now().date()
+            response = [
+                fixture
+                for fixture in response
+                if isinstance(fixture, dict)
+                and fixture.get("event_date")
+                and (
+                    datetime.strptime(str(fixture["event_date"]), "%Y-%m-%d").date()
+                    <= today
+                )
+            ]
             event_keys = [fixture.get("event_key") for fixture in response if fixture.get("event_key") is not None]
             existing_rows = fixtures_repo.search_filter({"event_key": event_keys}) if event_keys else []
             existing_by_key = {fixture.event_key: fixture for fixture in existing_rows}

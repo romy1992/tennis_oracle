@@ -60,6 +60,34 @@ a {
   color: #ffffff;
 }
 
+.global-update-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.global-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.global-update-actions .action-button {
+  flex: 1 1 auto;
+}
+
+.global-update-meta {
+  display: grid;
+  gap: 6px;
+}
+
+.global-update-meta small {
+  color: #b7c0d1;
+}
+
+.global-update-meta .action-error {
+  color: #fecaca;
+}
+
 .nav-section-label {
   color: #8d99ad;
   font-size: 12px;
@@ -490,7 +518,7 @@ input {
 }
 
 .slip-picks-table {
-  min-width: 720px;
+  min-width: 1040px;
 }
 
 .slip-picks-table th,
@@ -528,10 +556,29 @@ input {
 }
 
 .slip-col-odds,
-.slip-col-confidence {
+.slip-col-confidence,
+.slip-col-value {
   text-align: right;
   white-space: nowrap;
   width: 72px;
+}
+
+.slip-col-value-state {
+  min-width: 130px;
+}
+
+.slip-col-value-state small {
+  color: #65738a;
+  display: block;
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
+.page-header-actions {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .slip-card-footer {

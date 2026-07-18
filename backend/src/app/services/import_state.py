@@ -46,14 +46,17 @@ def get_fixture_import_state() -> dict:
 
 
 def get_import_status(db: Session) -> dict:
+    today = date.today()
     next_last_imported_at = db.scalar(select(func.max(NextFixture.imported_at)))
     next_fixtures_max_date = db.scalar(
         select(func.max(NextFixture.event_date)).where(NextFixture.is_completed.is_(False))
     )
-    fixtures_last_match_date = db.scalar(select(func.max(Fixture.event_date)))
+    # Cap to today so future contamination in fixture never drives the status panel.
+    fixtures_last_match_date = db.scalar(
+        select(func.max(Fixture.event_date)).where(Fixture.event_date <= today)
+    )
     fixture_state = get_fixture_import_state()
 
-    today = date.today()
     next_imported_today = (
         next_last_imported_at.date() == today if next_last_imported_at is not None else False
     )
@@ -69,8 +72,13 @@ def get_import_status(db: Session) -> dict:
     fixtures_last_imported_match_date = (
         date.fromisoformat(fixtures_last_imported_match_date_raw)
         if fixtures_last_imported_match_date_raw
-        else fixtures_last_match_date
+        else None
     )
+    if fixtures_last_imported_match_date is not None and fixtures_last_imported_match_date > today:
+        # Stale JSON from an unbounded max(event_date); prefer live DB.
+        fixtures_last_imported_match_date = fixtures_last_match_date
+    elif fixtures_last_imported_match_date is None:
+        fixtures_last_imported_match_date = fixtures_last_match_date
 
     return {
         "next_fixtures_last_imported_at": next_last_imported_at,

@@ -3,7 +3,7 @@ from datetime import date, datetime, time, timedelta
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -131,7 +131,7 @@ class BettingSlipsServiceTest(unittest.TestCase):
             )
         session.commit()
 
-    def test_build_candidate_pool_includes_missing_odds(self):
+    def test_build_candidate_pool_excludes_missing_odds(self):
         with self.Session() as session:
             self._seed_candidates(session, count=1)
             session.add(
@@ -161,10 +161,10 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 model_version="v2",
                 model_name="random_forest",
             )
-            self.assertEqual(len(candidates), 2)
-            by_key = {candidate.event_key: candidate for candidate in candidates}
-            self.assertEqual(by_key[999].odds, None)
-            self.assertEqual(by_key[100].odds, 1.525)
+            self.assertEqual(len(candidates), 1)
+            self.assertEqual(candidates[0].event_key, 100)
+            self.assertEqual(candidates[0].value_decision, "PLAY")
+            self.assertIsNotNone(candidates[0].void_odds)
 
     def test_v3_candidate_pool_excludes_missing_odds(self):
         with self.Session() as session:
@@ -210,7 +210,7 @@ class BettingSlipsServiceTest(unittest.TestCase):
             self.assertEqual([candidate.event_key for candidate in candidates], [100])
             self.assertIsNotNone(candidates[0].odds)
 
-    def test_build_candidate_pool_includes_heavy_favorite(self):
+    def test_build_candidate_pool_excludes_heavy_favorite_below_void(self):
         heavy_favorite_odds = {
             "100": {
                 "Home/Away": {
@@ -251,8 +251,7 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 model_version="v2",
                 model_name="random_forest",
             )
-            self.assertEqual(len(candidates), 1)
-            self.assertLess(candidates[0].odds, 1.30)
+            self.assertEqual(len(candidates), 0)
 
     def test_generate_slips_avoids_duplicate_event_keys(self):
         with self.Session() as session:
@@ -292,6 +291,70 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 for slip in second.slips
             ]
             self.assertEqual(first_keys, second_keys)
+
+    def test_persisted_slips_include_value_fields(self):
+        with self.Session() as session:
+            self._seed_candidates(session, count=6)
+            daily = get_daily_betting_slips(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+            )
+            self.assertGreater(len(daily.slips), 0)
+            first_pick = daily.slips[0].picks[0]
+            self.assertIsNotNone(first_pick.void_odds)
+            self.assertEqual(first_pick.value_decision, "PLAY")
+            self.assertIsNotNone(first_pick.edge_percent)
+
+    def test_regenerate_preserves_past_slips_when_pool_empty(self):
+        past_date = self.today - timedelta(days=2)
+        with self.Session() as session:
+            self._seed_stats_slip(
+                session,
+                event_key=700,
+                slip_date=past_date,
+                model_version="v2",
+                model_name="random_forest",
+                actual_winner=None,
+            )
+            daily = get_daily_betting_slips(
+                session,
+                slip_date=past_date,
+                model_version="v2",
+                model_name="random_forest",
+                regenerate=True,
+            )
+            self.assertEqual(len(daily.slips), 1)
+            self.assertTrue(
+                any("storiche mantenute" in warning.lower() for warning in daily.warnings)
+            )
+
+    def test_regenerate_replaces_existing_slips_with_picks(self):
+        with self.Session() as session:
+            self._seed_candidates(session, count=6)
+            first = get_daily_betting_slips(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+            )
+            self.assertGreater(len(first.slips), 0)
+            pick_count = session.scalar(select(func.count()).select_from(BettingSlipPick))
+            self.assertGreater(int(pick_count or 0), 0)
+
+            second = get_daily_betting_slips(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                regenerate=True,
+            )
+            self.assertGreater(len(second.slips), 0)
+            self.assertEqual(
+                int(session.scalar(select(func.count()).select_from(BettingSlipPick)) or 0),
+                sum(len(slip.picks) for slip in second.slips),
+            )
 
     def test_pick_and_slip_status_resolution(self):
         pick = BettingSlipPick(

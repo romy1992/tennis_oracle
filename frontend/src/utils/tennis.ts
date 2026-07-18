@@ -2,7 +2,21 @@ import type { Player, TennisMatch, Tournament } from "../types/api";
 
 export function formatDate(value: string | null) {
   if (!value) return "-";
-  return new Intl.DateTimeFormat("it-IT").format(new Date(value));
+  // Bare YYYY-MM-DD is a calendar date: parse at local noon to avoid UTC
+  // midnight shifting the displayed day in European timezones.
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T12:00:00`)
+    : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return new Intl.DateTimeFormat("it-IT").format(parsed);
+}
+
+/** Local calendar date as YYYY-MM-DD (not UTC from toISOString). */
+export function todayLocalISODate(now: Date = new Date()) {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function formatScore(match: TennisMatch) {

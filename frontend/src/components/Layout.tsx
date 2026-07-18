@@ -1,5 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 
+import { GlobalUpdateControls } from "./GlobalUpdateControls";
+
 const navItems = [
   { to: "/predictions", label: "Partite" },
   { to: "/betting-slips", label: "Consiglio schedina" },
@@ -15,6 +17,7 @@ export function Layout() {
           <h1>tennis_oracle</h1>
           <p>Previsioni e risultati tennis aggiornati ogni giorno.</p>
         </div>
+        <GlobalUpdateControls />
         <nav>
           {navItems.map((item) => (
             <NavLink

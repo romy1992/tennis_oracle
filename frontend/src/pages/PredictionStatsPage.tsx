@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 
 import { MetricCard } from "../components/MetricCard";
-import { ModelControls } from "../components/ModelControls";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
 import type {
   DailyPredictionStatsResponse,
-  MLModelName,
   MLModelVersion,
+  ModelsVersionsResultsResponse,
   PredictionSummaryResponse
 } from "../types/api";
-import { readStoredModelName, readStoredModelVersion } from "../utils/modelVersion";
+import {
+  DEFAULT_MODEL_VERSION,
+  resolvePreferredModelVersion,
+  writeStoredModelVersion
+} from "../utils/modelVersion";
 import { formatDate } from "../utils/tennis";
 
 function formatPct(value: number | null | undefined) {
@@ -35,12 +38,23 @@ function formatUnits(value: number | null | undefined) {
 }
 
 export function PredictionStatsPage() {
-  const [selectedVersion, setSelectedVersion] = useState<MLModelVersion>(() => readStoredModelVersion());
-  const [selectedModelName, setSelectedModelName] = useState<MLModelName>(() => readStoredModelName());
+  const [availableVersions, setAvailableVersions] = useState<ModelsVersionsResultsResponse["versions"]>([]);
+  const [activeVersion, setActiveVersion] = useState<MLModelVersion>(DEFAULT_MODEL_VERSION);
   const [dailyStats, setDailyStats] = useState<DailyPredictionStatsResponse | null>(null);
   const [summary, setSummary] = useState<PredictionSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadCatalog() {
+      const catalog = await apiClient.getModelsVersionsResults();
+      setAvailableVersions(catalog.versions);
+      if (catalog.versions.length > 0) {
+        setActiveVersion(resolvePreferredModelVersion(catalog.versions));
+      }
+    }
+    void loadCatalog();
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -48,13 +62,11 @@ export function PredictionStatsPage() {
         setLoading(true);
         const [statsData, summaryData] = await Promise.all([
           apiClient.getDailyPredictionStats({
-            model_version: selectedVersion,
-            model_name: selectedModelName,
+            model_version: activeVersion,
             from_day: 0
           }),
           apiClient.getPredictionSummary({
-            model_version: selectedVersion,
-            model_name: selectedModelName
+            model_version: activeVersion
           })
         ]);
         setDailyStats(statsData);
@@ -67,7 +79,7 @@ export function PredictionStatsPage() {
       }
     }
     void load();
-  }, [selectedVersion, selectedModelName]);
+  }, [activeVersion]);
 
   if (loading) {
     return <LoadingState title="Caricamento statistiche..." />;
@@ -91,12 +103,24 @@ export function PredictionStatsPage() {
           </p>
         </div>
         <div className="header-actions">
-          <ModelControls
-            modelVersion={selectedVersion}
-            modelName={selectedModelName}
-            onModelVersionChange={setSelectedVersion}
-            onModelNameChange={setSelectedModelName}
-          />
+          {availableVersions.length ? (
+            <div className="tab-list">
+              {availableVersions.map((entry) => (
+                <button
+                  key={entry.version}
+                  type="button"
+                  className={activeVersion === entry.version ? "active" : undefined}
+                  onClick={() => {
+                    const next = entry.version as MLModelVersion;
+                    writeStoredModelVersion(next);
+                    setActiveVersion(next);
+                  }}
+                >
+                  {entry.version}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -171,9 +195,7 @@ export function PredictionStatsPage() {
       <article className="panel">
         <div className="panel-header">
           <h3>Breakdown modello</h3>
-          <span className="pill">
-            {selectedVersion} · {selectedModelName}
-          </span>
+          <span className="pill">{activeVersion} · tutti i modelli</span>
         </div>
 
         {!summary || summary.breakdown.length === 0 ? (

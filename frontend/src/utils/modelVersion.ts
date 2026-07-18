@@ -14,19 +14,42 @@ export const MODEL_NAMES: Array<{ value: MLModelName; label: string }> = [
   { value: "random_forest", label: "Random forest" }
 ];
 
-const FALLBACK_MODEL_VERSION: MLModelVersion = "v3";
+export const DEFAULT_MODEL_VERSION: MLModelVersion = "v3";
 const FALLBACK_MODEL_NAME: MLModelName = "logistic_regression";
+
+function isMLModelVersion(value: string | null | undefined): value is MLModelVersion {
+  return value === "v1" || value === "v2" || value === "v3";
+}
 
 export function readStoredModelVersion(): MLModelVersion {
   const value = window.localStorage.getItem(VERSION_STORAGE_KEY);
-  if (value === "v1" || value === "v2" || value === "v3") {
+  if (isMLModelVersion(value)) {
     return value;
   }
-  return FALLBACK_MODEL_VERSION;
+  return DEFAULT_MODEL_VERSION;
 }
 
 export function writeStoredModelVersion(value: MLModelVersion) {
   window.localStorage.setItem(VERSION_STORAGE_KEY, value);
+}
+
+/** Prefer stored/default (v3) when present in the catalog; otherwise first available. */
+export function resolvePreferredModelVersion(
+  available: Array<{ version: string }>,
+  preferred: MLModelVersion = readStoredModelVersion()
+): MLModelVersion {
+  const versions = available.map((entry) => entry.version);
+  if (versions.includes(preferred) && isMLModelVersion(preferred)) {
+    return preferred;
+  }
+  if (versions.includes(DEFAULT_MODEL_VERSION)) {
+    return DEFAULT_MODEL_VERSION;
+  }
+  const first = versions[0];
+  if (isMLModelVersion(first)) {
+    return first;
+  }
+  return DEFAULT_MODEL_VERSION;
 }
 
 export function readStoredModelName(): MLModelName {

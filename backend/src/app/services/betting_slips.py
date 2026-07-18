@@ -43,6 +43,11 @@ from backend.src.app.schemas.betting_slips import (
     BettingSlipStatsSummary,
 )
 from backend.src.app.services.predictions import COMPLETED_WINNERS, _predictions_by_event_key, _resolve_model_name
+from backend.src.app.services.single_match_value import (
+    calculate_expected_roi,
+    calculate_void_odds,
+    classify_single_bet_value,
+)
 
 PickStatus = Literal["pending", "won", "lost"]
 SlipStatus = Literal["pending", "won", "lost"]
@@ -50,6 +55,7 @@ SlipStatus = Literal["pending", "won", "lost"]
 DEFAULT_STAKE = 10.0
 DEFAULT_SLIP_COUNT = 5
 DEFAULT_PICKS_PER_SLIP = 5
+DEFAULT_MIN_EDGE_PERCENT = 3.0
 
 #region agent log
 def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
@@ -117,6 +123,12 @@ class CandidatePick:
     market_prob: float | None
     edge: float | None
     odds: float | None
+    void_odds: float
+    edge_absolute: float
+    edge_percent: float
+    expected_roi: float
+    value_decision: str
+    value_label: str
     confidence: float
     pick_score: float
 
@@ -234,13 +246,13 @@ def build_candidate_pool(
     slip_date: date,
     model_version: ModelVersion,
     model_name: str,
+    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
 ) -> list[CandidatePick]:
     fixture_filters = [
         NextFixture.is_completed.is_(False),
         NextFixture.event_date == slip_date,
+        NextFixture.odds.is_not(None),
     ]
-    if model_version == "v3":
-        fixture_filters.append(NextFixture.odds.is_not(None))
 
     fixtures = list(
         db.scalars(
@@ -276,13 +288,24 @@ def build_candidate_pool(
             if odds is not None
             else None
         )
-        if model_version == "v3" and (odds is None or winner_odds is None or market_prob is None):
+        if odds is None or winner_odds is None or market_prob is None:
             continue
         confidence = _confidence(prediction.prob_player_1_win)
         if model_prob is None or confidence is None:
             continue
 
         edge = model_prob - market_prob if market_prob is not None else None
+        void_odds = calculate_void_odds(model_prob)
+        edge_absolute = winner_odds - void_odds
+        edge_percent = (edge_absolute / void_odds) * 100.0
+        expected_roi = calculate_expected_roi(winner_odds, model_prob)
+        value_decision = classify_single_bet_value(
+            market_odds=winner_odds,
+            void_odds=void_odds,
+            min_edge_percent=min_edge_percent,
+        )
+        if value_decision != "PLAY":
+            continue
 
         candidates.append(
             CandidatePick(
@@ -303,6 +326,12 @@ def build_candidate_pool(
                 market_prob=market_prob,
                 edge=edge,
                 odds=winner_odds,
+                void_odds=round(void_odds, 4),
+                edge_absolute=round(edge_absolute, 4),
+                edge_percent=round(edge_percent, 2),
+                expected_roi=round(expected_roi, 6),
+                value_decision=value_decision,
+                value_label="Singola con valore",
                 confidence=confidence,
                 pick_score=_pick_score(model_prob, edge, winner_odds),
             )
@@ -455,6 +484,18 @@ def _delete_slips_for_date(
     model_version: ModelVersion,
     model_name: str,
 ) -> None:
+    slip_ids = list(
+        db.scalars(
+            select(BettingSlip.id).where(
+                BettingSlip.slip_date == slip_date,
+                BettingSlip.model_version == model_version,
+                BettingSlip.model_name == model_name,
+            )
+        ).all()
+    )
+    if not slip_ids:
+        return
+    db.execute(delete(BettingSlipPick).where(BettingSlipPick.betting_slip_id.in_(slip_ids)))
     db.execute(
         delete(BettingSlip).where(
             BettingSlip.slip_date == slip_date,
@@ -661,6 +702,12 @@ def _persist_slips(
                     market_prob=pick.market_prob,
                     edge=pick.edge,
                     odds=pick.odds,
+                    void_odds=pick.void_odds,
+                    edge_absolute=pick.edge_absolute,
+                    edge_percent=pick.edge_percent,
+                    expected_roi=pick.expected_roi,
+                    value_decision=pick.value_decision,
+                    value_label=pick.value_label,
                     confidence=pick.confidence,
                     pick_score=pick.pick_score,
                     sort_order=index,
@@ -822,14 +869,66 @@ def _resolve_slip_status(pick_statuses: list[PickStatus]) -> SlipStatus:
     return "pending"
 
 
+def _resolve_pick_value_fields(
+    pick: BettingSlipPick,
+    *,
+    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
+) -> dict[str, float | str | None]:
+    if pick.void_odds is not None:
+        return {
+            "void_odds": pick.void_odds,
+            "edge_absolute": pick.edge_absolute,
+            "edge_percent": pick.edge_percent,
+            "expected_roi": pick.expected_roi,
+            "value_decision": pick.value_decision,
+            "value_label": pick.value_label,
+        }
+    if pick.model_prob is None or pick.odds is None:
+        return {
+            "void_odds": None,
+            "edge_absolute": None,
+            "edge_percent": None,
+            "expected_roi": None,
+            "value_decision": None,
+            "value_label": None,
+        }
+
+    void_odds = calculate_void_odds(pick.model_prob)
+    edge_absolute = pick.odds - void_odds
+    edge_percent = (edge_absolute / void_odds) * 100.0
+    expected_roi = calculate_expected_roi(pick.odds, pick.model_prob)
+    value_decision = classify_single_bet_value(
+        market_odds=pick.odds,
+        void_odds=void_odds,
+        min_edge_percent=min_edge_percent,
+    )
+    value_label = (
+        "Singola con valore"
+        if value_decision == "PLAY"
+        else "Quota in area void"
+        if value_decision == "BORDERLINE"
+        else "Quota sotto valore"
+    )
+    return {
+        "void_odds": round(void_odds, 4),
+        "edge_absolute": round(edge_absolute, 4),
+        "edge_percent": round(edge_percent, 2),
+        "expected_roi": round(expected_roi, 6),
+        "value_decision": value_decision,
+        "value_label": value_label,
+    }
+
+
 def _pick_read(
     pick: BettingSlipPick,
     *,
     predictions: dict[int, MatchPrediction],
     fixtures: dict[int, Fixture],
+    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
 ) -> BettingSlipPickRead:
     actual_winner = _resolve_actual_winner(pick, predictions, fixtures)
     pick_status, is_correct = _resolve_pick_status(pick, actual_winner)
+    value_fields = _resolve_pick_value_fields(pick, min_edge_percent=min_edge_percent)
     return BettingSlipPickRead(
         event_key=pick.event_key,
         event_date=pick.event_date,
@@ -844,6 +943,12 @@ def _pick_read(
         market_prob=pick.market_prob,
         edge=pick.edge,
         odds=pick.odds,
+        void_odds=value_fields["void_odds"],
+        edge_absolute=value_fields["edge_absolute"],
+        edge_percent=value_fields["edge_percent"],
+        expected_roi=value_fields["expected_roi"],
+        value_decision=value_fields["value_decision"],
+        value_label=value_fields["value_label"],
         confidence=pick.confidence,
         pick_score=pick.pick_score,
         pick_status=pick_status,
@@ -858,9 +963,15 @@ def _slip_read(
     predictions: dict[int, MatchPrediction],
     fixtures: dict[int, Fixture],
     stake: float,
+    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
 ) -> BettingSlipRead:
     pick_reads = [
-        _pick_read(pick, predictions=predictions, fixtures=fixtures)
+        _pick_read(
+            pick,
+            predictions=predictions,
+            fixtures=fixtures,
+            min_edge_percent=min_edge_percent,
+        )
         for pick in sorted(slip.picks, key=lambda item: item.sort_order)
     ]
     pick_statuses = [pick.pick_status for pick in pick_reads]
@@ -913,6 +1024,7 @@ def _build_daily_response(
     stake: float,
     candidate_pool_size: int,
     warnings: list[str],
+    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
 ) -> BettingSlipsDailyResponse:
     slips = _load_slips(
         db,
@@ -928,6 +1040,7 @@ def _build_daily_response(
             predictions=predictions,
             fixtures=fixtures,
             stake=stake,
+            min_edge_percent=min_edge_percent,
         )
         for slip in slips
     ]
@@ -983,6 +1096,7 @@ def get_daily_betting_slips(
     stake: float = DEFAULT_STAKE,
     slip_count: int = DEFAULT_SLIP_COUNT,
     picks_per_slip: int = DEFAULT_PICKS_PER_SLIP,
+    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
     regenerate: bool = False,
 ) -> BettingSlipsDailyResponse:
     target_date = slip_date or date.today()
@@ -990,18 +1104,25 @@ def get_daily_betting_slips(
 
     warnings: list[str] = [model_warning] if model_warning else []
     candidate_pool_size = 0
-
-    if regenerate and _slips_exist(
+    slips_exist_before = _slips_exist(
         db,
         slip_date=target_date,
         model_version=model_version,
         model_name=resolved_model_name,
-    ):
+    )
+    effective_regenerate = regenerate and not (
+        target_date < date.today() and slips_exist_before
+    )
+    if effective_regenerate and slips_exist_before:
         _delete_slips_for_date(
             db,
             slip_date=target_date,
             model_version=model_version,
             model_name=resolved_model_name,
+        )
+    elif regenerate and not effective_regenerate:
+        warnings.append(
+            "Schedine storiche mantenute: la rigenerazione con filtro valore vale solo per oggi e giornate future."
         )
 
     if not _slips_exist(
@@ -1015,8 +1136,13 @@ def get_daily_betting_slips(
             slip_date=target_date,
             model_version=model_version,
             model_name=resolved_model_name,
+            min_edge_percent=min_edge_percent,
         )
         candidate_pool_size = len(candidates)
+        if candidate_pool_size == 0:
+            warnings.append(
+                "Nessuna pick PLAY disponibile: tutte le partite sono sotto quota void o senza quote bookmaker."
+            )
         generated, generation_warnings = generate_slips(
             candidates,
             slip_count=slip_count,
@@ -1037,6 +1163,7 @@ def get_daily_betting_slips(
             slip_date=target_date,
             model_version=model_version,
             model_name=resolved_model_name,
+            min_edge_percent=min_edge_percent,
         )
         candidate_pool_size = len(candidates)
 
@@ -1065,6 +1192,7 @@ def get_daily_betting_slips(
         stake=stake,
         candidate_pool_size=candidate_pool_size,
         warnings=warnings,
+        min_edge_percent=min_edge_percent,
     )
 
 
@@ -1076,6 +1204,8 @@ def refresh_betting_slips(
     model_name: str | None = None,
     stake: float = DEFAULT_STAKE,
     days_back: int = 1,
+    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
+    regenerate: bool = True,
 ) -> BettingSlipsRefreshResponse:
     from backend.src.app.services.imports import import_played_fixtures, refresh_matches
 
@@ -1147,7 +1277,8 @@ def refresh_betting_slips(
         model_version=model_version,
         model_name=resolved_model_name,
         stake=stake,
-        regenerate=False,
+        min_edge_percent=min_edge_percent,
+        regenerate=regenerate,
     )
     if model_warning:
         daily.warnings.append(model_warning)
