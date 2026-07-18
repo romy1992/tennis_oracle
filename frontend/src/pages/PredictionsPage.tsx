@@ -1,17 +1,22 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
-import { ModelControls } from "../components/ModelControls";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
+import { useGlobalUpdate } from "../hooks/useGlobalUpdate";
 import { apiClient } from "../services/apiClient";
 import type {
   ImportStatusResponse,
-  MLModelName,
   MLModelVersion,
+  MatchPrediction,
+  ModelsVersionsResultsResponse,
   NextFixtureWithPrediction,
   SingleMatchValueDecision,
   SingleMatchValueResponse
 } from "../types/api";
-import { readStoredModelName, readStoredModelVersion } from "../utils/modelVersion";
+import {
+  DEFAULT_MODEL_VERSION,
+  resolvePreferredModelVersion,
+  writeStoredModelVersion
+} from "../utils/modelVersion";
 import { formatDate } from "../utils/tennis";
 
 type FixtureStatusFilter = "upcoming" | "played" | "all";
@@ -84,12 +89,13 @@ function winnerLabel(
   return winner;
 }
 
-function resultDot(fixture: NextFixtureWithPrediction, show: boolean) {
+function resultDot(fixture: MergedFixtureRow, show: boolean) {
   if (!show || !fixture.is_completed) return null;
-  if (fixture.prediction?.is_correct === null || fixture.prediction?.is_correct === undefined) {
+  const anyPrediction = Object.values(fixture.predictionsByModel).find(Boolean);
+  if (anyPrediction?.is_correct === null || anyPrediction?.is_correct === undefined) {
     return null;
   }
-  return fixture.prediction.is_correct ? "win" : "loss";
+  return anyPrediction.is_correct ? "win" : "loss";
 }
 
 function decisionClass(decision: SingleMatchValueDecision) {
@@ -134,63 +140,123 @@ function PaginationControls({
   );
 }
 
+type MergedFixtureRow = NextFixtureWithPrediction & {
+  predictionsByModel: Record<string, MatchPrediction | null>;
+};
+
+function modelLabel(name: string) {
+  if (name === "logistic_regression") return "Logistic";
+  if (name === "random_forest") return "Random Forest";
+  return name;
+}
+
 export function PredictionsPage() {
-  const [fixtures, setFixtures] = useState<NextFixtureWithPrediction[]>([]);
+  const { status: globalStatus, isRunning: globalUpdating, lastCompletedAt } = useGlobalUpdate();
+  const [availableVersions, setAvailableVersions] = useState<ModelsVersionsResultsResponse["versions"]>([]);
+  const [activeVersion, setActiveVersion] = useState<MLModelVersion>(DEFAULT_MODEL_VERSION);
+  const [fixtures, setFixtures] = useState<MergedFixtureRow[]>([]);
+  const [modelNames, setModelNames] = useState<string[]>([]);
   const [totalFixtures, setTotalFixtures] = useState(0);
-  const [singleValue, setSingleValue] = useState<SingleMatchValueResponse | null>(null);
+  const [singleValueByModel, setSingleValueByModel] = useState<Record<string, SingleMatchValueResponse>>({});
   const [importStatus, setImportStatus] = useState<ImportStatusResponse | null>(null);
   const [statusFilter, setStatusFilter] = useState<FixtureStatusFilter>("upcoming");
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
-  const [modelVersion, setModelVersion] = useState<MLModelVersion>(() => readStoredModelVersion());
   const [page, setPage] = useState(1);
   const [daysBack, setDaysBack] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [importingFixtures, setImportingFixtures] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [playerSearch, setPlayerSearch] = useState("");
   const [playerQuery, setPlayerQuery] = useState("");
   const [minEdgePercent, setMinEdgePercent] = useState(3);
-  const [modelName, setModelName] = useState<MLModelName>(() => readStoredModelName());
   const [error, setError] = useState<string | null>(null);
+  const [lastReloadToken, setLastReloadToken] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(totalFixtures / PAGE_SIZE));
   const showResultDots = statusFilter === "played" || statusFilter === "all";
 
   useEffect(() => {
+    async function loadCatalog() {
+      try {
+        const catalog = await apiClient.getModelsVersionsResults();
+        setAvailableVersions(catalog.versions);
+        if (catalog.versions.length > 0) {
+          setActiveVersion(resolvePreferredModelVersion(catalog.versions));
+        }
+      } catch {
+        setAvailableVersions([]);
+      }
+    }
+    void loadCatalog();
+  }, [lastCompletedAt]);
+
+  useEffect(() => {
     setPage(1);
-  }, [statusFilter, outcomeFilter, playerQuery, modelVersion, modelName, minEdgePercent]);
+  }, [statusFilter, outcomeFilter, playerQuery, activeVersion, minEdgePercent]);
+
+  const activeModels = useMemo(
+    () =>
+      availableVersions.find((entry) => entry.version === activeVersion)?.models.map((m) => m.model) ??
+      [],
+    [availableVersions, activeVersion]
+  );
 
   const loadPageData = useCallback(async () => {
     const offset = (page - 1) * PAGE_SIZE;
     const trimmedPlayer = playerQuery.trim();
-    const [fixturesPage, valueData, statusData] = await Promise.all([
-      apiClient.getUpcomingPredictions({
-        model_version: modelVersion,
-        model_name: modelName,
-        status: statusFilter,
-        outcome: statusFilter === "played" ? outcomeFilter : undefined,
-        limit: PAGE_SIZE,
-        offset,
-        player: trimmedPlayer || undefined
-      }),
-      apiClient.getSingleMatchValueAnalysis({
-        model_version: modelVersion,
-        model_name: modelName,
-        status: statusFilter,
-        outcome: statusFilter === "played" ? outcomeFilter : undefined,
-        limit: PAGE_SIZE,
-        offset,
-        player: trimmedPlayer || undefined,
-        min_edge_percent: minEdgePercent
-      }),
-      apiClient.getImportStatus()
-    ]);
-    setFixtures(fixturesPage.items);
-    setTotalFixtures(fixturesPage.total);
-    setSingleValue(valueData);
+    const models = activeModels.length ? activeModels : ["logistic_regression"];
+
+    const fixtureResponses = await Promise.all(
+      models.map((modelName) =>
+        apiClient.getUpcomingPredictions({
+          model_version: activeVersion,
+          model_name: modelName,
+          status: statusFilter,
+          outcome: statusFilter === "played" ? outcomeFilter : undefined,
+          limit: PAGE_SIZE,
+          offset,
+          player: trimmedPlayer || undefined
+        })
+      )
+    );
+
+    const valueResponses = await Promise.all(
+      models.map((modelName) =>
+        apiClient.getSingleMatchValueAnalysis({
+          model_version: activeVersion,
+          model_name: modelName,
+          status: statusFilter,
+          outcome: statusFilter === "played" ? outcomeFilter : undefined,
+          limit: PAGE_SIZE,
+          offset,
+          player: trimmedPlayer || undefined,
+          min_edge_percent: minEdgePercent
+        })
+      )
+    );
+
+    const statusData = await apiClient.getImportStatus();
+    const base = fixtureResponses[0];
+    const merged: MergedFixtureRow[] = (base?.items ?? []).map((fixture) => {
+      const predictionsByModel: Record<string, MatchPrediction | null> = {};
+      models.forEach((modelName, index) => {
+        const match = fixtureResponses[index]?.items.find((item) => item.event_key === fixture.event_key);
+        predictionsByModel[modelName] = match?.prediction ?? null;
+      });
+      return { ...fixture, predictionsByModel };
+    });
+
+    const values: Record<string, SingleMatchValueResponse> = {};
+    models.forEach((modelName, index) => {
+      values[modelName] = valueResponses[index];
+    });
+
+    setFixtures(merged);
+    setModelNames(models);
+    setTotalFixtures(base?.total ?? 0);
+    setSingleValueByModel(values);
     setImportStatus(statusData);
-  }, [statusFilter, outcomeFilter, page, playerQuery, modelVersion, modelName, minEdgePercent]);
+  }, [statusFilter, outcomeFilter, page, playerQuery, activeVersion, activeModels, minEdgePercent]);
 
   useEffect(() => {
     async function load() {
@@ -207,40 +273,14 @@ export function PredictionsPage() {
     void load();
   }, [loadPageData]);
 
-  async function handleRefresh() {
-    try {
-      setRefreshing(true);
-      setActionMessage(null);
-      const statusBefore = importStatus ?? (await apiClient.getImportStatus());
-      const coverageIncomplete =
-        statusBefore.next_fixtures_max_date !== null &&
-        statusBefore.next_fixtures_window_until !== null &&
-        statusBefore.next_fixtures_max_date < statusBefore.next_fixtures_window_until;
-      const result = await apiClient.refreshMatches({
-        model_version: modelVersion,
-        model_name: modelName,
-        force_next_import: coverageIncomplete || !statusBefore.next_fixtures_imported_today
-      });
-      setPage(1);
-      await loadPageData();
-      const importedToday = result.import_status.next_fixtures_imported_today;
-      const importedNow = result.next_fixtures_imported;
-      setActionMessage(
-        importedNow
-          ? coverageIncomplete
-            ? "Calendario reimportato (copertura incompleta) e previsioni rigenerate."
-            : "Calendario aggiornato e previsioni rigenerate."
-          : importedToday
-            ? "Previsioni rigenerate. Il calendario era gia aggiornato oggi."
-            : "Previsioni rigenerate."
-      );
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore durante l'aggiornamento.");
-    } finally {
-      setRefreshing(false);
+  useEffect(() => {
+    if (!lastCompletedAt || lastCompletedAt === lastReloadToken) {
+      return;
     }
-  }
+    setLastReloadToken(lastCompletedAt);
+    void loadPageData();
+    setActionMessage("Dati aggiornati dall'ultima run globale.");
+  }, [lastCompletedAt, lastReloadToken, loadPageData]);
 
   async function handleImportFixtures() {
     try {
@@ -274,7 +314,7 @@ export function PredictionsPage() {
     importStatus?.next_fixtures_max_date &&
     importStatus.next_fixtures_window_until &&
     importStatus.next_fixtures_max_date < importStatus.next_fixtures_window_until
-      ? `Calendario coperto fino al ${formatDate(importStatus.next_fixtures_max_date)} (previsto fino al ${formatDate(importStatus.next_fixtures_window_until)}). Usa Aggiorna per reimportare.`
+      ? `Calendario coperto fino al ${formatDate(importStatus.next_fixtures_max_date)} (previsto fino al ${formatDate(importStatus.next_fixtures_window_until)}). Usa Aggiorna tutto nella sidebar.`
       : importStatus?.next_fixtures_window_until
         ? `Finestra da giocare: oggi → ${formatDate(importStatus.next_fixtures_window_until)} (${importStatus.next_fixtures_window_days} giorni).`
         : null;
@@ -285,28 +325,36 @@ export function PredictionsPage() {
         <div>
           <h2>Partite</h2>
           <p>
-            Calendario, previsioni salvate e import manuali. Usa Aggiorna per
-            sincronizzare next_fixture e rigenerare le prediction del giorno.
+            Calendario e previsioni salvate per tutte le versioni e i modelli disponibili.
+            L&apos;aggiornamento globale e nella sidebar.
           </p>
         </div>
-        <div className="header-actions">
-          <ModelControls
-            modelVersion={modelVersion}
-            modelName={modelName}
-            onModelVersionChange={setModelVersion}
-            onModelNameChange={setModelName}
-            disabled={refreshing || importingFixtures}
-          />
-          <button
-            type="button"
-            className="action-button primary"
-            onClick={() => void handleRefresh()}
-            disabled={refreshing || importingFixtures}
-          >
-            {refreshing ? "Aggiornamento..." : "Aggiorna"}
-          </button>
-        </div>
+        {globalStatus ? (
+          <div className="header-actions">
+            <span className="pill">{globalStatus.current_phase ?? globalStatus.status}</span>
+            {globalUpdating ? <span className="pill">Run in corso</span> : null}
+          </div>
+        ) : null}
       </header>
+
+      {availableVersions.length ? (
+        <div className="tab-list" aria-label="Versioni modello">
+          {availableVersions.map((entry) => (
+            <button
+              key={entry.version}
+              type="button"
+              className={activeVersion === entry.version ? "active" : undefined}
+              onClick={() => {
+                const next = entry.version as MLModelVersion;
+                writeStoredModelVersion(next);
+                setActiveVersion(next);
+              }}
+            >
+              {entry.version}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <article className="panel">
         <div className="panel-header">
@@ -350,7 +398,7 @@ export function PredictionsPage() {
             <select
               value={daysBack}
               onChange={(event) => setDaysBack(Number(event.target.value))}
-              disabled={importingFixtures || refreshing}
+              disabled={importingFixtures || globalUpdating}
             >
               {[0, 1, 2, 3, 5, 7, 14, 30].map((value) => (
                 <option key={value} value={value}>
@@ -363,7 +411,7 @@ export function PredictionsPage() {
             type="button"
             className="action-button"
             onClick={() => void handleImportFixtures()}
-            disabled={importingFixtures || refreshing}
+            disabled={importingFixtures || globalUpdating}
           >
             {importingFixtures ? "Import in corso..." : "Importa disputate"}
           </button>
@@ -377,10 +425,7 @@ export function PredictionsPage() {
         <div className="section-header">
           <div>
             <h3>Single Match Value Analysis</h3>
-            <p>
-              Analisi da investitore sulla singola partita: una giocata non basta che sia
-              probabile, deve superare la quota void.
-            </p>
+            <p>Analisi per modello nella versione {activeVersion}.</p>
           </div>
           <label className="min-edge-field">
             <span>Margine sicurezza</span>
@@ -391,120 +436,53 @@ export function PredictionsPage() {
               step="0.5"
               value={minEdgePercent}
               onChange={(event) => setMinEdgePercent(Number(event.target.value))}
-              disabled={refreshing || importingFixtures}
+              disabled={globalUpdating || importingFixtures}
             />
             <small>% sopra quota void</small>
           </label>
         </div>
 
-        {singleValue ? (
-          <>
-            <div className="single-value-summary">
-              <div>
-                <span>PLAY</span>
-                <strong>{singleValue.summary.play_count}</strong>
-                <small>Valore reale intercettato</small>
+        {modelNames.map((name) => {
+          const singleValue = singleValueByModel[name];
+          if (!singleValue) return null;
+          return (
+            <section key={name} className="panel">
+              <h4>{modelLabel(name)}</h4>
+              <div className="single-value-summary">
+                <div>
+                  <span>PLAY</span>
+                  <strong>{singleValue.summary.play_count}</strong>
+                </div>
+                <div>
+                  <span>NO BET</span>
+                  <strong>{singleValue.summary.no_bet_count}</strong>
+                </div>
+                <div>
+                  <span>ROI medio</span>
+                  <strong>{formatSignedPercent(singleValue.summary.avg_expected_roi)}</strong>
+                </div>
               </div>
-              <div>
-                <span>BORDERLINE</span>
-                <strong>{singleValue.summary.borderline_count}</strong>
-                <small>Quota in area void</small>
-              </div>
-              <div>
-                <span>NO BET</span>
-                <strong>{singleValue.summary.no_bet_count}</strong>
-                <small>Quota sotto valore</small>
-              </div>
-              <div>
-                <span>ROI medio atteso</span>
-                <strong>{formatSignedPercent(singleValue.summary.avg_expected_roi)}</strong>
-                <small>Stake simulato 1 unita</small>
-              </div>
-            </div>
-
-            {singleValue.simulation.play_bets.resolved_count > 0 ? (
-              <p className="note">
-                Simulazione storica PLAY: {singleValue.simulation.play_bets.resolved_count} giocate
-                risolte, ROI {formatSignedPercentValue(singleValue.simulation.play_bets.roi_pct)},
-                hit rate {formatSignedPercentValue(singleValue.simulation.play_bets.hit_rate_pct)},
-                P/L {singleValue.simulation.play_bets.profit_loss_units.toLocaleString("it-IT", {
-                  maximumFractionDigits: 2
-                })}{" "}
-                unita.
-              </p>
-            ) : (
-              <p className="note">
-                La simulazione storica si popola quando ci sono partite risolte classificate PLAY.
-              </p>
-            )}
-
-            {singleValue.items.length === 0 ? (
-              <EmptyState
-                title="Nessuna singola analizzabile"
-                message="Servono prediction AI e quote bookmaker disponibili per calcolare quota void e valore."
-              />
-            ) : (
-              <div className="single-value-list">
-                {singleValue.items.map((item) => (
-                  <section key={item.match_id} className="single-value-card">
-                    <div className="single-value-card-header">
-                      <div>
-                        <span className="single-value-market">{item.market}</span>
+              {singleValue.items.length === 0 ? (
+                <EmptyState title="Nessuna singola analizzabile" message="Servono prediction e quote." />
+              ) : (
+                <div className="single-value-list">
+                  {singleValue.items.slice(0, 5).map((item) => (
+                    <section key={`${name}-${item.match_id}`} className="single-value-card">
+                      <div className="single-value-card-header">
                         <h4>
                           {item.player_a ?? "?"} vs {item.player_b ?? "?"}
                         </h4>
-                        <p>
-                          {item.tournament_name ?? "Torneo non disponibile"} · Selezione:{" "}
-                          <strong>{item.selection}</strong>
-                        </p>
+                        <span className={`value-decision-badge ${decisionClass(item.decision)}`}>
+                          {item.decision}
+                        </span>
                       </div>
-                      <span className={`value-decision-badge ${decisionClass(item.decision)}`}>
-                        {item.decision}
-                      </span>
-                    </div>
-
-                    <div className="single-value-metrics">
-                      <div>
-                        <span>Probabilita AI</span>
-                        <strong>{formatProb(item.model_probability)}</strong>
-                      </div>
-                      <div>
-                        <span>Quota mercato</span>
-                        <strong>{formatOdds(item.market_odds)}</strong>
-                      </div>
-                      <div>
-                        <span>Quota void</span>
-                        <strong>{formatOdds(item.void_odds)}</strong>
-                      </div>
-                      <div>
-                        <span>Margine</span>
-                        <strong className={item.edge_percent >= 0 ? "positive-value" : "negative-value"}>
-                          {formatSignedPercentValue(item.edge_percent)}
-                        </strong>
-                      </div>
-                      <div>
-                        <span>ROI atteso</span>
-                        <strong className={item.expected_roi >= 0 ? "positive-value" : "negative-value"}>
-                          {formatSignedPercent(item.expected_roi)}
-                        </strong>
-                      </div>
-                      <div>
-                        <span>Stake simulato</span>
-                        <strong>{item.stake.toLocaleString("it-IT")} unita</strong>
-                      </div>
-                    </div>
-
-                    <p className="single-value-explanation">
-                      <strong>{item.value_label}.</strong> {item.explanation}
-                    </p>
-                  </section>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          <LoadingState title="Caricamento analisi valore..." />
-        )}
+                    </section>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })}
       </article>
 
       <article className="panel">
@@ -639,18 +617,28 @@ export function PredictionsPage() {
                     <th>Torneo</th>
                     <th>Surface</th>
                     <th>Match</th>
-                    <th>Prob P1</th>
-                    <th>Predetto</th>
-                    <th>Quota predetto</th>
-                    <th>Confidence</th>
-                    <th>Versione</th>
-                    <th>Modello</th>
+                    {modelNames.map((name) => (
+                      <th key={name} colSpan={2}>
+                        {modelLabel(name)}
+                      </th>
+                    ))}
                     <th>Stato</th>
+                  </tr>
+                  <tr>
+                    <th colSpan={showResultDots ? 6 : 5} />
+                    {modelNames.map((name) => (
+                      <Fragment key={name}>
+                        <th>Predetto</th>
+                        <th>Conf.</th>
+                      </Fragment>
+                    ))}
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
                   {fixtures.map((fixture) => {
                     const dot = resultDot(fixture, showResultDots);
+                    const hasAnyPrediction = Object.values(fixture.predictionsByModel).some(Boolean);
                     return (
                       <tr key={fixture.event_key}>
                         {showResultDots ? (
@@ -671,16 +659,19 @@ export function PredictionsPage() {
                           {fixture.event_first_player ?? "?"} vs{" "}
                           {fixture.event_second_player ?? "?"}
                         </td>
-                        <td>{formatProb(fixture.prediction?.prob_player_1_win)}</td>
-                        <td>{winnerLabel(fixture, fixture.prediction?.predicted_winner)}</td>
-                        <td>{formatOdds(fixture.prediction?.predicted_winner_odds)}</td>
-                        <td>{formatProb(fixture.prediction?.confidence)}</td>
-                        <td>{fixture.prediction?.model_version ?? "-"}</td>
-                        <td>{fixture.prediction?.model_name ?? "-"}</td>
+                        {modelNames.map((name) => {
+                          const prediction = fixture.predictionsByModel[name];
+                          return (
+                            <Fragment key={`${fixture.event_key}-${name}`}>
+                              <td>{winnerLabel(fixture, prediction?.predicted_winner)}</td>
+                              <td>{formatProb(prediction?.confidence)}</td>
+                            </Fragment>
+                          );
+                        })}
                         <td>
                           {fixture.is_completed
                             ? "Giocata"
-                            : fixture.prediction
+                            : hasAnyPrediction
                               ? "Da giocare"
                               : "Da generare"}
                         </td>

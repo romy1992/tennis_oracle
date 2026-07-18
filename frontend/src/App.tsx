@@ -1,5 +1,6 @@
 import { Navigate, createBrowserRouter, RouterProvider } from "react-router-dom";
 
+import { GlobalUpdateProvider } from "./hooks/useGlobalUpdate";
 import { Layout } from "./components/Layout";
 import { BettingSlipModelStatsPage } from "./pages/BettingSlipModelStatsPage";
 import { BettingSlipsPage } from "./pages/BettingSlipsPage";
@@ -21,5 +22,9 @@ const router = createBrowserRouter([
 ]);
 
 export function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <GlobalUpdateProvider>
+      <RouterProvider router={router} />
+    </GlobalUpdateProvider>
+  );
 }

@@ -10,9 +10,12 @@ import type {
   DailyPredictionStatsResponse,
   DailyStatsParams,
   FixturesWithPredictionsPage,
+  GlobalUpdateRunRead,
+  GlobalUpdateStartResponse,
   ImportFixturesResponse,
   ImportStatusResponse,
   MLModelVersion,
+  ModelsVersionsResultsResponse,
   NextFixtureWithPrediction,
   PredictionQueryParams,
   PredictionSummaryResponse,
@@ -124,5 +127,15 @@ export const apiClient = {
       withQuery("/api/betting-slips/stats/by-model", params)
     ),
   getBettingSlipCalendar: (params: { model_version?: MLModelVersion; model_name?: string } = {}) =>
-    request<BettingSlipCalendarResponse>(withQuery("/api/betting-slips/calendar", params))
+    request<BettingSlipCalendarResponse>(withQuery("/api/betting-slips/calendar", params)),
+  startGlobalUpdate: (params: { force?: boolean; days_forward?: number; days_back_fixtures?: number } = {}) =>
+    post<GlobalUpdateStartResponse>("/api/global-update", params),
+  getGlobalUpdateStatus: () => request<GlobalUpdateRunRead | null>("/api/global-update/status"),
+  getGlobalUpdateLatest: () => request<GlobalUpdateRunRead | null>("/api/global-update/latest"),
+  cancelGlobalUpdate: (runId: number) =>
+    post<GlobalUpdateStartResponse>(`/api/global-update/${runId}/cancel`, {}),
+  getGlobalUpdateRun: (runId: number) =>
+    request<GlobalUpdateRunRead>(`/api/global-update/${runId}`),
+  getModelsVersionsResults: (params: { date?: string } = {}) =>
+    request<ModelsVersionsResultsResponse>(withQuery("/api/models-versions/results", params))
 };

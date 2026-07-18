@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { ModelControls } from "../components/ModelControls";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
+import { useGlobalUpdate } from "../hooks/useGlobalUpdate";
 import { apiClient } from "../services/apiClient";
 import type {
   BettingSlip,
@@ -10,11 +10,15 @@ import type {
   BettingSlipPick,
   BettingSlipStatsResponse,
   BettingSlipsDailyResponse,
-  MLModelName,
-  MLModelVersion
+  MLModelVersion,
+  ModelsVersionsResultsResponse
 } from "../types/api";
-import { readStoredModelName, readStoredModelVersion } from "../utils/modelVersion";
-import { formatDate } from "../utils/tennis";
+import {
+  DEFAULT_MODEL_VERSION,
+  resolvePreferredModelVersion,
+  writeStoredModelVersion
+} from "../utils/modelVersion";
+import { formatDate, todayLocalISODate } from "../utils/tennis";
 
 const STAKE_PRESETS = [1, 5, 10, 25, 50];
 
@@ -49,6 +53,25 @@ function formatPct(value: number | null | undefined) {
   return `${value.toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
 }
 
+function formatSignedPct(value: number | null | undefined) {
+  if (value === null || value === undefined) return "-";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
+}
+
+function formatSignedRoi(value: number | null | undefined) {
+  if (value === null || value === undefined) return "-";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${(value * 100).toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
+}
+
+function valueDecisionClass(decision: string | null | undefined) {
+  if (decision === "PLAY") return "play";
+  if (decision === "BORDERLINE") return "borderline";
+  if (decision === "NO BET") return "no-bet";
+  return "pending";
+}
+
 function pickDotClass(status: BettingSlipPick["pick_status"]) {
   if (status === "won") return "win";
   if (status === "lost") return "loss";
@@ -77,7 +100,7 @@ function computeStakeValues(slip: BettingSlip, stake: number) {
 function buildSlipClipboard(slip: BettingSlip, stake: number) {
   const lines = slip.picks.map(
     (pick) =>
-      `${formatTime(pick.event_time)} ${pick.tournament_name ?? "-"} | ${pick.player_1 ?? "?"} vs ${pick.player_2 ?? "?"} -> ${pick.predicted_winner_label ?? "-"} @ ${formatOdds(pick.odds)}`
+      `${formatTime(pick.event_time)} ${pick.tournament_name ?? "-"} | ${pick.player_1 ?? "?"} vs ${pick.player_2 ?? "?"} -> ${pick.predicted_winner_label ?? "-"} @ ${formatOdds(pick.odds)} (void ${formatOdds(pick.void_odds)}, margine ${formatSignedPct(pick.edge_percent)})`
   );
   const { potentialReturn } = computeStakeValues(slip, stake);
   return [
@@ -264,6 +287,10 @@ function SlipCard({
               <th>Match</th>
               <th>Pick</th>
               <th>Quota</th>
+              <th>Void</th>
+              <th>Margine</th>
+              <th>ROI</th>
+              <th>Valore</th>
               <th>Conf.</th>
             </tr>
           </thead>
@@ -295,6 +322,23 @@ function SlipCard({
                   <strong>{pick.predicted_winner_label ?? "-"}</strong>
                 </td>
                 <td className="slip-col-odds">{formatOdds(pick.odds)}</td>
+                <td className="slip-col-value">{formatOdds(pick.void_odds)}</td>
+                <td className={`slip-col-value ${pick.edge_percent !== null && pick.edge_percent >= 0 ? "positive-value" : "negative-value"}`}>
+                  {formatSignedPct(pick.edge_percent)}
+                </td>
+                <td className={`slip-col-value ${pick.expected_roi !== null && pick.expected_roi >= 0 ? "positive-value" : "negative-value"}`}>
+                  {formatSignedRoi(pick.expected_roi)}
+                </td>
+                <td className="slip-col-value-state">
+                  {pick.value_decision ? (
+                    <span className={`value-decision-badge ${valueDecisionClass(pick.value_decision)}`}>
+                      {pick.value_decision}
+                    </span>
+                  ) : (
+                    "-"
+                  )}
+                  {pick.value_label ? <small>{pick.value_label}</small> : null}
+                </td>
                 <td className="slip-col-confidence">{formatProb(pick.confidence)}</td>
               </tr>
             ))}
@@ -338,57 +382,97 @@ function SlipCard({
 }
 
 export function BettingSlipsPage() {
+  const { lastCompletedAt } = useGlobalUpdate();
+  const [availableVersions, setAvailableVersions] = useState<ModelsVersionsResultsResponse["versions"]>([]);
+  const [activeVersion, setActiveVersion] = useState<MLModelVersion>(DEFAULT_MODEL_VERSION);
   const [calendar, setCalendar] = useState<BettingSlipCalendarResponse | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const [daily, setDaily] = useState<BettingSlipsDailyResponse | null>(null);
-  const [dayStats, setDayStats] = useState<BettingSlipStatsResponse | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayLocalISODate());
+  const [dailyByModel, setDailyByModel] = useState<Record<string, BettingSlipsDailyResponse>>({});
+  const [dayStatsByModel, setDayStatsByModel] = useState<Record<string, BettingSlipStatsResponse>>({});
   const [overallStats, setOverallStats] = useState<BettingSlipStatsResponse | null>(null);
   const [stake, setStake] = useState(10);
-  const [modelVersion, setModelVersion] = useState<MLModelVersion>(() => readStoredModelVersion());
-  const [modelName, setModelName] = useState<MLModelName>(() => readStoredModelName());
+  const [minEdgePercent, setMinEdgePercent] = useState(3);
   const [loading, setLoading] = useState(true);
   const [loadingDay, setLoadingDay] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastReloadToken, setLastReloadToken] = useState<string | null>(null);
+
+  const activeModels = useMemo(
+    () =>
+      availableVersions.find((entry) => entry.version === activeVersion)?.models.map((m) => m.model) ??
+      [],
+    [availableVersions, activeVersion]
+  );
+
+  useEffect(() => {
+    async function loadCatalog() {
+      const catalog = await apiClient.getModelsVersionsResults();
+      setAvailableVersions(catalog.versions);
+      if (catalog.versions.length > 0) {
+        setActiveVersion(resolvePreferredModelVersion(catalog.versions));
+      }
+    }
+    void loadCatalog();
+  }, [lastCompletedAt]);
 
   const selectedCalendarDay = useMemo(
     () => calendar?.days.find((day) => day.date === selectedDate) ?? null,
     [calendar, selectedDate]
   );
 
-  const loadDayData = useCallback(async (date: string) => {
-    const [dailyData, dayStatsData, overallStatsData] = await Promise.all([
-      apiClient.getDailyBettingSlips({ model_version: modelVersion, model_name: modelName, stake, date }),
-      apiClient.getBettingSlipStats({
-        model_version: modelVersion,
-        model_name: modelName,
-        from: date,
-        to: date,
-        stake
-      }),
-      apiClient.getBettingSlipStats({
-        model_version: modelVersion,
-        model_name: modelName,
-        all_time: true,
-        stake
-      })
-    ]);
-    // #region agent log
-    fetch('http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8c43c3'},body:JSON.stringify({sessionId:'8c43c3',runId:'pre-fix',hypothesisId:'H4,H5',location:'frontend/src/pages/BettingSlipsPage.tsx:loadDayData',message:'Loaded betting slips day data in frontend',data:{date,modelVersion,modelName,responseModelName:dailyData.model_name,slipCount:dailyData.slips.length,slipStatusCounts:{won:dailyData.slips.filter((slip)=>slip.slip_status==='won').length,lost:dailyData.slips.filter((slip)=>slip.slip_status==='lost').length,pending:dailyData.slips.filter((slip)=>slip.slip_status==='pending').length},pickStatusCounts:{won:dailyData.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='won').length,0),lost:dailyData.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='lost').length,0),pending:dailyData.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='pending').length,0)}},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    setDaily(dailyData);
-    setDayStats(dayStatsData);
+  const loadDayData = useCallback(async (date: string, options?: { regenerate?: boolean }) => {
+    const models = activeModels.length ? activeModels : ["logistic_regression"];
+    const dailyResponses = await Promise.all(
+      models.map((modelName) =>
+        apiClient.getDailyBettingSlips({
+          model_version: activeVersion,
+          model_name: modelName,
+          stake,
+          date,
+          min_edge_percent: minEdgePercent,
+          regenerate: options?.regenerate ?? false
+        })
+      )
+    );
+    const dayStatsResponses = await Promise.all(
+      models.map((modelName) =>
+        apiClient.getBettingSlipStats({
+          model_version: activeVersion,
+          model_name: modelName,
+          from: date,
+          to: date,
+          stake
+        })
+      )
+    );
+    const overallStatsData = await apiClient.getBettingSlipStats({
+      model_version: activeVersion,
+      model_name: models[0],
+      all_time: true,
+      stake
+    });
+
+    const dailyMap: Record<string, BettingSlipsDailyResponse> = {};
+    const statsMap: Record<string, BettingSlipStatsResponse> = {};
+    models.forEach((modelName, index) => {
+      dailyMap[modelName] = dailyResponses[index];
+      statsMap[modelName] = dayStatsResponses[index];
+    });
+    setDailyByModel(dailyMap);
+    setDayStatsByModel(statsMap);
     setOverallStats(overallStatsData);
-  }, [stake, modelVersion, modelName]);
+  }, [stake, activeVersion, activeModels, minEdgePercent]);
 
   useEffect(() => {
     async function loadCalendar() {
       try {
         setLoading(true);
+        const firstModel = activeModels[0] ?? "logistic_regression";
         const calendarData = await apiClient.getBettingSlipCalendar({
-          model_version: modelVersion,
-          model_name: modelName
+          model_version: activeVersion,
+          model_name: firstModel
         });
         setCalendar(calendarData);
         const initialDate = calendarData.days.some((day) => day.is_today)
@@ -402,8 +486,10 @@ export function BettingSlipsPage() {
         setLoading(false);
       }
     }
-    void loadCalendar();
-  }, [modelVersion, modelName]);
+    if (activeModels.length) {
+      void loadCalendar();
+    }
+  }, [activeVersion, activeModels]);
 
   useEffect(() => {
     if (!calendar) return;
@@ -421,54 +507,36 @@ export function BettingSlipsPage() {
     void reloadSelectedDay();
   }, [calendar, selectedDate, loadDayData]);
 
-  async function handleRefresh() {
-    try {
-      setRefreshing(true);
-      setActionMessage(null);
-      const [result, calendarData] = await Promise.all([
-        apiClient.refreshBettingSlips({
-          model_version: modelVersion,
-          model_name: modelName,
-          stake,
-          date: selectedDate
-        }),
-        apiClient.getBettingSlipCalendar({ model_version: modelVersion, model_name: modelName })
-      ]);
-      // #region agent log
-      fetch('http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8c43c3'},body:JSON.stringify({sessionId:'8c43c3',runId:'pre-fix',hypothesisId:'H1,H4,H5',location:'frontend/src/pages/BettingSlipsPage.tsx:handleRefresh',message:'Received betting slips refresh response in frontend',data:{selectedDate,modelVersion,modelName,responseModelName:result.model_name,slipCount:result.slips.length,refreshSummary:result.refresh_summary,calendarSelectedDay:calendarData.days.find((day)=>day.date===selectedDate)??null,slipStatusCounts:{won:result.slips.filter((slip)=>slip.slip_status==='won').length,lost:result.slips.filter((slip)=>slip.slip_status==='lost').length,pending:result.slips.filter((slip)=>slip.slip_status==='pending').length},pickStatusCounts:{won:result.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='won').length,0),lost:result.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='lost').length,0),pending:result.slips.reduce((total,slip)=>total+slip.picks.filter((pick)=>pick.pick_status==='pending').length,0)}},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-      setCalendar(calendarData);
-      setDaily(result);
-      const [dayStatsData, overallStatsData] = await Promise.all([
-        apiClient.getBettingSlipStats({
-          model_version: modelVersion,
-          model_name: modelName,
-          from: selectedDate,
-          to: selectedDate,
-          stake
-        }),
-        apiClient.getBettingSlipStats({
-          model_version: modelVersion,
-          model_name: modelName,
-          all_time: true,
-          stake
-        })
-      ]);
-      setDayStats(dayStatsData);
-      setOverallStats(overallStatsData);
-      const resolvedPicks = result.slips.reduce(
-        (total, slip) => total + slip.picks_won + slip.picks_lost,
-        0
-      );
-      const wonSlips = result.slips.filter((slip) => slip.slip_status === "won").length;
+  useEffect(() => {
+    if (!lastCompletedAt || lastCompletedAt === lastReloadToken) {
+      return;
+    }
+    setLastReloadToken(lastCompletedAt);
+    const shouldRegenerate = !selectedCalendarDay?.is_past;
+    void loadDayData(selectedDate, { regenerate: shouldRegenerate }).then(() => {
       setActionMessage(
-        `${resolvedPicks} pick aggiornate, ${wonSlips} schedina${wonSlips === 1 ? "" : "e"} vinta${wonSlips === 1 ? "" : "e"}.`
+        shouldRegenerate
+          ? "Schedine rigenerate con filtro valore dall'ultima run globale."
+          : "Schedine aggiornate dall'ultima run globale."
       );
+    });
+  }, [lastCompletedAt, lastReloadToken, loadDayData, selectedDate, selectedCalendarDay?.is_past]);
+
+  async function handleRegenerate() {
+    if (selectedCalendarDay?.is_past) {
+      setActionMessage("Le schedine storiche non vengono rigenerate: seleziona oggi o un giorno futuro.");
+      return;
+    }
+    try {
+      setRegenerating(true);
+      setActionMessage(null);
+      await loadDayData(selectedDate, { regenerate: true });
+      setActionMessage("Schedine rigenerate con filtro valore PLAY.");
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore durante l'aggiornamento.");
+      setError(err instanceof Error ? err.message : "Errore inatteso.");
     } finally {
-      setRefreshing(false);
+      setRegenerating(false);
     }
   }
 
@@ -476,7 +544,7 @@ export function BettingSlipsPage() {
     return <LoadingState title="Caricamento schedine..." />;
   }
 
-  if (error && !daily) {
+  if (error && Object.keys(dailyByModel).length === 0) {
     return <ErrorState title="Schedine non disponibili" message={error} />;
   }
 
@@ -484,7 +552,9 @@ export function BettingSlipsPage() {
   const upcomingDays = calendar?.days.filter((day) => !day.is_past) ?? [];
   const historicalOutcomesMissing =
     Boolean(selectedCalendarDay?.is_past) &&
-    Boolean(daily?.slips.some((slip) => slip.picks_pending > 0));
+    Object.values(dailyByModel).some((daily) =>
+      daily.slips.some((slip) => slip.picks_pending > 0)
+    );
 
   return (
     <section className="page">
@@ -492,32 +562,51 @@ export function BettingSlipsPage() {
         <div>
           <h2>Consiglio schedina</h2>
           <p>
-            {daily ? formatDate(daily.date) : "-"} · versione {daily?.model_version ?? modelVersion} · modello{" "}
-            {daily?.model_name ?? "-"} · pool{" "}
-            {daily?.candidate_pool_size ?? 0} partite
-            {selectedCalendarDay
-              ? ` · ${selectedCalendarDay.fixture_count} match in calendario`
-              : ""}
+            {formatDate(selectedDate)} · versione {activeVersion} · solo pick PLAY sopra quota void
           </p>
         </div>
-        <div className="header-actions">
-          <ModelControls
-            modelVersion={modelVersion}
-            modelName={modelName}
-            onModelVersionChange={setModelVersion}
-            onModelNameChange={setModelName}
-            disabled={refreshing || loadingDay}
-          />
+        <div className="page-header-actions">
+          <label className="min-edge-field">
+            <span>Margine sicurezza</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              value={minEdgePercent}
+              onChange={(event) => setMinEdgePercent(Number(event.target.value) || 0)}
+            />
+            <small>% sopra quota void</small>
+          </label>
           <button
             type="button"
             className="action-button"
-            disabled={refreshing || loadingDay}
-            onClick={() => void handleRefresh()}
+            onClick={() => void handleRegenerate()}
+            disabled={regenerating || loadingDay || Boolean(selectedCalendarDay?.is_past)}
           >
-            {refreshing ? "Aggiornamento esiti..." : "Aggiorna"}
+            {regenerating ? "Rigenerazione..." : "Rigenera schedine"}
           </button>
         </div>
       </header>
+
+      {availableVersions.length ? (
+        <div className="tab-list" aria-label="Versioni modello">
+          {availableVersions.map((entry) => (
+            <button
+              key={entry.version}
+              type="button"
+              className={activeVersion === entry.version ? "active" : undefined}
+              onClick={() => {
+                const next = entry.version as MLModelVersion;
+                writeStoredModelVersion(next);
+                setActiveVersion(next);
+              }}
+            >
+              {entry.version}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {calendar ? (
         <article className="panel">
@@ -567,13 +656,22 @@ export function BettingSlipsPage() {
 
       {actionMessage ? <p className="action-success">{actionMessage}</p> : null}
       {error ? <p className="action-error">{error}</p> : null}
-      {daily?.warnings.length ? (
-        <div className="panel">
-          {daily.warnings.map((warning) => (
-            <p key={warning}>{warning}</p>
-          ))}
-        </div>
+      {Object.values(dailyByModel).some((daily) => daily.candidate_pool_size >= 0) ? (
+        <p className="note">
+          Pool PLAY disponibile:{" "}
+          {Object.entries(dailyByModel)
+            .map(([modelName, daily]) => `${modelName}: ${daily.candidate_pool_size}`)
+            .join(" · ")}
+        </p>
       ) : null}
+
+      {Object.values(dailyByModel).flatMap((daily) =>
+        daily.warnings.map((warning) => (
+          <p key={`${daily.model_name}-${warning}`} className="note">
+            {daily.model_name}: {warning}
+          </p>
+        ))
+      )}
 
       <div className="panel stake-panel">
         <label htmlFor="stake-input">Simula puntata</label>
@@ -605,31 +703,39 @@ export function BettingSlipsPage() {
         <span><span className="result-dot pending" /> In corso</span>
       </div>
 
-      {!loadingDay && !daily?.slips.length ? (
+      {!loadingDay && !Object.values(dailyByModel).some((daily) => daily.slips.length) ? (
         <EmptyState
           title="Nessuna schedina disponibile per questo giorno"
-          message='Seleziona un altro giorno o usa "Aggiorna" per importare partite e previsioni.'
+          message='Seleziona un altro giorno o usa "Aggiorna tutto" nella sidebar.'
         />
       ) : null}
 
-      {!loadingDay && daily?.slips.length ? (
-        <div className="slip-list">
-          {daily.slips.map((slip) => (
-            <SlipCard
-              key={slip.slip_key}
-              slip={slip}
-              stake={stake}
-              historicalOutcomesMissing={historicalOutcomesMissing}
-            />
-          ))}
-        </div>
-      ) : null}
-
-      <SlipStatsPanel
-        title="Statistiche del giorno selezionato"
-        subtitle={`Risultati per ${formatDate(selectedDate)}.`}
-        stats={dayStats}
-      />
+      {!loadingDay
+        ? activeModels.map((modelName) => {
+            const daily = dailyByModel[modelName];
+            if (!daily?.slips.length) return null;
+            return (
+              <section key={modelName} className="panel">
+                <h3>{modelName}</h3>
+                <div className="slip-list">
+                  {daily.slips.map((slip) => (
+                    <SlipCard
+                      key={`${modelName}-${slip.slip_key}`}
+                      slip={slip}
+                      stake={stake}
+                      historicalOutcomesMissing={historicalOutcomesMissing}
+                    />
+                  ))}
+                </div>
+                <SlipStatsPanel
+                  title={`Statistiche ${modelName}`}
+                  subtitle={`Risultati per ${formatDate(selectedDate)}.`}
+                  stats={dayStatsByModel[modelName] ?? null}
+                />
+              </section>
+            );
+          })
+        : null}
 
       <SlipStatsPanel
         title="Statistiche complessive"

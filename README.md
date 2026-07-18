@@ -1,18 +1,75 @@
-# tennis_oracle
+# tennis_oracle — documentazione tecnica
 
-Monorepo con backend FastAPI (`backend/`) e frontend React (`frontend/`).
+Monorepo **backend FastAPI** (`backend/`) + **frontend React** (`frontend/`).
 
-Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), li espone via API e li sincronizza verso un database target.
+Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espone API REST, genera previsioni ML, schedine e sincronizza opzionalmente verso un DB target.
 
-## Setup backend
+| Documento | Pubblico |
+|-----------|----------|
+| **Questo file** | Sviluppatori: architettura, classi, metodi, API, ML |
+| [docs/GUIDA_UTENTE.md](docs/GUIDA_UTENTE.md) | Utente medio: cosa fa il prodotto e come usarlo |
+| [docs/SCHEDULING.md](docs/SCHEDULING.md) | Job giornaliero, cron, sync cloud |
+
+> **Manutenzione docs**: ad ogni modifica rilevante di codice, aggiornare questo README e/o la guida utente (regola Cursor `.cursor/rules/keep-docs-updated.mdc`).
+
+---
+
+## Indice
+
+1. [Architettura](#1-architettura)
+2. [Setup](#2-setup)
+3. [API REST](#3-api-rest)
+4. [Backend — riferimento classi e metodi](#4-backend--riferimento-classi-e-metodi)
+5. [Frontend — riferimento moduli](#5-frontend--riferimento-moduli)
+6. [Pipeline ML](#6-pipeline-ml)
+7. [Import, job e sync](#7-import-job-e-sync)
+8. [Bot Telegram](#8-bot-telegram)
+9. [Schema dati](#9-schema-dati)
+
+---
+
+## 1. Architettura
+
+```text
+┌─────────────┐     HTTP      ┌──────────────────┐     SQL      ┌────────────┐
+│  Frontend   │ ────────────► │  FastAPI (main)  │ ──────────► │ PostgreSQL │
+│  React/Vite │               │  /api/*          │             │ tennis_db  │
+└─────────────┘               └────────┬─────────┘             └─────▲──────┘
+                                       │                             │
+                          ┌────────────┼────────────┐                │
+                          ▼            ▼            ▼                │
+                     services/    predictor/   import_*  ◄── API Tennis
+                          │            │            │
+                          └────────────┴────────────┘
+                                       │
+                              global_update / scheduler
+                                       │
+                              jobs/daily_pipeline ──sync──► DB cloud (opz.)
+```
+
+**Layer backend (ordine tipico della richiesta):**
+
+1. `api/routes/*` — endpoint HTTP
+2. `app/services/*` — logica applicativa
+3. `entity/*` + `app/models/*` — ORM SQLAlchemy
+4. `repository/*` — CRUD legacy usato dagli import
+5. `app/ml/*` — dataset, training, inferenza
+
+---
+
+## 2. Setup
+
+### Backend
 
 ```bash
 cd backend
 pip install -r requirements.txt
 cp .env.example .env
+alembic upgrade head
+uvicorn src.app.main:app --reload
 ```
 
-Imposta almeno queste variabili in `backend/.env`:
+Variabili minime in `backend/.env`:
 
 ```env
 APP_ENV=local
@@ -22,72 +79,11 @@ CORS_ORIGINS=["http://localhost:5173","http://localhost:5174","http://127.0.0.1:
 CORS_ORIGIN_REGEX=^https?://(localhost|127\.0\.0\.1):\d+$
 ```
 
-Per gli import dall'API tennis continua a essere supportato anche
-`backend/properties/config.env`, che deve contenere `API_TENNIS_KEY` e
-`API_TENNIS_BASE`.
+Per gli import API tennis: `backend/properties/config.env` con `API_TENNIS_KEY` e `API_TENNIS_BASE` (vedi `config.env.example`).
 
-### Migrazioni Alembic
+Se lo schema esiste già senza Alembic: `alembic stamp head`.
 
-Applica lo schema PostgreSQL (dalla cartella `backend/`):
-
-```bash
-cd backend
-alembic upgrade head
-```
-
-Se `tennis_db` esiste già con le stesse tabelle create in passato via
-SQLAlchemy, verifica lo schema prima di eseguire la migration iniziale. In quel
-caso puoi registrare lo stato corrente con:
-
-```bash
-alembic stamp head
-```
-
-### Avvio backend FastAPI
-
-```bash
-cd backend
-uvicorn src.app.main:app --reload
-```
-
-Endpoint minimi:
-
-- `GET /health`
-- `GET /api/matches`
-- `GET /api/matches/{match_id}`
-- `GET /api/players`
-- `GET /api/players/{player_id}`
-- `GET /api/tournaments`
-
-### Bot Telegram
-
-Il backend include un bot Telegram in polling che consulta le API FastAPI
-esistenti per pronostici, schedine e partite, senza duplicare la logica ML.
-
-Aggiungi a `backend/.env`:
-
-```env
-TELEGRAM_BOT_TOKEN=123456:token_del_bot
-TELEGRAM_API_BASE_URL=http://localhost:8000/api
-TELEGRAM_MODEL_VERSION=v2
-TELEGRAM_DEFAULT_STAKE=10.0
-```
-
-Avvia prima FastAPI, poi in un secondo terminale:
-
-```bash
-cd backend
-python -m src.app.telegram.bot
-```
-
-Comandi principali: `/start`, `/help`, `/pronostici`, `/giorno <0-10>`,
-`/10giorni`, `/schedine [YYYY-MM-DD|0-10]`, `/partite [YYYY-MM-DD|0-10]`,
-`/cerca <nome giocatore>`.
-
-## Setup frontend
-
-Il frontend vive in `frontend/` ed espone una prima UI per dashboard,
-partite, giocatori, dettaglio giocatore e tornei.
+### Frontend
 
 ```bash
 cd frontend
@@ -96,90 +92,399 @@ cp .env.example .env
 npm run dev
 ```
 
-Configura l'URL del backend in `frontend/.env`:
-
 ```env
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
-## Base dati ML-ready
+### Global update cron (in-app)
 
-Le tabelle legacy usate dagli import (`fixture`, `player`, `tournament`) restano
-intatte. Per ML/DL sono state aggiunte tabelle canoniche separate:
+In `config.env` / `.env`:
 
-- `ml_player`
-- `ml_tournament`
-- `ml_match`
-- `ranking_snapshot`
-- `odds_snapshot`
-- `feature_snapshot`
-
-Applica le migrazioni:
-
-```bash
-cd backend
-alembic upgrade head
+```env
+GLOBAL_UPDATE_CRON_ENABLED=false
+GLOBAL_UPDATE_CRON_TIME=02:00
+GLOBAL_UPDATE_CRON_TIMEZONE=Europe/Rome
+GLOBAL_UPDATE_ALLOW_CONCURRENT_RUNS=false
 ```
 
-Le feature devono essere calcolate solo con dati precedenti alla data della
-partita. Con lo schema attuale il dataset builder legge direttamente dalle
-tabelle legacy `fixture` e `tournament`: usa `fixture` per match, player, data e
-target, e `tournament.tournament_sourface` come `surface`.
+---
 
-Crea il dataset CSV addestrabile:
+## 3. API REST
+
+Prefisso default: `/api` (`Settings.api_prefix`).  
+Documentazione interattiva: `http://localhost:8000/docs`.
+
+### Montate in `api/router.py` (attive)
+
+| Metodo | Path | Handler | Ruolo |
+|--------|------|---------|-------|
+| GET | `/health` | `health.health` | Stato app |
+| GET | `/api/imports/status` | `imports.read_import_status` | Ultimo stato import |
+| POST | `/api/imports/refresh` | `imports.refresh_upcoming_matches` | Refresh next fixtures + predizioni |
+| POST | `/api/imports/fixtures` | `imports.import_completed_fixtures` | Import partite giocate |
+| GET | `/api/next-fixtures` | `predictions.read_next_fixtures` | Prossime partite |
+| GET | `/api/next-fixtures/predictions` | `predictions.read_next_fixtures_predictions` | Partite + predizione paginate |
+| GET | `/api/predictions/stats/daily` | `predictions.read_daily_prediction_stats` | Stats giornaliere |
+| GET | `/api/predictions/stats/summary` | `predictions.read_prediction_summary` | Riepilogo accuracy/ROI |
+| GET | `/api/single-match-value` | `single_match_value.read_single_match_value_analysis` | Analisi value bet singola |
+| GET | `/api/betting-slips/daily` | `betting_slips.read_daily_betting_slips` | Schedine del giorno |
+| GET | `/api/betting-slips/calendar` | `betting_slips.read_betting_slip_calendar` | Calendario giorni con schedine |
+| POST | `/api/betting-slips/refresh` | `betting_slips.refresh_daily_betting_slips` | Rigenera schedine |
+| GET | `/api/betting-slips/stats` | `betting_slips.read_betting_slip_stats` | Stats schedine |
+| GET | `/api/betting-slips/stats/by-model` | `betting_slips.read_betting_slip_stats_by_model` | Stats per modello |
+| POST | `/api/global-update` | `global_update.trigger_global_update` | Avvia aggiornamento globale |
+| GET | `/api/global-update/status` | `global_update.read_global_update_status` | Run attiva |
+| GET | `/api/global-update/latest` | `global_update.read_latest_global_update` | Ultima run |
+| GET | `/api/global-update/{run_id}` | `global_update.read_global_update_run` | Dettaglio run |
+| GET | `/api/global-update/{run_id}/report` | `global_update.read_global_update_report` | Report run |
+| POST | `/api/global-update/{run_id}/cancel` | `global_update.cancel_global_update_run` | Annulla run |
+| GET | `/api/models-versions/results` | `global_update.read_models_versions_results` | Risultati per versione/modello |
+
+### Presenti nel codice ma non montate in `api_router` (legacy / opzionali)
+
+Route definite in `matches.py`, `players.py`, `tournaments.py`, `ml.py` — **non** incluse in `backend/src/app/api/router.py` nella configurazione attuale. Per riattivarle: `api_router.include_router(...)`.
+
+---
+
+## 4. Backend — riferimento classi e metodi
+
+### 4.1 Entry point e core
+
+#### `app/main.py`
+
+| Simbolo | Ruolo |
+|---------|-------|
+| `lifespan` | All’avvio: `reconcile_orphaned_runs` + `start_global_update_scheduler`; allo shutdown ferma lo scheduler |
+| `app` | Istanza FastAPI, CORS, mount health + `api_router` |
+
+#### `app/core/config.py` — `Settings`
+
+Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`.  
+`get_settings()` — settings cacheati (`lru_cache`).
+
+#### `app/core/logging.py`
+
+`configure_logging()` — setup logging applicativo.
+
+#### `app/db/session.py`
+
+`get_db()` — dependency FastAPI che yielda una `Session` SQLAlchemy.
+
+#### `app/scheduler.py`
+
+| Funzione | Ruolo |
+|----------|-------|
+| `_parse_cron_time` | Parse `HH:MM` |
+| `_should_run_now` | True se ora corrente = target |
+| `_scheduler_loop` | Loop background che a orario avvia `start_global_update` |
+| `start_global_update_scheduler` | Avvia thread se `GLOBAL_UPDATE_CRON_ENABLED` |
+| `stop_global_update_scheduler` | Ferma lo scheduler |
+
+---
+
+### 4.2 Entity (ORM legacy / dominio)
+
+Modulo `backend/src/entity/`.
+
+| Classe | Tabella / ruolo |
+|--------|-----------------|
+| `Event` | Tipi evento |
+| `Tournament` | Tornei (superficie in `tournament_sourface`) |
+| `Fixture` | Partite storiche/completate |
+| `NextFixture` | Partite future + odds JSON |
+| `Player` | Giocatori |
+| `Standing` | Classifica corrente (non usata come rank pre-match ML) |
+| `MatchPrediction` | Predizione persistita (`event_key` + `model_version` + `model_name`) |
+| `BettingSlip` / `BettingSlipDay` / `BettingSlipPick` | Schedine e selezioni |
+| `GlobalUpdateRun` / `GlobalUpdateRunItem` | Stato aggiornamento globale e step per combo modello |
+
+Modelli ML canonici in `app/models/ml.py`: `MLPlayer`, `MLTournament`, `MLMatch`, `RankingSnapshot`, `OddsSnapshot`, `FeatureSnapshot`.
+
+---
+
+### 4.3 Repository
+
+#### `repository/base/crud_repository.py` — `CrudRepository`
+
+| Metodo | Ruolo |
+|--------|-------|
+| `save` | `merge` + commit (insert/update) |
+| `save_all` | Insert massivo |
+| `search_all` | Tutti i record |
+| `search_column_values` | Valori colonna (opz. distinct) |
+| `filter_by` | Query `filter_by` |
+| `search_filter` | Filtri avanzati (OR, IN, None/not None) |
+| `update` | Aggiorna un campo su match filtro |
+| `delete` / `delete_by_filters` | Cancellazione |
+| `massive_update_bulk` | `bulk_update_mappings` |
+
+Repository specializzati (eredita `CrudRepository`):  
+`EventRepository`, `FixtureRepository`, `NextFixtureRepository`, `PlayerRepository`, `StandingRepository`, `TournamentsRepository`, `MatchPredictionRepository`.
+
+---
+
+### 4.4 Services applicativi
+
+#### `app/services/predictions.py`
+
+| Funzione | Ruolo |
+|----------|-------|
+| `list_next_fixtures` / `count_next_fixtures` | Query next fixtures filtrate |
+| `list_played_fixtures` / `count_played_fixtures` | Partite giocate |
+| `list_played_fixtures_with_predictions` | Giocate + predizione |
+| `get_next_fixtures_with_predictions` | Merge upcoming/played + predizioni (paginato) |
+| `compute_daily_prediction_stats` | Metriche per giorno |
+| `compute_prediction_summary` | Summary + breakdown per modello |
+
+#### `app/services/betting_slips.py`
+
+| Simbolo | Ruolo |
+|---------|-------|
+| `CandidatePick` / `GeneratedSlip` | Dataclass candidate / slip generata |
+| `build_candidate_pool` | Pool pick da fixtures+predizioni+odds |
+| `generate_slips` | Seleziona pick e costruisce slip (profili stake) |
+| `get_betting_slip_calendar` | Giorni con presenza/assenza slip |
+| `get_daily_betting_slips` | Legge o genera slip del giorno |
+| `refresh_betting_slips` | Rigenera forzando delete/upsert |
+| `compute_betting_slip_stats` | ROI/winrate per profilo e giorno |
+| `compute_betting_slip_model_stats` | Stats aggregate per versione/modello |
+
+#### `app/services/single_match_value.py`
+
+| Funzione | Ruolo |
+|----------|-------|
+| `calculate_void_odds` | Quota di break-even data P(modello) |
+| `calculate_expected_roi` | ROI atteso quota vs probabilità |
+| `classify_single_bet_value` | `PLAY` / `NO BET` / `BORDERLINE` |
+| `analyze_single_match_value` | Analisi su lista context |
+| `get_single_match_value_analysis` | Entry point usato dalla route |
+
+#### `app/services/global_update.py`
+
+| Simbolo | Ruolo |
+|---------|-------|
+| `ModelCombination` | Coppia `(model_version, model_name)` |
+| `list_enabled_combinations` | Combo con artefatto `.pkl` su disco |
+| `reconcile_orphaned_runs` | Marca run zombie all’avvio app |
+| `start_global_update` | Crea run e thread `_execute_global_update` |
+| `cancel_global_update` | Richiesta cancel cooperativa |
+| `_execute_global_update` | Import fixtures → next → predict tutte le combo → slip |
+| `build_run_report` | Report strutturato della run |
+| `get_models_versions_results` | Esito per modello/versione su una data |
+| `get_run_by_id` / `get_latest_run` / `get_active_run` | Lettura stato |
+
+#### `app/services/imports.py` / `import_state.py`
+
+Gestione refresh upcoming, purge fixture incomplete future, stato ultimo import su file/DB.
+
+---
+
+### 4.5 ML — dataset, training, predizione
+
+#### `app/ml/model_versioning.py`
+
+| Simbolo | Ruolo |
+|---------|-------|
+| `ModelVersion` | `"v1" \| "v2" \| "v3"` |
+| `DatasetVersionPaths` / `ModelVersionPaths` | Path dataset/modelli/metriche per versione |
+| `DATASET_VERSIONS` / `MODEL_VERSIONS` | Registry path |
+| `dataset_candidates` | Lista CSV candidati per training |
+| `select_training_dataset_path` | Sceglie il CSV di training |
+
+#### `app/ml/model_selection.py`
+
+`select_best_model(version)` — sceglie il modello con miglior `roc_auc` (fallback accuracy / log_loss) dalle metriche JSON.
+
+#### `app/ml/datasets/dataset_builder.py`
+
+| Simbolo | Ruolo |
+|---------|-------|
+| `load_legacy_match_rows` | Legge `fixture`+`tournament` dal DB |
+| `legacy_match_rows_to_dataframe` / `_v2` | Feature storiche (forma, H2H, Elo, rank) |
+| `build_dataset_dataframe` / `_v2` | Pipeline completa DataFrame |
+| `clean_dataset_dataframe` / `_v2` | Normalizza missing (rank 9999, Elo 1500, …) |
+| `split_features_target` | Separa X/y |
+| `export_dataset_csv` | Scrive CSV |
+| `build_and_export_dataset*` / `*_report*` / `*_v2` | Entry point build+export+summary |
+
+#### `app/ml/datasets/elo_builder.py` — `EloTracker`
+
+| Metodo | Ruolo |
+|--------|-------|
+| `pre_match_features` | Elo overall/surface **prima** del match |
+| `record_match` | Aggiorna Elo dopo il risultato |
+| `get_overall` / `get_surface` | Lettura rating |
+
+Funzioni: `expected_score`, `update_elo`.
+
+#### `app/ml/datasets/ranking_history.py`
+
+`HistoricalRankingLookup` — rank/points ATP storici pre-match; `build_historical_ranking_lookup`.
+
+#### `app/ml/datasets/odds_builder.py`
+
+Parsing quote match-winner, aggregati bookmaker, attach a dataset:
+
+`load_fixture_odds_records`, `aggregate_match_odds`, `attach_odds_to_dataset`, `build_and_export_odds_dataset`, utilità `implied_probability`, `bookmaker_margin`, `no_vig_market_probabilities`, ROI/hit-rate.
+
+#### `app/ml/datasets/atp_singles_enrichment.py`
+
+Matching fixture ↔ CSV ATP singles: `build_atp_singles_outputs`, mapping player/match, export dataset arricchito.
+
+#### CLI dataset
+
+- `python -m app.ml.datasets.build_dataset [--version v2|v3]`
+- `python -m app.ml.datasets.build_atp_singles [--version …]`
+- `python -m app.ml.datasets.build_odds_dataset [--version …]`  
+  (da `backend/src`)
+
+#### `app/ml/features/feature_builder.py`
+
+Feature engineering su tabelle `ml_*` / snapshot: win-rate, H2H, giorni dall’ultimo match, `build_feature_snapshots`, `prepare_feature_snapshot_row`.
+
+#### `app/ml/training/train_baseline.py`
+
+| Funzione | Ruolo |
+|----------|-------|
+| `temporal_train_test_split` | Split temporale (no shuffle random) |
+| `allowed_feature_columns` / `leakage_excluded_columns` | Feature ammesse per versione |
+| `filter_rows_with_valid_odds` | Filtro obbligatorio per v3 |
+| `train_baseline` | Allena LR + RF, salva `.pkl` e metriche |
+| `classification_metrics` | accuracy, ROC-AUC, log-loss, … |
+| `market_benchmark_metrics` | Benchmark mercato sulle odds |
+| `compute_value_bet_metrics` (modulo dedicato) | Metriche value bet |
+| `update_model_registry_entry` / `write_model_comparison` | Registry JSON |
+
+#### `app/ml/prediction/predictor.py`
+
+| Simbolo | Ruolo |
+|---------|-------|
+| `PreMatchFeatureBuilder.from_db` | Carica storico e costruisce stato forma/Elo/H2H |
+| `PreMatchFeatureBuilder.build_feature_row` | Feature pre-match per una fixture |
+| `odds_feature_row` | Feature odds per v3 |
+| `predict_fixture` | Inferenza singola → probabilità |
+| `predict_upcoming_fixtures` | Batch su next fixtures, persistenza `MatchPrediction` |
+| `clear_model_cache` | Svuota cache artefatti in memoria |
+| `PredictUpcomingCancelled` | Cancel cooperativa durante predict |
+
+---
+
+### 4.6 Import e sync
+
+#### `service/import_fixtures.py`
+
+`import_all_fixtures`, `run_daily_fixture_import` — scarica/upsert partite per range date.
+
+#### `service/import_next_fixtures.py`
+
+| Funzione | Ruolo |
+|----------|-------|
+| `import_next_fixtures` | Import finestra giorni forward |
+| `run_daily_next_fixture_import` | Daily: upcoming + promozione completati |
+| `upsert_next_fixture` / `upsert_fixture_from_api` | Upsert |
+| `promote_completed_match` | Sposta in `fixture` e risolve predizioni |
+| `resolve_predictions_for_match` | Set `actual_winner` sulle predizioni |
+| `fetch_odds_for_match` | Odds per event_key |
+
+#### `service/import_stading_player.py` / `basic_import.py`
+
+Import classifiche/giocatori e bootstrap eventi/tornei.
+
+#### `service/database_migrator.py`
+
+`run_migration(upsert=…, tables=…)` — copia tabelle SOURCE → TARGET con upsert sulle PK di conflitto.
+
+#### `utility/request_api.py`
+
+Client HTTP verso API tennis (chiavi da `config.env`).
+
+---
+
+### 4.7 Jobs
+
+#### `jobs/daily_pipeline.py` — `DailyPipeline`
+
+`run()` esegue in ordine:
+
+1. `run_daily_fixture_import`
+2. `run_daily_next_fixture_import`
+3. `run_upcoming_prediction_generation`
+4. opz. `run_migration` sync cloud
+
+`run_daily_pipeline(...)` — wrapper CLI/env (`SYNC_CLOUD`).
+
+#### `jobs/generate_upcoming_predictions.py`
+
+`run_upcoming_prediction_generation` — seleziona modello (best metrics o nome esplicito) e chiama `predict_upcoming_fixtures`.
+
+#### `jobs/all_models_daily_update.py`
+
+Variante multi-modello dell’aggiornamento giornaliero.
+
+---
+
+## 5. Frontend — riferimento moduli
+
+### Routing (`App.tsx`)
+
+| Path | Pagina |
+|------|--------|
+| `/` | Redirect → `/predictions` |
+| `/predictions` | `PredictionsPage` |
+| `/prediction-stats` | `PredictionStatsPage` |
+| `/betting-slips` | `BettingSlipsPage` |
+| `/betting-slip-model-stats` | `BettingSlipModelStatsPage` |
+
+Wrapper: `GlobalUpdateProvider`.
+
+### Pagine
+
+| Componente | Ruolo |
+|------------|-------|
+| `PredictionsPage` | Lista partite+predizioni, filtri modello, value analysis |
+| `PredictionStatsPage` | Summary e serie giornaliere accuracy/ROI |
+| `BettingSlipsPage` | Calendario, slip card, stake, refresh, clipboard |
+| `BettingSlipModelStatsPage` | Tabella comparativa stats per modello |
+
+### Componenti / hook
+
+| Modulo | Ruolo |
+|--------|-------|
+| `Layout` | Sidebar, nav, slot `GlobalUpdateControls` |
+| `GlobalUpdateControls` | Start/cancel/status aggiornamento globale |
+| `ModelControls` | Selettore versione/nome modello |
+| `Status` | `LoadingState` / `ErrorState` / `EmptyState` |
+| `MetricCard` | Card metrica |
+| `useGlobalUpdate` | Context: polling status, start/cancel |
+
+### `services/apiClient.ts`
+
+Client `fetch` tipizzato verso le API montate (predictions, betting-slips, imports, global-update, single-match-value).  
+`ApiError` — errore HTTP con `status`.
+
+### Utils
+
+- `utils/modelVersion.ts` — default `v3`, persistenza localStorage; `resolvePreferredModelVersion` su Predictions / Betting slips / Stats
+- `utils/tennis.ts` — format date/score/superficie/nomi giocatore
+- `types/api.ts` — tipi TypeScript allineati agli schema Pydantic
+
+---
+
+## 6. Pipeline ML
+
+### Versioni
+
+| Versione | Idea | Odds in training/inferenza |
+|----------|------|----------------------------|
+| **v1** | Baseline forma/H2H/ATP parziale | No (solo post-hoc edge) |
+| **v2** | Rank storico, Elo, forma, H2H, ATP | No (solo post-hoc) |
+| **v3** | Feature v2 + aggregati quote pre-match | Sì (solo match con odds) |
+
+Default UI/API: **v2**. Modelli tipici: `logistic_regression`, `random_forest`.
+
+### Comandi tipici (da `backend/src`)
 
 ```bash
-cd backend/src
-python -m app.ml.datasets.build_dataset
-```
-
-Output predefinito:
-
-```text
-backend/data/processed/tennis_winner_dataset.csv
-```
-
-Arricchimento opzionale ATP singles, usando i CSV in
-`backend/data/processed/tennis_atp-master`:
-
-```bash
-cd backend/src
-python -m app.ml.datasets.build_atp_singles
-```
-
-Questo comando non sovrascrive il dataset base e crea:
-
-- `backend/data/processed/atp_singles_matches_normalized.csv`
-- `backend/data/processed/atp_singles_match_mapping.csv`
-- `backend/data/processed/atp_singles_player_mapping.csv`
-- `backend/data/processed/tennis_winner_dataset_atp_enriched.csv`
-
-Il dataset builder (`backend/src/app/ml/datasets/dataset_builder.py`) crea un
-DataFrame pandas, calcola storico forma/H2H scorrendo i match in ordine
-temporale, gestisce rank/Elo mancanti con valori numerici puliti, esporta CSV e
-separa feature/target, ma non esegue training. Le classifiche in `standing` sono
-correnti e non storiche, quindi non vengono usate come ranking pre-match per
-evitare data leakage. Per il training usa uno split temporale, ad esempio train
-sulle date più vecchie e validation/test sulle date più recenti.
-
-### Versioni modello ML
-
-Le versioni restano separate per dataset, cartella modelli, report metriche e
-predizioni persistite (`event_key + model_version + model_name`):
-
-- `v1`: baseline storico/form/H2H/ATP parziale, indipendente dalle odds.
-- `v2`: ranking storico, Elo, forma recente, H2H e feature ATP, indipendente
-  dalle odds. Le odds sono usate solo dopo la predizione per benchmark, edge,
-  value bet e schedine.
-- `v3`: modello odds-aware. Usa le feature di `v2` più aggregate pre-match
-  (`avg_player_1_odds`, `avg_player_2_odds`, probabilità mercato medie,
-  margine bookmaker e numero bookmaker). Training, inferenza, liste FE e
-  schedine `v3` includono solo match con odds disponibili.
-
-Pipeline consigliata per generare `v3` senza toccare artefatti `v1`/`v2`:
-
-```bash
-cd backend/src
 python -m app.ml.datasets.build_dataset --version v3
 python -m app.ml.datasets.build_atp_singles --version v3
 python -m app.ml.datasets.build_odds_dataset --version v3
@@ -187,25 +492,70 @@ python -m app.ml.training.train_baseline --model-version v3
 python -m jobs.generate_upcoming_predictions --model-version v3
 ```
 
-Le metriche `v3` vengono salvate in
-`backend/data/reports/baseline_v3_metrics.json` e i modelli in
-`backend/data/models/v3/`. Le API e il frontend continuano a usare `v2` come
-default; passa `model_version=v3` per pronostici o schedine odds-aware.
+Artefatti:
 
-## Comandi import esistenti
+- Dataset: `backend/data/processed/`
+- Modelli: `backend/data/models/` (`v2/`, `v3/`, …)
+- Metriche: `backend/data/reports/baseline_*_metrics.json`
 
-Esegui dalla cartella `backend/`:
+**Anti-leakage**: feature solo con dati *precedenti* al match; `standing` corrente non usata come rank pre-match; split temporale in training.
+
+---
+
+## 7. Import, job e sync
 
 ```bash
-# Bootstrap eventi e tornei
+# dalla cartella backend/ (o root come da SCHEDULING.md)
 python -c "from src.service.basic_import import basic; basic()"
-
-# Import fixtures
 python -m src.service.import_fixtures
-
-# Pipeline giornaliera import + sync
 python -m src.jobs.daily_pipeline
-
-# Solo import locale, senza sync cloud
 python -m src.jobs.daily_pipeline --no-sync
 ```
+
+Dettagli cron Windows/Linux e sync cloud: [docs/SCHEDULING.md](docs/SCHEDULING.md).
+
+---
+
+## 8. Bot Telegram
+
+Modulo `app/telegram/`.
+
+| Modulo | Ruolo |
+|--------|-------|
+| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, model version/stake default |
+| `client.BackendApiClient` | Chiama le stesse API FastAPI |
+| `bot.build_application` / `main` | Polling + handler comandi |
+| `messages` / `dates` / `images` | Formattazione risposte, date Roma, immagini |
+
+Comandi: `/start`, `/help`, `/pronostici`, `/giorno <0-10>`, `/10giorni`, `/schedine […]`, `/partite […]`, `/cerca <nome>`.
+
+```bash
+cd backend
+python -m src.app.telegram.bot
+```
+
+---
+
+## 9. Schema dati
+
+Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip e global update.
+
+Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+---
+
+## Test
+
+```bash
+cd backend
+pytest
+```
+
+Test rilevanti: `tests/test_betting_slips.py`, `test_global_update.py`, `test_predictor.py`, `test_dataset_builder.py`, `test_train_baseline.py`, `test_telegram_bot.py`, ecc.
+
+Frontend: test Vitest dove presenti (es. `ModelsControlPage.test.tsx`).

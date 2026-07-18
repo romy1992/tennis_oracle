@@ -4,7 +4,7 @@ import { MetricCard } from "../components/MetricCard";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
 import type { BettingSlipModelStatsResponse, BettingSlipModelStatsRow } from "../types/api";
-import { formatDate } from "../utils/tennis";
+import { formatDate, todayLocalISODate } from "../utils/tennis";
 
 const STAKE_PRESETS = [1, 5, 10, 25, 50];
 
@@ -13,13 +13,13 @@ type SortKey = "slip_win_rate_pct" | "theoretical_roi_pct" | "slips_total";
 type SortDirection = "asc" | "desc";
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return todayLocalISODate();
 }
 
 function daysAgoIso(days: number) {
   const value = new Date();
   value.setDate(value.getDate() - days);
-  return value.toISOString().slice(0, 10);
+  return todayLocalISODate(value);
 }
 
 function formatPct(value: number | null | undefined) {

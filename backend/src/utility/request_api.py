@@ -18,7 +18,17 @@ def request_api(method: str, params: dict = None):
     if response.status_code == 200:
         logging.info(f"Call URL: {response.url}")
         response_json = response.json().get("result")
-        if isinstance(response_json, list) and response_json and response_json[0].get("cod"):
+        # API Tennis sometimes returns a plain error string in `result`
+        # (e.g. date-range limits) instead of a list/dict payload.
+        if isinstance(response_json, str):
+            logging.error("Error in API request: %s", response_json)
+            raise RuntimeError(f"API Tennis error: {response_json}")
+        if (
+            isinstance(response_json, list)
+            and response_json
+            and isinstance(response_json[0], dict)
+            and response_json[0].get("cod")
+        ):
             logging.error(f"Error in API request: {response_json}")
             error = response_json[0]
             raise RuntimeError(

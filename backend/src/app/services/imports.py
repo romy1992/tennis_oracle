@@ -1,6 +1,6 @@
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.src.app.ml.model_versioning import ModelVersion
@@ -48,6 +48,39 @@ def refresh_matches(
     }
 
 
+def _latest_played_match_date(db: Session, *, date_from: date | None = None) -> date | None:
+    """Max fixture.event_date on/before today (ignores future contamination)."""
+    today = date.today()
+    filters = [Fixture.event_date <= today]
+    if date_from is not None:
+        filters.append(Fixture.event_date >= date_from)
+    return db.scalar(select(func.max(Fixture.event_date)).where(*filters))
+
+
+def purge_future_incomplete_fixtures(db: Session) -> int:
+    """Remove unfinished rows that landed in fixture with event_date > today."""
+    today = date.today()
+    rows = db.scalars(
+        select(Fixture).where(
+            Fixture.event_date > today,
+            or_(
+                Fixture.event_winner.is_(None),
+                Fixture.event_winner == "",
+                Fixture.event_final_result.is_(None),
+                Fixture.event_final_result == "",
+                Fixture.event_final_result == "-",
+            ),
+        )
+    ).all()
+    removed = 0
+    for row in rows:
+        db.delete(row)
+        removed += 1
+    if removed:
+        db.commit()
+    return removed
+
+
 def import_played_fixtures(
     db: Session,
     *,
@@ -57,11 +90,10 @@ def import_played_fixtures(
         raise ValueError("days_back must be >= 0")
 
     run_daily_fixture_import(days_back_start=days_back, days_back_stop=0)
+    purged = purge_future_incomplete_fixtures(db)
 
     date_from = date.today() - timedelta(days=days_back)
-    last_match_date = db.scalar(
-        select(func.max(Fixture.event_date)).where(Fixture.event_date >= date_from)
-    )
+    last_match_date = _latest_played_match_date(db, date_from=date_from)
     record_fixture_import(
         last_match_date=last_match_date,
         imported_at=datetime.now(),
@@ -70,5 +102,6 @@ def import_played_fixtures(
 
     return {
         "days_back": days_back,
+        "purged_future_incomplete": purged,
         "import_status": get_import_status(db),
     }

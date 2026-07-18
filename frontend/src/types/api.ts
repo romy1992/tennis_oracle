@@ -496,6 +496,12 @@ export type BettingSlipPick = {
   market_prob: number | null;
   edge: number | null;
   odds: number | null;
+  void_odds: number | null;
+  edge_absolute: number | null;
+  edge_percent: number | null;
+  expected_roi: number | null;
+  value_decision: string | null;
+  value_label: string | null;
   confidence: number | null;
   pick_score: number | null;
   pick_status: PickStatus;
@@ -627,6 +633,7 @@ export type BettingSlipsQueryParams = {
   model_version?: MLModelVersion;
   model_name?: string;
   stake?: number;
+  min_edge_percent?: number;
   regenerate?: boolean;
 };
 
@@ -665,4 +672,71 @@ export type BettingSlipCalendarResponse = {
   model_version: MLModelVersion;
   model_name: string;
   days: BettingSlipCalendarDay[];
+};
+
+export type GlobalUpdateStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "completed_with_errors"
+  | "failed"
+  | "cancelled";
+
+export type GlobalUpdateRunItemRead = {
+  model_version: string;
+  model_name: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  predictions_generated: number;
+  slips_generated: number;
+  error_message: string | null;
+  warnings: string[];
+};
+
+export type GlobalUpdateRunRead = {
+  id: number;
+  run_date: string;
+  origin: "manual" | "cron";
+  status: GlobalUpdateStatus;
+  current_phase: string | null;
+  progress_pct: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  force: boolean;
+  versions_processed: number;
+  models_processed: number;
+  combinations_completed: number;
+  combinations_failed: number;
+  combinations_skipped: number;
+  fixtures_processed: number;
+  slips_generated: number;
+  errors: string[];
+  warnings: string[];
+  items: GlobalUpdateRunItemRead[];
+};
+
+export type GlobalUpdateStartResponse = {
+  run_id: number;
+  status: GlobalUpdateStatus;
+  message: string;
+};
+
+export type ModelsVersionsResultsResponse = {
+  date: string;
+  last_updated_at: string | null;
+  last_run_id: number | null;
+  last_run_origin: "manual" | "cron" | null;
+  versions: Array<{
+    version: string;
+    models: Array<{
+      model: string;
+      status: string;
+      predictions_count: number;
+      slips_count: number;
+      data: Record<string, unknown>;
+    }>;
+  }>;
 };
