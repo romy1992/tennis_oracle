@@ -44,6 +44,7 @@ from backend.src.app.schemas.betting_slips import (
 )
 from backend.src.app.services.predictions import COMPLETED_WINNERS, _predictions_by_event_key, _resolve_model_name
 from backend.src.app.services.single_match_value import (
+    DEFAULT_MIN_EDGE_PERCENT,
     calculate_expected_roi,
     calculate_void_odds,
     classify_single_bet_value,
@@ -51,11 +52,11 @@ from backend.src.app.services.single_match_value import (
 
 PickStatus = Literal["pending", "won", "lost"]
 SlipStatus = Literal["pending", "won", "lost"]
+ValueDecision = Literal["PLAY", "BORDERLINE", "NO BET"]
 
 DEFAULT_STAKE = 10.0
-DEFAULT_SLIP_COUNT = 5
+DEFAULT_SLIP_COUNT = 9
 DEFAULT_PICKS_PER_SLIP = 5
-DEFAULT_MIN_EDGE_PERCENT = 3.0
 
 #region agent log
 def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
@@ -74,36 +75,78 @@ def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict
         pass
 #endregion
 
-SLIP_PROFILES: tuple[dict[str, str | int], ...] = (
+SLIP_PROFILES: tuple[dict[str, object], ...] = (
     {
-        "slip_key": "safe",
-        "label": "Sicura",
-        "description": "Alta confidence, quote contenute",
+        "slip_key": "play_safe",
+        "label": "Play · Sicura",
+        "description": "Solo PLAY: alta confidence, quote contenute",
         "target_picks": 5,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "confidence",
     },
     {
-        "slip_key": "balanced",
-        "label": "Bilanciata",
-        "description": "Buon mix confidence + edge",
+        "slip_key": "play_balanced",
+        "label": "Play · Bilanciata",
+        "description": "Solo PLAY: mix confidence + edge",
         "target_picks": 4,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "score",
     },
     {
-        "slip_key": "value",
-        "label": "Value",
-        "description": "Edge piu alto, quote piu alte",
+        "slip_key": "play_value",
+        "label": "Play · Value",
+        "description": "Solo PLAY: edge e quote piu alti",
         "target_picks": 4,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "edge",
     },
     {
-        "slip_key": "mix",
-        "label": "Mix del giorno",
-        "description": "Top score complessivo",
+        "slip_key": "soft_safe",
+        "label": "Play+Border · Sicura",
+        "description": "PLAY e BORDERLINE: selezione prudente",
         "target_picks": 5,
+        "allowed_decisions": ("PLAY", "BORDERLINE"),
+        "sort_mode": "confidence",
     },
     {
-        "slip_key": "alternative",
-        "label": "Alternativa",
-        "description": "Selezione diversificata",
+        "slip_key": "soft_balanced",
+        "label": "Play+Border · Bilanciata",
+        "description": "PLAY e BORDERLINE: mix del giorno",
         "target_picks": 4,
+        "allowed_decisions": ("PLAY", "BORDERLINE"),
+        "sort_mode": "score",
+    },
+    {
+        "slip_key": "soft_value",
+        "label": "Play+Border · Value",
+        "description": "PLAY e BORDERLINE: punta sull'edge",
+        "target_picks": 4,
+        "allowed_decisions": ("PLAY", "BORDERLINE"),
+        "sort_mode": "edge",
+    },
+    {
+        "slip_key": "mixed_safe",
+        "label": "Mista · Sicura",
+        "description": "Tutti gli stati: selezione piu diversificata",
+        "target_picks": 5,
+        "allowed_decisions": ("PLAY", "BORDERLINE", "NO BET"),
+        "sort_mode": "confidence",
+    },
+    {
+        "slip_key": "mixed_balanced",
+        "label": "Mista · Bilanciata",
+        "description": "Tutti gli stati: mix completo del giorno",
+        "target_picks": 4,
+        "allowed_decisions": ("PLAY", "BORDERLINE", "NO BET"),
+        "sort_mode": "score",
+    },
+    {
+        "slip_key": "mixed_value",
+        "label": "Mista · Value",
+        "description": "Tutti gli stati: massima aggressivita sull'edge",
+        "target_picks": 4,
+        "allowed_decisions": ("PLAY", "BORDERLINE", "NO BET"),
+        "sort_mode": "edge",
     },
 )
 
@@ -127,6 +170,8 @@ class CandidatePick:
     edge_absolute: float
     edge_percent: float
     expected_roi: float
+    suggested_min_edge_percent: float
+    min_edge_percent: float
     value_decision: str
     value_label: str
     confidence: float
@@ -240,13 +285,22 @@ def _resolve_betting_model_name(
     return DEFAULT_MODEL_NAME, "model_selection_unavailable"
 
 
+def _value_label_for_decision(decision: str) -> str:
+    if decision == "PLAY":
+        return "Singola con valore"
+    if decision == "BORDERLINE":
+        return "Quota in area void"
+    return "Quota sotto valore"
+
+
 def build_candidate_pool(
     db: Session,
     *,
     slip_date: date,
     model_version: ModelVersion,
     model_name: str,
-    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
+    min_edge_percent: float | None = None,
+    min_edge_overrides: dict[int, float] | None = None,
 ) -> list[CandidatePick]:
     fixture_filters = [
         NextFixture.is_completed.is_(False),
@@ -273,6 +327,7 @@ def build_candidate_pool(
         model_version,
         model_name,
     )
+    overrides = min_edge_overrides or {}
 
     candidates: list[CandidatePick] = []
     for fixture in fixtures:
@@ -299,13 +354,16 @@ def build_candidate_pool(
         edge_absolute = winner_odds - void_odds
         edge_percent = (edge_absolute / void_odds) * 100.0
         expected_roi = calculate_expected_roi(winner_odds, model_prob)
+        baseline_min_edge = (
+            DEFAULT_MIN_EDGE_PERCENT if min_edge_percent is None else float(min_edge_percent)
+        )
+        suggested_min_edge = baseline_min_edge
+        effective_min_edge = overrides.get(fixture.event_key, baseline_min_edge)
         value_decision = classify_single_bet_value(
             market_odds=winner_odds,
             void_odds=void_odds,
-            min_edge_percent=min_edge_percent,
+            min_edge_percent=effective_min_edge,
         )
-        if value_decision != "PLAY":
-            continue
 
         candidates.append(
             CandidatePick(
@@ -330,8 +388,10 @@ def build_candidate_pool(
                 edge_absolute=round(edge_absolute, 4),
                 edge_percent=round(edge_percent, 2),
                 expected_roi=round(expected_roi, 6),
+                suggested_min_edge_percent=suggested_min_edge,
+                min_edge_percent=round(float(effective_min_edge), 2),
                 value_decision=value_decision,
-                value_label="Singola con valore",
+                value_label=_value_label_for_decision(value_decision),
                 confidence=confidence,
                 pick_score=_pick_score(model_prob, edge, winner_odds),
             )
@@ -390,6 +450,67 @@ def _combined_odds(picks: list[CandidatePick]) -> float:
     return round(total, 4)
 
 
+def _sort_key_for_mode(sort_mode: str):
+    if sort_mode == "confidence":
+        return lambda candidate: candidate.confidence
+    if sort_mode == "edge":
+        return lambda candidate: candidate.edge or 0.0
+    return lambda candidate: candidate.pick_score
+
+
+def _select_picks_for_tier(
+    candidates: list[CandidatePick],
+    *,
+    count: int,
+    exclude_keys: set[int],
+    allowed_decisions: tuple[str, ...],
+    sort_key,
+) -> list[CandidatePick]:
+    """Fill a slip preferring a mix of decision states when the tier allows them."""
+    allowed_set = set(allowed_decisions)
+    base_filter = lambda candidate: candidate.value_decision in allowed_set
+
+    if allowed_set == {"PLAY"}:
+        return _select_picks_simple(
+            candidates,
+            count=count,
+            exclude_keys=exclude_keys,
+            sort_key=sort_key,
+            extra_filter=base_filter,
+        )
+
+    selected: list[CandidatePick] = []
+    used = set(exclude_keys)
+    secondary = [decision for decision in allowed_decisions if decision != "PLAY"]
+    # Reserve roughly one slot per non-PLAY state when available.
+    for decision in secondary:
+        if len(selected) >= count:
+            break
+        picks = _select_picks_simple(
+            candidates,
+            count=1,
+            exclude_keys=used,
+            sort_key=sort_key,
+            extra_filter=lambda candidate, decision=decision: candidate.value_decision == decision,
+        )
+        for pick in picks:
+            selected.append(pick)
+            used.add(pick.event_key)
+
+    remaining = count - len(selected)
+    if remaining > 0:
+        fillers = _select_picks_simple(
+            candidates,
+            count=remaining,
+            exclude_keys=used,
+            sort_key=sort_key,
+            extra_filter=base_filter,
+        )
+        selected.extend(fillers)
+
+    return selected[:count]
+
+
 def generate_slips(
     candidates: list[CandidatePick],
     *,
@@ -402,35 +523,22 @@ def generate_slips(
 
     profiles = list(SLIP_PROFILES[:slip_count])
     generated: list[GeneratedSlip] = []
-    used_keys: set[int] = set()
+    used_keys_by_tier: dict[tuple[str, ...], set[int]] = defaultdict(set)
 
     for profile in profiles:
         target = min(int(profile["target_picks"]), picks_per_slip)
         slip_key = str(profile["slip_key"])
+        allowed = tuple(profile["allowed_decisions"])  # type: ignore[arg-type]
+        sort_mode = str(profile.get("sort_mode") or "score")
+        sort_key = _sort_key_for_mode(sort_mode)
+        tier_used = used_keys_by_tier[allowed]
 
-        if slip_key == "safe":
-            pool_filter = None
-            sort_key = lambda candidate: candidate.confidence
-        elif slip_key == "balanced":
-            pool_filter = None
-            sort_key = lambda candidate: candidate.pick_score
-        elif slip_key == "value":
-            pool_filter = None
-            sort_key = lambda candidate: candidate.edge or 0.0
-        elif slip_key == "mix":
-            pool_filter = None
-            sort_key = lambda candidate: candidate.pick_score
-        else:
-            pool_filter = None
-            sort_key = lambda candidate: candidate.pick_score
-
-        exclude = used_keys if slip_key == "alternative" else set()
-        picks = _select_picks_simple(
+        picks = _select_picks_for_tier(
             candidates,
             count=target,
-            exclude_keys=exclude,
+            exclude_keys=tier_used,
+            allowed_decisions=allowed,
             sort_key=sort_key,
-            extra_filter=pool_filter,
         )
         if len(picks) < 4:
             warnings.append(
@@ -439,7 +547,7 @@ def generate_slips(
             if not picks:
                 continue
 
-        used_keys.update(pick.event_key for pick in picks)
+        tier_used.update(pick.event_key for pick in picks)
         generated.append(
             GeneratedSlip(
                 slip_key=slip_key,
@@ -706,6 +814,8 @@ def _persist_slips(
                     edge_absolute=pick.edge_absolute,
                     edge_percent=pick.edge_percent,
                     expected_roi=pick.expected_roi,
+                    suggested_min_edge_percent=pick.suggested_min_edge_percent,
+                    min_edge_percent=pick.min_edge_percent,
                     value_decision=pick.value_decision,
                     value_label=pick.value_label,
                     confidence=pick.confidence,
@@ -872,50 +982,87 @@ def _resolve_slip_status(pick_statuses: list[PickStatus]) -> SlipStatus:
 def _resolve_pick_value_fields(
     pick: BettingSlipPick,
     *,
-    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
+    min_edge_percent: float | None = None,
 ) -> dict[str, float | str | None]:
-    if pick.void_odds is not None:
-        return {
-            "void_odds": pick.void_odds,
-            "edge_absolute": pick.edge_absolute,
-            "edge_percent": pick.edge_percent,
-            "expected_roi": pick.expected_roi,
-            "value_decision": pick.value_decision,
-            "value_label": pick.value_label,
-        }
+    stored_min_edge = getattr(pick, "min_edge_percent", None)
+    stored_suggested = getattr(pick, "suggested_min_edge_percent", None)
+    effective_min_edge = (
+        min_edge_percent
+        if min_edge_percent is not None
+        else stored_min_edge
+        if stored_min_edge is not None
+        else DEFAULT_MIN_EDGE_PERCENT
+    )
     if pick.model_prob is None or pick.odds is None:
         return {
             "void_odds": None,
             "edge_absolute": None,
             "edge_percent": None,
             "expected_roi": None,
+            "suggested_min_edge_percent": stored_suggested,
+            "min_edge_percent": stored_min_edge,
             "value_decision": None,
             "value_label": None,
         }
 
-    void_odds = calculate_void_odds(pick.model_prob)
+    # Always reclassify with the requested margin; stored value_decision may be stale.
+    void_odds = (
+        float(pick.void_odds)
+        if pick.void_odds is not None
+        else calculate_void_odds(pick.model_prob)
+    )
     edge_absolute = pick.odds - void_odds
     edge_percent = (edge_absolute / void_odds) * 100.0
-    expected_roi = calculate_expected_roi(pick.odds, pick.model_prob)
+    expected_roi = (
+        float(pick.expected_roi)
+        if pick.expected_roi is not None
+        else calculate_expected_roi(pick.odds, pick.model_prob)
+    )
     value_decision = classify_single_bet_value(
         market_odds=pick.odds,
         void_odds=void_odds,
-        min_edge_percent=min_edge_percent,
+        min_edge_percent=float(effective_min_edge),
     )
-    value_label = (
-        "Singola con valore"
-        if value_decision == "PLAY"
-        else "Quota in area void"
-        if value_decision == "BORDERLINE"
-        else "Quota sotto valore"
-    )
+    # #region agent log
+    if pick.value_decision != value_decision:
+        try:
+            from pathlib import Path
+            import json as _json
+            from datetime import datetime as _dt
+
+            Path(r"c:\Users\trott\git\tennis_oracle\debug-839b99.log").open("a", encoding="utf-8").write(
+                _json.dumps(
+                    {
+                        "sessionId": "839b99",
+                        "runId": "post-fix",
+                        "hypothesisId": "G",
+                        "location": "betting_slips.py:_resolve_pick_value_fields",
+                        "message": "reclassified pick with effective margin",
+                        "data": {
+                            "effective_min_edge": float(effective_min_edge),
+                            "stored_decision": pick.value_decision,
+                            "new_decision": value_decision,
+                            "odds": pick.odds,
+                            "void_odds": void_odds,
+                        },
+                        "timestamp": int(_dt.now().timestamp() * 1000),
+                    },
+                    default=str,
+                )
+                + "\n"
+            )
+        except Exception:
+            pass
+    # #endregion
     return {
         "void_odds": round(void_odds, 4),
         "edge_absolute": round(edge_absolute, 4),
         "edge_percent": round(edge_percent, 2),
         "expected_roi": round(expected_roi, 6),
+        "suggested_min_edge_percent": stored_suggested,
+        "min_edge_percent": round(float(effective_min_edge), 2),
         "value_decision": value_decision,
-        "value_label": value_label,
+        "value_label": _value_label_for_decision(value_decision),
     }
 
 
@@ -924,7 +1071,7 @@ def _pick_read(
     *,
     predictions: dict[int, MatchPrediction],
     fixtures: dict[int, Fixture],
-    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
+    min_edge_percent: float | None = None,
 ) -> BettingSlipPickRead:
     actual_winner = _resolve_actual_winner(pick, predictions, fixtures)
     pick_status, is_correct = _resolve_pick_status(pick, actual_winner)
@@ -947,6 +1094,8 @@ def _pick_read(
         edge_absolute=value_fields["edge_absolute"],
         edge_percent=value_fields["edge_percent"],
         expected_roi=value_fields["expected_roi"],
+        suggested_min_edge_percent=value_fields["suggested_min_edge_percent"],
+        min_edge_percent=value_fields["min_edge_percent"],
         value_decision=value_fields["value_decision"],
         value_label=value_fields["value_label"],
         confidence=pick.confidence,
@@ -963,7 +1112,7 @@ def _slip_read(
     predictions: dict[int, MatchPrediction],
     fixtures: dict[int, Fixture],
     stake: float,
-    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
+    min_edge_percent: float | None = None,
 ) -> BettingSlipRead:
     pick_reads = [
         _pick_read(
@@ -1024,7 +1173,7 @@ def _build_daily_response(
     stake: float,
     candidate_pool_size: int,
     warnings: list[str],
-    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
+    min_edge_percent: float | None = None,
 ) -> BettingSlipsDailyResponse:
     slips = _load_slips(
         db,
@@ -1096,7 +1245,8 @@ def get_daily_betting_slips(
     stake: float = DEFAULT_STAKE,
     slip_count: int = DEFAULT_SLIP_COUNT,
     picks_per_slip: int = DEFAULT_PICKS_PER_SLIP,
-    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
+    min_edge_percent: float | None = None,
+    min_edge_overrides: dict[int, float] | None = None,
     regenerate: bool = False,
 ) -> BettingSlipsDailyResponse:
     target_date = slip_date or date.today()
@@ -1137,11 +1287,12 @@ def get_daily_betting_slips(
             model_version=model_version,
             model_name=resolved_model_name,
             min_edge_percent=min_edge_percent,
+            min_edge_overrides=min_edge_overrides,
         )
         candidate_pool_size = len(candidates)
         if candidate_pool_size == 0:
             warnings.append(
-                "Nessuna pick PLAY disponibile: tutte le partite sono sotto quota void o senza quote bookmaker."
+                "Nessuna pick disponibile: servono previsioni e quote bookmaker per le partite del giorno."
             )
         generated, generation_warnings = generate_slips(
             candidates,
@@ -1164,6 +1315,7 @@ def get_daily_betting_slips(
             model_version=model_version,
             model_name=resolved_model_name,
             min_edge_percent=min_edge_percent,
+            min_edge_overrides=min_edge_overrides,
         )
         candidate_pool_size = len(candidates)
 
@@ -1204,7 +1356,8 @@ def refresh_betting_slips(
     model_name: str | None = None,
     stake: float = DEFAULT_STAKE,
     days_back: int = 1,
-    min_edge_percent: float = DEFAULT_MIN_EDGE_PERCENT,
+    min_edge_percent: float | None = None,
+    min_edge_overrides: dict[int, float] | None = None,
     regenerate: bool = True,
 ) -> BettingSlipsRefreshResponse:
     from backend.src.app.services.imports import import_played_fixtures, refresh_matches
@@ -1278,6 +1431,7 @@ def refresh_betting_slips(
         model_name=resolved_model_name,
         stake=stake,
         min_edge_percent=min_edge_percent,
+        min_edge_overrides=min_edge_overrides,
         regenerate=regenerate,
     )
     if model_warning:

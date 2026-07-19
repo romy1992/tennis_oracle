@@ -210,12 +210,12 @@ class BettingSlipsServiceTest(unittest.TestCase):
             self.assertEqual([candidate.event_key for candidate in candidates], [100])
             self.assertIsNotNone(candidates[0].odds)
 
-    def test_build_candidate_pool_excludes_heavy_favorite_below_void(self):
+    def test_build_candidate_pool_includes_heavy_favorite_as_no_bet(self):
         heavy_favorite_odds = {
             "100": {
                 "Home/Away": {
-                    "Home": {"Book A": "1.08", "Book B": "1.10"},
-                    "Away": {"Book A": "8.00", "Book B": "7.50"},
+                    "Home": {"Book A": "1.04", "Book B": "1.05"},
+                    "Away": {"Book A": "12.00", "Book B": "11.00"},
                 }
             }
         }
@@ -251,7 +251,10 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 model_version="v2",
                 model_name="random_forest",
             )
-            self.assertEqual(len(candidates), 0)
+            self.assertEqual(len(candidates), 1)
+            self.assertEqual(candidates[0].value_decision, "NO BET")
+            self.assertIsNotNone(candidates[0].suggested_min_edge_percent)
+            self.assertIsNotNone(candidates[0].min_edge_percent)
 
     def test_generate_slips_avoids_duplicate_event_keys(self):
         with self.Session() as session:
@@ -266,6 +269,21 @@ class BettingSlipsServiceTest(unittest.TestCase):
             for slip in slips:
                 keys = [pick.event_key for pick in slip.picks]
                 self.assertEqual(len(keys), len(set(keys)))
+
+    def test_generate_slips_builds_three_difficulty_tiers(self):
+        with self.Session() as session:
+            self._seed_candidates(session, count=12)
+            candidates = build_candidate_pool(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+            )
+            slips, _warnings = generate_slips(candidates, slip_count=9)
+            self.assertGreaterEqual(len(slips), 1)
+            keys = [slip.slip_key for slip in slips]
+            self.assertTrue(any(key.startswith("play_") for key in keys))
+            self.assertTrue(any(key.startswith("soft_") for key in keys) or any(key.startswith("mixed_") for key in keys))
 
     def test_persisted_slips_are_stable_on_second_load(self):
         with self.Session() as session:

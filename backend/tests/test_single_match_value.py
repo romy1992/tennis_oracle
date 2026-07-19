@@ -10,6 +10,7 @@ from backend.src.app.db.session import get_db
 from backend.src.app.main import app
 from backend.src.app.services.single_match_value import (
     calculate_expected_roi,
+    calculate_match_min_edge_percent,
     calculate_void_odds,
     classify_single_bet_value,
 )
@@ -41,6 +42,18 @@ class SingleMatchValueTest(unittest.TestCase):
     def test_void_odds_and_expected_roi_formula(self):
         self.assertAlmostEqual(calculate_void_odds(0.833333), 1.2, places=4)
         self.assertAlmostEqual(calculate_expected_roi(1.25, 0.833333), 0.04166625)
+
+    def test_match_min_edge_from_bookmaker_margin(self):
+        # 1/1.90 + 1/2.10 - 1 ≈ 0.0025 → clamped to floor 1.0
+        self.assertEqual(calculate_match_min_edge_percent(1.90, 2.10), 1.0)
+        # Wider overround ~5.26%
+        self.assertAlmostEqual(calculate_match_min_edge_percent(1.80, 2.00), 5.56, places=2)
+        # Few bookmakers add penalty
+        self.assertAlmostEqual(
+            calculate_match_min_edge_percent(1.80, 2.00, bookmaker_count=1),
+            6.06,
+            places=2,
+        )
 
     def test_classifies_play_no_bet_and_borderline(self):
         void_odds = calculate_void_odds(0.72)
@@ -117,6 +130,8 @@ class SingleMatchValueTest(unittest.TestCase):
         self.assertEqual(item["decision"], "PLAY")
         self.assertAlmostEqual(item["void_odds"], 1.3889, places=4)
         self.assertAlmostEqual(item["expected_roi"], 0.0944, places=4)
+        self.assertIn("suggested_min_edge_percent", item)
+        self.assertIn("min_edge_percent", item)
         self.assertEqual(item["value_label"], "Singola con valore")
 
     def test_route_prepares_historical_simulation_for_play_bets(self):

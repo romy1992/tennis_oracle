@@ -24,7 +24,12 @@ def read_single_match_value_analysis(
     status: FixturePredictionStatus = Query(default="upcoming"),
     outcome: PredictionOutcome = Query(default="all"),
     player: str | None = Query(default=None, min_length=1, max_length=100),
-    min_edge_percent: float = Query(default=3.0, ge=0.0, le=100.0),
+    min_edge_percent: float = Query(
+        default=2.0,
+        ge=0.0,
+        le=100.0,
+        description="Global safety margin percent above void odds (default 2).",
+    ),
     db: Session = Depends(get_db),
 ) -> SingleMatchValueResponse:
     try:

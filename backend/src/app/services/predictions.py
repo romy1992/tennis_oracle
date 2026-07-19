@@ -358,6 +358,20 @@ def count_played_fixtures(
     return int(db.scalar(stmt) or 0)
 
 
+def _played_has_prediction_expr(
+    model_version: ModelVersion,
+    explicit_model_name: str | None,
+):
+    conditions = [
+        MatchPrediction.event_key == Fixture.event_key,
+        MatchPrediction.model_version == model_version,
+        MatchPrediction.predicted_winner.isnot(None),
+    ]
+    if explicit_model_name is not None:
+        conditions.append(MatchPrediction.model_name == explicit_model_name)
+    return exists(select(1).where(*conditions))
+
+
 def list_played_fixtures(
     db: Session,
     *,
@@ -371,6 +385,7 @@ def list_played_fixtures(
     player_name: str | None = None,
     odds_required: bool = False,
 ) -> list[Fixture]:
+    has_prediction = _played_has_prediction_expr(model_version, explicit_model_name)
     stmt = (
         select(Fixture)
         .where(
@@ -385,6 +400,8 @@ def list_played_fixtures(
             )
         )
         .order_by(
+            # Prefer rows with a stored prediction so "Giocate" page 1 is useful.
+            has_prediction.desc(),
             Fixture.event_date.desc().nullslast(),
             Fixture.event_time.desc().nullslast(),
             Fixture.event_key.desc(),

@@ -13,6 +13,7 @@ import type {
   MLModelVersion,
   ModelsVersionsResultsResponse
 } from "../types/api";
+import { classifySingleBetValue } from "../utils/minEdge";
 import {
   DEFAULT_MODEL_VERSION,
   resolvePreferredModelVersion,
@@ -245,14 +246,24 @@ function truncateText(value: string | null | undefined, maxLength = 28) {
   return `${value.slice(0, maxLength - 1)}…`;
 }
 
+function resolvePickDisplay(pick: BettingSlipPick, globalMinEdge: number) {
+  let decision = pick.value_decision;
+  if (pick.odds != null && pick.void_odds != null) {
+    decision = classifySingleBetValue(pick.odds, pick.void_odds, globalMinEdge);
+  }
+  return { decision };
+}
+
 function SlipCard({
   slip,
   stake,
-  historicalOutcomesMissing
+  historicalOutcomesMissing,
+  globalMinEdge
 }: {
   slip: BettingSlip;
   stake: number;
   historicalOutcomesMissing: boolean;
+  globalMinEdge: number;
 }) {
   const { potentialReturn, potentialProfit, actualOutcome } = computeStakeValues(slip, stake);
 
@@ -288,14 +299,16 @@ function SlipCard({
               <th>Pick</th>
               <th>Quota</th>
               <th>Void</th>
-              <th>Margine</th>
+              <th>Edge</th>
               <th>ROI</th>
               <th>Valore</th>
               <th>Conf.</th>
             </tr>
           </thead>
           <tbody>
-            {slip.picks.map((pick) => (
+            {slip.picks.map((pick) => {
+              const display = resolvePickDisplay(pick, globalMinEdge);
+              return (
               <tr key={pick.event_key}>
                 <td className="slip-col-status">
                   <span
@@ -330,9 +343,9 @@ function SlipCard({
                   {formatSignedRoi(pick.expected_roi)}
                 </td>
                 <td className="slip-col-value-state">
-                  {pick.value_decision ? (
-                    <span className={`value-decision-badge ${valueDecisionClass(pick.value_decision)}`}>
-                      {pick.value_decision}
+                  {display.decision ? (
+                    <span className={`value-decision-badge ${valueDecisionClass(display.decision)}`}>
+                      {display.decision}
                     </span>
                   ) : (
                     "-"
@@ -341,7 +354,8 @@ function SlipCard({
                 </td>
                 <td className="slip-col-confidence">{formatProb(pick.confidence)}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -391,7 +405,7 @@ export function BettingSlipsPage() {
   const [dayStatsByModel, setDayStatsByModel] = useState<Record<string, BettingSlipStatsResponse>>({});
   const [overallStats, setOverallStats] = useState<BettingSlipStatsResponse | null>(null);
   const [stake, setStake] = useState(10);
-  const [minEdgePercent, setMinEdgePercent] = useState(3);
+  const [minEdgePercent, setMinEdgePercent] = useState(2);
   const [loading, setLoading] = useState(true);
   const [loadingDay, setLoadingDay] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -422,18 +436,28 @@ export function BettingSlipsPage() {
     [calendar, selectedDate]
   );
 
-  const loadDayData = useCallback(async (date: string, options?: { regenerate?: boolean }) => {
+  const loadDayData = useCallback(async (date: string, options?: { regenerate?: boolean; minEdge?: number }) => {
     const models = activeModels.length ? activeModels : ["logistic_regression"];
+    // Do not put minEdgePercent in deps: margin changes reclassify client-side without refetch.
+    // Regenerate/global-update callers pass minEdge explicitly.
+    const edgeForRequest = options?.minEdge ?? 0;
     const dailyResponses = await Promise.all(
       models.map((modelName) =>
-        apiClient.getDailyBettingSlips({
-          model_version: activeVersion,
-          model_name: modelName,
-          stake,
-          date,
-          min_edge_percent: minEdgePercent,
-          regenerate: options?.regenerate ?? false
-        })
+        options?.regenerate
+          ? apiClient.regenerateDailyBettingSlips({
+              model_version: activeVersion,
+              model_name: modelName,
+              stake,
+              date,
+              min_edge_percent: edgeForRequest
+            })
+          : apiClient.getDailyBettingSlips({
+              model_version: activeVersion,
+              model_name: modelName,
+              stake,
+              date,
+              min_edge_percent: edgeForRequest
+            })
       )
     );
     const dayStatsResponses = await Promise.all(
@@ -463,7 +487,7 @@ export function BettingSlipsPage() {
     setDailyByModel(dailyMap);
     setDayStatsByModel(statsMap);
     setOverallStats(overallStatsData);
-  }, [stake, activeVersion, activeModels, minEdgePercent]);
+  }, [stake, activeVersion, activeModels]);
 
   useEffect(() => {
     async function loadCalendar() {
@@ -513,7 +537,10 @@ export function BettingSlipsPage() {
     }
     setLastReloadToken(lastCompletedAt);
     const shouldRegenerate = !selectedCalendarDay?.is_past;
-    void loadDayData(selectedDate, { regenerate: shouldRegenerate }).then(() => {
+    void loadDayData(selectedDate, {
+      regenerate: shouldRegenerate,
+      minEdge: minEdgePercent
+    }).then(() => {
       setActionMessage(
         shouldRegenerate
           ? "Schedine rigenerate con filtro valore dall'ultima run globale."
@@ -530,8 +557,8 @@ export function BettingSlipsPage() {
     try {
       setRegenerating(true);
       setActionMessage(null);
-      await loadDayData(selectedDate, { regenerate: true });
-      setActionMessage("Schedine rigenerate con filtro valore PLAY.");
+      await loadDayData(selectedDate, { regenerate: true, minEdge: minEdgePercent });
+      setActionMessage("Schedine rigenerate (9 profili: Play / Play+Border / Miste).");
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore inatteso.");
@@ -562,7 +589,8 @@ export function BettingSlipsPage() {
         <div>
           <h2>Consiglio schedina</h2>
           <p>
-            {formatDate(selectedDate)} · versione {activeVersion} · solo pick PLAY sopra quota void
+            {formatDate(selectedDate)} · versione {activeVersion} · 9 schedine a difficoltà crescente
+            (3 Play, 3 Play+Borderline, 3 miste)
           </p>
         </div>
         <div className="page-header-actions">
@@ -576,7 +604,7 @@ export function BettingSlipsPage() {
               value={minEdgePercent}
               onChange={(event) => setMinEdgePercent(Number(event.target.value) || 0)}
             />
-            <small>% sopra quota void</small>
+            <small>% sopra quota void (default 2). A 0% solo BORDERLINE → PLAY; NO BET resta se quota &lt; void.</small>
           </label>
           <button
             type="button"
@@ -724,6 +752,7 @@ export function BettingSlipsPage() {
                       slip={slip}
                       stake={stake}
                       historicalOutcomesMissing={historicalOutcomesMissing}
+                      globalMinEdge={minEdgePercent}
                     />
                   ))}
                 </div>

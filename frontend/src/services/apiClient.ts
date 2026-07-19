@@ -118,6 +118,10 @@ export const apiClient = {
     post<ImportFixturesResponse>("/api/imports/fixtures", { days_back: daysBack }),
   getDailyBettingSlips: (params: BettingSlipsQueryParams = {}) =>
     request<BettingSlipsDailyResponse>(withQuery("/api/betting-slips/daily", params)),
+  regenerateDailyBettingSlips: (params: BettingSlipsQueryParams = {}) =>
+    post<BettingSlipsDailyResponse>(
+      withQuery("/api/betting-slips/daily", { ...params, regenerate: true })
+    ),
   refreshBettingSlips: (params: BettingSlipsQueryParams = {}) =>
     post<BettingSlipsRefreshResponse>(withQuery("/api/betting-slips/refresh", params)),
   getBettingSlipStats: (params: BettingSlipStatsParams = {}) =>

@@ -8,6 +8,12 @@ PickStatus = Literal["pending", "won", "lost"]
 SlipStatus = Literal["pending", "won", "lost"]
 
 
+class BettingSlipsGenerateRequest(BaseModel):
+    """Optional body for regenerate flows with per-match margin overrides."""
+
+    min_edge_overrides: dict[int, float] = Field(default_factory=dict)
+
+
 class BettingSlipPickRead(BaseModel):
     event_key: int
     event_date: date | None = None
@@ -26,6 +32,8 @@ class BettingSlipPickRead(BaseModel):
     edge_absolute: float | None = None
     edge_percent: float | None = None
     expected_roi: float | None = None
+    suggested_min_edge_percent: float | None = None
+    min_edge_percent: float | None = None
     value_decision: str | None = None
     value_label: str | None = None
     confidence: float | None = None

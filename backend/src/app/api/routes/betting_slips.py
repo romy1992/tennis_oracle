@@ -10,6 +10,7 @@ from backend.src.app.schemas.betting_slips import (
     BettingSlipCalendarResponse,
     BettingSlipModelStatsResponse,
     BettingSlipsDailyResponse,
+    BettingSlipsGenerateRequest,
     BettingSlipsRefreshResponse,
     BettingSlipStatsResponse,
 )
@@ -31,9 +32,9 @@ def read_daily_betting_slips(
     model_version: ModelVersion = Query(default="v2"),
     model_name: str | None = Query(default=None),
     stake: float = Query(default=10.0, ge=0.01),
-    slip_count: int = Query(default=5, ge=1, le=5),
+    slip_count: int = Query(default=9, ge=1, le=9),
     picks_per_slip: int = Query(default=5, ge=4, le=5),
-    min_edge_percent: float = Query(default=3.0, ge=0.0, le=100.0),
+    min_edge_percent: float = Query(default=2.0, ge=0.0, le=100.0),
     regenerate: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> BettingSlipsDailyResponse:
@@ -47,6 +48,40 @@ def read_daily_betting_slips(
             slip_count=slip_count,
             picks_per_slip=picks_per_slip,
             min_edge_percent=min_edge_percent,
+            regenerate=regenerate,
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Database table for betting slips is not available.",
+        ) from exc
+
+
+@router.post("/daily", response_model=BettingSlipsDailyResponse)
+def generate_daily_betting_slips(
+    body: BettingSlipsGenerateRequest | None = None,
+    slip_date: date | None = Query(default=None, alias="date"),
+    model_version: ModelVersion = Query(default="v2"),
+    model_name: str | None = Query(default=None),
+    stake: float = Query(default=10.0, ge=0.01),
+    slip_count: int = Query(default=9, ge=1, le=9),
+    picks_per_slip: int = Query(default=5, ge=4, le=5),
+    min_edge_percent: float = Query(default=2.0, ge=0.0, le=100.0),
+    regenerate: bool = Query(default=True),
+    db: Session = Depends(get_db),
+) -> BettingSlipsDailyResponse:
+    try:
+        overrides = body.min_edge_overrides if body is not None else {}
+        return get_daily_betting_slips(
+            db=db,
+            slip_date=slip_date,
+            model_version=model_version,
+            model_name=model_name,
+            stake=stake,
+            slip_count=slip_count,
+            picks_per_slip=picks_per_slip,
+            min_edge_percent=min_edge_percent,
+            min_edge_overrides=overrides or None,
             regenerate=regenerate,
         )
     except SQLAlchemyError as exc:
@@ -82,11 +117,13 @@ def refresh_daily_betting_slips(
     model_name: str | None = Query(default=None),
     stake: float = Query(default=10.0, ge=0.01),
     days_back: int = Query(default=1, ge=0, le=14),
-    min_edge_percent: float = Query(default=3.0, ge=0.0, le=100.0),
+    min_edge_percent: float = Query(default=2.0, ge=0.0, le=100.0),
     regenerate: bool = Query(default=True),
+    body: BettingSlipsGenerateRequest | None = None,
     db: Session = Depends(get_db),
 ) -> BettingSlipsRefreshResponse:
     try:
+        overrides = body.min_edge_overrides if body is not None else {}
         return refresh_betting_slips(
             db=db,
             slip_date=slip_date,
@@ -95,6 +132,7 @@ def refresh_daily_betting_slips(
             stake=stake,
             days_back=days_back,
             min_edge_percent=min_edge_percent,
+            min_edge_overrides=overrides or None,
             regenerate=regenerate,
         )
     except SQLAlchemyError as exc:
