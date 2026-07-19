@@ -36,8 +36,8 @@ Nel menu laterale trovi:
 
 | Voce | A cosa serve |
 |------|----------------|
-| **Partite** | Elenco partite con pronostico, quote e indicazione di valore (PLAY / NO BET / BORDERLINE) |
-| **Consiglio schedina** | Schedine multipla proposte per un giorno, con stake e copia rapida |
+| **Partite** | Elenco partite con pronostico, quota void e stato valore (PLAY / BORDERLINE / NO BET) |
+| **Consiglio schedina** | Fino a 9 schedine per giorno a difficoltà crescente: 3 solo Play, 3 Play+Borderline, 3 miste |
 | **Statistiche schedine** | Confronto risultati delle schedine tra modelli/versioni |
 | **Statistiche previsioni** | Accuratezza e metriche delle previsioni nel tempo |
 
@@ -56,6 +56,26 @@ In sintesi:
 - **v3**: modello **consapevole delle quote** (solo partite con quote disponibili)
 
 La scelta resta salvata nel browser.
+
+### Margine di sicurezza e stati valore
+
+In alto su **Partite** e **Consiglio schedina** trovi il **margine di sicurezza** (default **2%**, editabile). Vale per tutte le partite della pagina. Se lo porti a **0%**, solo le BORDERLINE diventano PLAY; le NO BET restano tali (quota di mercato sotto void).
+
+Per ogni partita con quote e pronostico il sistema calcola:
+
+1. **Quota void** — break-even dalla probabilità del modello (`1 / probabilità`)
+2. **Margine di sicurezza** — percentuale sopra la void richiesta per un PLAY (impostata in alto)
+3. **Stato** — `PLAY` (quota abbastanza sopra void), `BORDERLINE` (sopra void ma sotto il margine), `NO BET` (sotto void)
+
+### Consiglio schedine (difficoltà)
+
+Alla generazione/rigenerazione compaiono tipicamente **9 schedine**:
+
+- **3 Play** — solo pick classificate PLAY
+- **3 Play+Border** — mix di PLAY e BORDERLINE
+- **3 Miste** — possono includere anche NO BET (più aggressive / rischiose)
+
+Dentro ogni gruppo ci sono varianti (sicura / bilanciata / value). Se i candidati del giorno non bastano, alcune schedine possono mancare o avere meno pick: controlla i messaggi di avviso in pagina.
 
 ### Aggiornamento globale
 
@@ -144,13 +164,13 @@ Se usi un database cloud separato, il job giornaliero può anche **sincronizzare
 ## Domande frequenti
 
 **Perché alcune partite non hanno pronostico?**  
-Mancano dati storici, odds (per `v3`), o l’aggiornamento non è ancora stato eseguito.
+Mancano dati storici, odds (per `v3`), o l’aggiornamento non è ancora stato eseguito. In **Giocate**, le partite senza previsione salvata restano vuote: il pronostico va generato **prima** che la partita finisca (Aggiorna tutto / job giornaliero).
 
 **Cosa significa PLAY / NO BET / BORDERLINE?**  
-È il giudizio sul valore della scommessa singola confrontando probabilità del modello e quota di mercato.
+Confronta la quota di mercato con la **quota void** del modello, più il **margine di sicurezza** impostato in alto nella pagina. PLAY = abbastanza sopra void; BORDERLINE = sopra void ma sotto il margine; NO BET = sotto void.
 
 **Le schedine vengono aggiornate da sole?**  
-Sì, tipicamente dopo un aggiornamento globale o un refresh esplicito della pagina schedine.
+Sì, tipicamente dopo un aggiornamento globale o un refresh esplicito / “Rigenera schedine” sulla pagina Consiglio schedina.
 
 **Serve capire il machine learning per usarlo?**  
 No. Per l’uso quotidiano basta l’interfaccia web e, se vuoi, il bot Telegram.

@@ -98,6 +98,8 @@ class BettingSlipPick(Base):
     edge_absolute = Column(Float, nullable=True)
     edge_percent = Column(Float, nullable=True)
     expected_roi = Column(Float, nullable=True)
+    suggested_min_edge_percent = Column(Float, nullable=True)
+    min_edge_percent = Column(Float, nullable=True)
     value_decision = Column(String, nullable=True)
     value_label = Column(String, nullable=True)
     confidence = Column(Float, nullable=True)

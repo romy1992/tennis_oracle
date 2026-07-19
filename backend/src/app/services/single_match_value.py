@@ -9,6 +9,7 @@ from backend.src.app.ml.datasets.odds_builder import (
     FixtureOddsRecord,
     MatchWinnerOddsAverage,
     average_match_winner_odds_from_record,
+    bookmaker_margin,
     profit_for_unit_stake,
 )
 from backend.src.app.ml.model_versioning import ModelVersion
@@ -35,6 +36,11 @@ from backend.src.app.services.predictions import (
 
 SINGLE_MATCH_STAKE = 1.0
 MATCH_WINNER_MARKET_LABEL = "Vincente match"
+DEFAULT_MIN_EDGE_PERCENT = 2.0
+MIN_EDGE_PERCENT_FLOOR = 1.0
+MIN_EDGE_PERCENT_CAP = 10.0
+LOW_BOOKMAKER_COUNT_THRESHOLD = 2
+LOW_BOOKMAKER_COUNT_PENALTY = 0.5
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,24 @@ def calculate_void_odds(model_probability: float) -> float:
 
 def calculate_expected_roi(market_odds: float, model_probability: float) -> float:
     return market_odds * model_probability - 1.0
+
+
+def calculate_match_min_edge_percent(
+    player_1_odd: float,
+    player_2_odd: float,
+    *,
+    bookmaker_count: int | None = None,
+) -> float:
+    """Per-match safety margin above void odds, derived from market overround."""
+    try:
+        margin_pct = bookmaker_margin(player_1_odd, player_2_odd) * 100.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        return DEFAULT_MIN_EDGE_PERCENT
+
+    suggested = max(MIN_EDGE_PERCENT_FLOOR, min(MIN_EDGE_PERCENT_CAP, margin_pct))
+    if bookmaker_count is not None and bookmaker_count < LOW_BOOKMAKER_COUNT_THRESHOLD:
+        suggested = min(MIN_EDGE_PERCENT_CAP, suggested + LOW_BOOKMAKER_COUNT_PENALTY)
+    return round(suggested, 2)
 
 
 def classify_single_bet_value(
@@ -81,13 +105,20 @@ def analyze_single_match_value(
     predicted_winner: str,
     prob_player_1_win: float,
     odds: MatchWinnerOddsAverage,
-    min_edge_percent: float,
+    min_edge_percent: float | None = None,
     actual_winner: str | None = None,
 ) -> SingleMatchValueItem | None:
     model_probability = _model_prob_for_selection(predicted_winner, prob_player_1_win)
     market_odds = _market_odds_for_selection(predicted_winner, odds)
     if model_probability is None or market_odds is None:
         return None
+
+    suggested_min_edge_percent = (
+        float(min_edge_percent)
+        if min_edge_percent is not None
+        else DEFAULT_MIN_EDGE_PERCENT
+    )
+    effective_min_edge_percent = suggested_min_edge_percent
 
     void_odds = calculate_void_odds(model_probability)
     edge_absolute = market_odds - void_odds
@@ -96,7 +127,7 @@ def analyze_single_match_value(
     decision = classify_single_bet_value(
         market_odds=market_odds,
         void_odds=void_odds,
-        min_edge_percent=min_edge_percent,
+        min_edge_percent=effective_min_edge_percent,
     )
     is_correct = None
     profit_loss = None
@@ -121,6 +152,8 @@ def analyze_single_match_value(
         edge_absolute=round(edge_absolute, 4),
         edge_percent=round(edge_percent, 2),
         expected_roi=round(expected_roi, 6),
+        suggested_min_edge_percent=suggested_min_edge_percent,
+        min_edge_percent=round(effective_min_edge_percent, 2),
         stake=SINGLE_MATCH_STAKE,
         decision=decision,
         value_label=_value_label(decision),
@@ -145,9 +178,39 @@ def get_single_match_value_analysis(
     status: FixturePredictionStatus = "upcoming",
     outcome: PredictionOutcome = "all",
     player_name: str | None = None,
-    min_edge_percent: float = 3.0,
+    min_edge_percent: float | None = DEFAULT_MIN_EDGE_PERCENT,
+    min_edge_overrides: dict[int, float] | None = None,
 ) -> SingleMatchValueResponse:
     selected_model_name = _resolve_model_name(model_version, model_name)
+    baseline_min_edge = (
+        DEFAULT_MIN_EDGE_PERCENT if min_edge_percent is None else float(min_edge_percent)
+    )
+    #region agent log
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        from datetime import datetime as _dt
+        _Path(r"c:\Users\trott\git\tennis_oracle\debug-839b99.log").open("a", encoding="utf-8").write(
+            _json.dumps({
+                "sessionId": "839b99",
+                "runId": "pre-fix",
+                "hypothesisId": "B",
+                "location": "single_match_value.py:get_single_match_value_analysis",
+                "message": "server received min_edge_percent",
+                "data": {
+                    "min_edge_percent_arg": min_edge_percent,
+                    "baseline_min_edge": baseline_min_edge,
+                    "is_none": min_edge_percent is None,
+                    "model_version": model_version,
+                    "model_name": model_name,
+                    "status": status,
+                },
+                "timestamp": int(_dt.now().timestamp() * 1000),
+            }) + "\n"
+        )
+    except Exception:
+        pass
+    #endregion
     contexts = _single_match_contexts(
         db,
         model_version=model_version,
@@ -158,13 +221,17 @@ def get_single_match_value_analysis(
         outcome=outcome,
         player_name=player_name,
     )
+    overrides = min_edge_overrides or {}
     items = [
         item
         for context in contexts
         if (
             item := _analyze_context(
                 context,
-                min_edge_percent=min_edge_percent,
+                min_edge_percent=overrides.get(
+                    context.fixture.event_key,
+                    baseline_min_edge,
+                ),
             )
         )
         is not None
@@ -174,7 +241,7 @@ def get_single_match_value_analysis(
     return SingleMatchValueResponse(
         model_version=model_version,
         model_name=selected_model_name,
-        min_edge_percent=min_edge_percent,
+        min_edge_percent=baseline_min_edge,
         items=page_items,
         total=len(items),
         offset=offset,
@@ -257,7 +324,7 @@ def _single_match_contexts(
 def _analyze_context(
     context: SingleMatchContext,
     *,
-    min_edge_percent: float,
+    min_edge_percent: float | None,
 ) -> SingleMatchValueItem | None:
     fixture = context.fixture
     prediction = context.prediction

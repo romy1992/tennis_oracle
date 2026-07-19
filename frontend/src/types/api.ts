@@ -192,6 +192,8 @@ export type SingleMatchValueItem = {
   edge_absolute: number;
   edge_percent: number;
   expected_roi: number;
+  suggested_min_edge_percent: number;
+  min_edge_percent: number;
   stake: number;
   decision: SingleMatchValueDecision;
   value_label: string;
@@ -234,7 +236,7 @@ export type SingleMatchValueSummary = {
 export type SingleMatchValueResponse = {
   model_version: MLModelVersion;
   model_name: string | null;
-  min_edge_percent: number;
+  min_edge_percent: number | null;
   items: SingleMatchValueItem[];
   total: number;
   offset: number;
@@ -500,6 +502,8 @@ export type BettingSlipPick = {
   edge_absolute: number | null;
   edge_percent: number | null;
   expected_roi: number | null;
+  suggested_min_edge_percent: number | null;
+  min_edge_percent: number | null;
   value_decision: string | null;
   value_label: string | null;
   confidence: number | null;

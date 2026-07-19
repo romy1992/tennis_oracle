@@ -24,6 +24,8 @@ class SingleMatchValueItem(BaseModel):
     edge_absolute: float
     edge_percent: float
     expected_roi: float
+    suggested_min_edge_percent: float
+    min_edge_percent: float
     stake: float = 1.0
     decision: SingleMatchValueDecision
     value_label: str
@@ -66,7 +68,7 @@ class SingleMatchValueSummary(BaseModel):
 class SingleMatchValueResponse(BaseModel):
     model_version: str
     model_name: str | None = None
-    min_edge_percent: float
+    min_edge_percent: float | None = None
     items: list[SingleMatchValueItem]
     total: int
     offset: int

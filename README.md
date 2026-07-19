@@ -126,10 +126,11 @@ Documentazione interattiva: `http://localhost:8000/docs`.
 | GET | `/api/next-fixtures/predictions` | `predictions.read_next_fixtures_predictions` | Partite + predizione paginate |
 | GET | `/api/predictions/stats/daily` | `predictions.read_daily_prediction_stats` | Stats giornaliere |
 | GET | `/api/predictions/stats/summary` | `predictions.read_prediction_summary` | Riepilogo accuracy/ROI |
-| GET | `/api/single-match-value` | `single_match_value.read_single_match_value_analysis` | Analisi value bet singola |
-| GET | `/api/betting-slips/daily` | `betting_slips.read_daily_betting_slips` | Schedine del giorno |
+| GET | `/api/single-match-value` | `single_match_value.read_single_match_value_analysis` | Analisi value bet (margine globale default 2%) |
+| GET | `/api/betting-slips/daily` | `betting_slips.read_daily_betting_slips` | Schedine del giorno (9 profili a tier) |
+| POST | `/api/betting-slips/daily` | `betting_slips.generate_daily_betting_slips` | Rigenera schedine del giorno |
 | GET | `/api/betting-slips/calendar` | `betting_slips.read_betting_slip_calendar` | Calendario giorni con schedine |
-| POST | `/api/betting-slips/refresh` | `betting_slips.refresh_daily_betting_slips` | Rigenera schedine |
+| POST | `/api/betting-slips/refresh` | `betting_slips.refresh_daily_betting_slips` | Refresh import + rigenera schedine |
 | GET | `/api/betting-slips/stats` | `betting_slips.read_betting_slip_stats` | Stats schedine |
 | GET | `/api/betting-slips/stats/by-model` | `betting_slips.read_betting_slip_stats_by_model` | Stats per modello |
 | POST | `/api/global-update` | `global_update.trigger_global_update` | Avvia aggiornamento globale |
@@ -241,10 +242,11 @@ Repository specializzati (eredita `CrudRepository`):
 | Simbolo | Ruolo |
 |---------|-------|
 | `CandidatePick` / `GeneratedSlip` | Dataclass candidate / slip generata |
-| `build_candidate_pool` | Pool pick da fixtures+predizioni+odds |
-| `generate_slips` | Seleziona pick e costruisce slip (profili stake) |
+| `SLIP_PROFILES` | 9 profili: 3 Play, 3 Play+Borderline, 3 miste (tutti gli stati) |
+| `build_candidate_pool` | Pool pick da fixtures+predizioni+odds (include PLAY/BORDERLINE/NO BET) |
+| `generate_slips` | Seleziona pick per tier di difficoltà e costruisce slip |
 | `get_betting_slip_calendar` | Giorni con presenza/assenza slip |
-| `get_daily_betting_slips` | Legge o genera slip del giorno |
+| `get_daily_betting_slips` | Legge o genera slip del giorno con `min_edge_percent` globale |
 | `refresh_betting_slips` | Rigenera forzando delete/upsert |
 | `compute_betting_slip_stats` | ROI/winrate per profilo e giorno |
 | `compute_betting_slip_model_stats` | Stats aggregate per versione/modello |
@@ -254,9 +256,10 @@ Repository specializzati (eredita `CrudRepository`):
 | Funzione | Ruolo |
 |----------|-------|
 | `calculate_void_odds` | Quota di break-even data P(modello) |
+| `calculate_match_min_edge_percent` | Helper overround (opzionale); il default operativo è `DEFAULT_MIN_EDGE_PERCENT = 2` |
 | `calculate_expected_roi` | ROI atteso quota vs probabilità |
-| `classify_single_bet_value` | `PLAY` / `NO BET` / `BORDERLINE` |
-| `analyze_single_match_value` | Analisi su lista context |
+| `classify_single_bet_value` | `PLAY` / `NO BET` / `BORDERLINE` rispetto a void + margine |
+| `analyze_single_match_value` | Analisi singola partita (suggested + effective min edge) |
 | `get_single_match_value_analysis` | Entry point usato dalla route |
 
 #### `app/services/global_update.py`
@@ -441,9 +444,9 @@ Wrapper: `GlobalUpdateProvider`.
 
 | Componente | Ruolo |
 |------------|-------|
-| `PredictionsPage` | Lista partite+predizioni, filtri modello, value analysis |
+| `PredictionsPage` | Lista partite+predizioni; margine globale (default 2%); void/decision in riga |
 | `PredictionStatsPage` | Summary e serie giornaliere accuracy/ROI |
-| `BettingSlipsPage` | Calendario, slip card, stake, refresh, clipboard |
+| `BettingSlipsPage` | Calendario, 9 slip a tier, margine globale (default 2%) |
 | `BettingSlipModelStatsPage` | Tabella comparativa stats per modello |
 
 ### Componenti / hook
@@ -465,6 +468,7 @@ Client `fetch` tipizzato verso le API montate (predictions, betting-slips, impor
 ### Utils
 
 - `utils/modelVersion.ts` — default `v3`, persistenza localStorage; `resolvePreferredModelVersion` su Predictions / Betting slips / Stats
+- `utils/minEdge.ts` — classificazione PLAY/BORDERLINE/NO BET lato client
 - `utils/tennis.ts` — format date/score/superficie/nomi giocatore
 - `types/api.ts` — tipi TypeScript allineati agli schema Pydantic
 

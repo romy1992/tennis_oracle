@@ -12,12 +12,51 @@ import type {
   SingleMatchValueDecision,
   SingleMatchValueResponse
 } from "../types/api";
+import { classifySingleBetValue } from "../utils/minEdge";
 import {
   DEFAULT_MODEL_VERSION,
   resolvePreferredModelVersion,
   writeStoredModelVersion
 } from "../utils/modelVersion";
 import { formatDate } from "../utils/tennis";
+
+// #region agent log
+function agentLog(payload: {
+  hypothesisId: string;
+  location: string;
+  message: string;
+  data?: Record<string, unknown>;
+  runId?: string;
+}) {
+  const body = {
+    sessionId: "839b99",
+    runId: payload.runId ?? "post-fix",
+    hypothesisId: payload.hypothesisId,
+    location: payload.location,
+    message: payload.message,
+    data: payload.data ?? {},
+    timestamp: Date.now()
+  };
+  const encoded = JSON.stringify(body);
+  fetch("http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "839b99" },
+    body: encoded
+  }).catch(() => {});
+  // Prefer 127.0.0.1 (known-good in this session); also try localhost / VITE base.
+  for (const base of [
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    import.meta.env.VITE_API_BASE_URL
+  ].filter(Boolean)) {
+    fetch(`${base}/api/debug/agent-log`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: encoded
+    }).catch(() => {});
+  }
+}
+// #endregion
 
 type FixtureStatusFilter = "upcoming" | "played" | "all";
 type OutcomeFilter = "all" | "won" | "lost";
@@ -54,18 +93,6 @@ function formatOdds(value: number | null | undefined) {
   });
 }
 
-function formatSignedPercent(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${(value * 100).toLocaleString("it-IT", { maximumFractionDigits: 2 })}%`;
-}
-
-function formatSignedPercentValue(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toLocaleString("it-IT", { maximumFractionDigits: 2 })}%`;
-}
-
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -100,6 +127,58 @@ function resultDot(fixture: MergedFixtureRow, show: boolean) {
 
 function decisionClass(decision: SingleMatchValueDecision) {
   return decision.toLowerCase().replace(/\s+/g, "-");
+}
+
+function modelProbForWinner(
+  predictedWinner: string | null | undefined,
+  probPlayer1Win: number | null | undefined
+): number | null {
+  if (probPlayer1Win == null || !predictedWinner) return null;
+  if (predictedWinner === "First Player") return probPlayer1Win;
+  if (predictedWinner === "Second Player") return 1 - probPlayer1Win;
+  return null;
+}
+
+function resolveValueItem(
+  analysis: SingleMatchValueResponse | undefined,
+  eventKey: number,
+  globalMinEdge: number,
+  prediction?: MatchPrediction | null
+): { void_odds: number; decision: SingleMatchValueDecision } | null {
+  const item = analysis?.items.find((entry) => entry.match_id === eventKey);
+  if (item) {
+    const decision = classifySingleBetValue(item.market_odds, item.void_odds, globalMinEdge);
+    // #region agent log
+    if (globalMinEdge === 0 || item.decision !== decision) {
+      fetch('http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'839b99'},body:JSON.stringify({sessionId:'839b99',runId:'pre-fix',hypothesisId:'C,D',location:'PredictionsPage.tsx:resolveValueItem',message:'classify from SMVA item',data:{eventKey,globalMinEdge,marketOdds:item.market_odds,voidOdds:item.void_odds,apiDecision:item.decision,clientDecision:decision,playThreshold:item.void_odds*(1+globalMinEdge/100)},timestamp:Date.now()})}).catch(()=>{});
+    }
+    // #endregion
+    return {
+      void_odds: item.void_odds,
+      decision
+    };
+  }
+
+  // Fallback for played rows: derive void/decision from the prediction already on the fixture.
+  const modelProb = modelProbForWinner(
+    prediction?.predicted_winner,
+    prediction?.prob_player_1_win
+  );
+  const marketOdds = prediction?.predicted_winner_odds;
+  if (modelProb == null || modelProb <= 0 || marketOdds == null) {
+    return null;
+  }
+  const voidOdds = 1 / modelProb;
+  const decision = classifySingleBetValue(marketOdds, voidOdds, globalMinEdge);
+  // #region agent log
+  if (globalMinEdge === 0) {
+    fetch('http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'839b99'},body:JSON.stringify({sessionId:'839b99',runId:'pre-fix',hypothesisId:'C,D',location:'PredictionsPage.tsx:resolveValueItem',message:'classify from prediction fallback',data:{eventKey,globalMinEdge,marketOdds,voidOdds,clientDecision:decision,playThreshold:voidOdds*(1+globalMinEdge/100)},timestamp:Date.now()})}).catch(()=>{});
+  }
+  // #endregion
+  return {
+    void_odds: voidOdds,
+    decision
+  };
 }
 
 function PaginationControls({
@@ -168,7 +247,7 @@ export function PredictionsPage() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [playerSearch, setPlayerSearch] = useState("");
   const [playerQuery, setPlayerQuery] = useState("");
-  const [minEdgePercent, setMinEdgePercent] = useState(3);
+  const [minEdgePercent, setMinEdgePercent] = useState(2);
   const [error, setError] = useState<string | null>(null);
   const [lastReloadToken, setLastReloadToken] = useState<string | null>(null);
 
@@ -192,7 +271,7 @@ export function PredictionsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, outcomeFilter, playerQuery, activeVersion, minEdgePercent]);
+  }, [statusFilter, outcomeFilter, playerQuery, activeVersion]);
 
   const activeModels = useMemo(
     () =>
@@ -220,6 +299,15 @@ export function PredictionsPage() {
       )
     );
 
+    // #region agent log
+    agentLog({
+      hypothesisId: "B",
+      location: "PredictionsPage.tsx:loadPageData",
+      message: "fetching fixtures+SMVA (margin not a reload trigger)",
+      data: { statusFilter, activeVersion, models }
+    });
+    // #endregion
+    // Fetch odds/void once; PLAY/BORDERLINE/NO BET is reclassified client-side from minEdgePercent.
     const valueResponses = await Promise.all(
       models.map((modelName) =>
         apiClient.getSingleMatchValueAnalysis({
@@ -227,10 +315,10 @@ export function PredictionsPage() {
           model_name: modelName,
           status: statusFilter,
           outcome: statusFilter === "played" ? outcomeFilter : undefined,
-          limit: PAGE_SIZE,
-          offset,
+          limit: 200,
+          offset: 0,
           player: trimmedPlayer || undefined,
-          min_edge_percent: minEdgePercent
+          min_edge_percent: 0
         })
       )
     );
@@ -256,7 +344,34 @@ export function PredictionsPage() {
     setTotalFixtures(base?.total ?? 0);
     setSingleValueByModel(values);
     setImportStatus(statusData);
-  }, [statusFilter, outcomeFilter, page, playerQuery, activeVersion, activeModels, minEdgePercent]);
+  }, [statusFilter, outcomeFilter, page, playerQuery, activeVersion, activeModels]);
+
+  const decisionCounts = useMemo(() => {
+    const counts = { PLAY: 0, BORDERLINE: 0, "NO BET": 0, missing: 0 };
+    const primaryModel = modelNames[0];
+    const analysis = primaryModel ? singleValueByModel[primaryModel] : undefined;
+    for (const fixture of fixtures) {
+      const prediction = primaryModel ? fixture.predictionsByModel[primaryModel] : null;
+      const value = resolveValueItem(analysis, fixture.event_key, minEdgePercent, prediction);
+      if (!value) {
+        counts.missing += 1;
+        continue;
+      }
+      counts[value.decision] += 1;
+    }
+    return counts;
+  }, [fixtures, singleValueByModel, modelNames, minEdgePercent]);
+
+  useEffect(() => {
+    // #region agent log
+    agentLog({
+      hypothesisId: "C,E",
+      location: "PredictionsPage.tsx:decisionCounts",
+      message: "visible page decision counts for current margin",
+      data: { minEdgePercent, decisionCounts, fixtureCount: fixtures.length }
+    });
+    // #endregion
+  }, [minEdgePercent, decisionCounts, fixtures.length]);
 
   useEffect(() => {
     async function load() {
@@ -329,12 +444,43 @@ export function PredictionsPage() {
             L&apos;aggiornamento globale e nella sidebar.
           </p>
         </div>
-        {globalStatus ? (
-          <div className="header-actions">
-            <span className="pill">{globalStatus.current_phase ?? globalStatus.status}</span>
-            {globalUpdating ? <span className="pill">Run in corso</span> : null}
-          </div>
-        ) : null}
+        <div className="page-header-actions">
+          <label className="min-edge-field">
+            <span>Margine sicurezza</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              value={minEdgePercent}
+              onChange={(event) => {
+                const raw = event.target.value;
+                const next = Number(raw) || 0;
+                // #region agent log
+                agentLog({
+                  hypothesisId: "A",
+                  location: "PredictionsPage.tsx:minEdge.onChange",
+                  message: "margin input changed",
+                  data: { raw, parsed: Number(raw), next, previous: minEdgePercent }
+                });
+                // #endregion
+                setMinEdgePercent(next);
+              }}
+              disabled={globalUpdating || importingFixtures}
+            />
+            <small>% sopra quota void (default 2). A 0% solo BORDERLINE → PLAY.</small>
+            <small>
+              Pagina: PLAY {decisionCounts.PLAY} · BORDERLINE {decisionCounts.BORDERLINE} · NO BET{" "}
+              {decisionCounts["NO BET"]}
+            </small>
+          </label>
+          {globalStatus ? (
+            <div className="header-actions">
+              <span className="pill">{globalStatus.current_phase ?? globalStatus.status}</span>
+              {globalUpdating ? <span className="pill">Run in corso</span> : null}
+            </div>
+          ) : null}
+        </div>
       </header>
 
       {availableVersions.length ? (
@@ -419,70 +565,6 @@ export function PredictionsPage() {
 
         {actionMessage ? <p className="note action-note">{actionMessage}</p> : null}
         {error ? <p className="note action-error">{error}</p> : null}
-      </article>
-
-      <article className="panel single-value-panel">
-        <div className="section-header">
-          <div>
-            <h3>Single Match Value Analysis</h3>
-            <p>Analisi per modello nella versione {activeVersion}.</p>
-          </div>
-          <label className="min-edge-field">
-            <span>Margine sicurezza</span>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              step="0.5"
-              value={minEdgePercent}
-              onChange={(event) => setMinEdgePercent(Number(event.target.value))}
-              disabled={globalUpdating || importingFixtures}
-            />
-            <small>% sopra quota void</small>
-          </label>
-        </div>
-
-        {modelNames.map((name) => {
-          const singleValue = singleValueByModel[name];
-          if (!singleValue) return null;
-          return (
-            <section key={name} className="panel">
-              <h4>{modelLabel(name)}</h4>
-              <div className="single-value-summary">
-                <div>
-                  <span>PLAY</span>
-                  <strong>{singleValue.summary.play_count}</strong>
-                </div>
-                <div>
-                  <span>NO BET</span>
-                  <strong>{singleValue.summary.no_bet_count}</strong>
-                </div>
-                <div>
-                  <span>ROI medio</span>
-                  <strong>{formatSignedPercent(singleValue.summary.avg_expected_roi)}</strong>
-                </div>
-              </div>
-              {singleValue.items.length === 0 ? (
-                <EmptyState title="Nessuna singola analizzabile" message="Servono prediction e quote." />
-              ) : (
-                <div className="single-value-list">
-                  {singleValue.items.slice(0, 5).map((item) => (
-                    <section key={`${name}-${item.match_id}`} className="single-value-card">
-                      <div className="single-value-card-header">
-                        <h4>
-                          {item.player_a ?? "?"} vs {item.player_b ?? "?"}
-                        </h4>
-                        <span className={`value-decision-badge ${decisionClass(item.decision)}`}>
-                          {item.decision}
-                        </span>
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              )}
-            </section>
-          );
-        })}
       </article>
 
       <article className="panel">
@@ -593,6 +675,14 @@ export function PredictionsPage() {
           </p>
         ) : null}
 
+        <p className="note">
+          Per ogni modello: quota void e stato PLAY / BORDERLINE / NO BET in base al margine di
+          sicurezza impostato in alto nella pagina.
+          {statusFilter === "played"
+            ? " In Giocate compaiono prima le partite con pronostico salvato; senza previsione restano vuote (usa Aggiorna tutto prima che finiscano)."
+            : null}
+        </p>
+
         {fixtures.length === 0 ? (
           <EmptyState
             title="Nessuna partita"
@@ -618,7 +708,7 @@ export function PredictionsPage() {
                     <th>Surface</th>
                     <th>Match</th>
                     {modelNames.map((name) => (
-                      <th key={name} colSpan={2}>
+                      <th key={name} colSpan={4}>
                         {modelLabel(name)}
                       </th>
                     ))}
@@ -630,6 +720,8 @@ export function PredictionsPage() {
                       <Fragment key={name}>
                         <th>Predetto</th>
                         <th>Conf.</th>
+                        <th>Void</th>
+                        <th>Valore</th>
                       </Fragment>
                     ))}
                     <th />
@@ -661,10 +753,28 @@ export function PredictionsPage() {
                         </td>
                         {modelNames.map((name) => {
                           const prediction = fixture.predictionsByModel[name];
+                          const valueItem = resolveValueItem(
+                            singleValueByModel[name],
+                            fixture.event_key,
+                            minEdgePercent,
+                            prediction
+                          );
                           return (
                             <Fragment key={`${fixture.event_key}-${name}`}>
                               <td>{winnerLabel(fixture, prediction?.predicted_winner)}</td>
                               <td>{formatProb(prediction?.confidence)}</td>
+                              <td>{formatOdds(valueItem?.void_odds)}</td>
+                              <td>
+                                {valueItem ? (
+                                  <span
+                                    className={`value-decision-badge ${decisionClass(valueItem.decision)}`}
+                                  >
+                                    {valueItem.decision}
+                                  </span>
+                                ) : (
+                                  "-"
+                                )}
+                              </td>
                             </Fragment>
                           );
                         })}
