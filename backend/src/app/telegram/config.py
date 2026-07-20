@@ -8,7 +8,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[3]
 
 
 class TelegramSettings(BaseSettings):
-    telegram_bot_token: str | None = "8972623840:AAF1H3mKCcNzswJyJ49W5qalldhA3FveOHc"
+    telegram_bot_token: str | None = None
     telegram_api_base_url: str = "http://localhost:8000/api"
     telegram_model_version: str = "v3"
     telegram_model_name: str | None = "logistic_regression"

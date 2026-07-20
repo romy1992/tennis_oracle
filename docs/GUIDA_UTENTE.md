@@ -41,7 +41,7 @@ Nel menu laterale trovi:
 | **Statistiche schedine** | Confronto risultati delle schedine tra modelli/versioni |
 | **Statistiche previsioni** | Accuratezza e metriche delle previsioni nel tempo |
 | **Report aggiornamento** | Esito dell’ultima run “Aggiorna tutto”: errori, warning, fasi e combo modello |
-| **Bot Telegram** | Solo admin: accessi e comandi usati sul bot (KPI, breakdown, storico) |
+| **Bot Telegram** | Solo admin: accessi e comandi usati sul bot (KPI, filtri per data/utente/comando, breakdown giornaliero, storico) |
 
 In alto nella sidebar c’è anche il controllo **Aggiornamento globale**: importa partite, genera previsioni per tutti i modelli disponibili e aggiorna le schedine. Se compaiono errori (es. “4 errori”), il conteggio è cliccabile e apre **Report aggiornamento**.
 
@@ -49,7 +49,7 @@ In alto nella sidebar c’è anche il controllo **Aggiornamento globale**: impor
 
 Nelle pagine puoi scegliere:
 
-- **Versione modello**: `v1`, `v2`, `v3` (default); la scelta resta salvata nel browser
+- **Versione modello**: `v1`, `v2`, `v3` (default in interfaccia e bot: **v3**); la scelta resta salvata nel browser
 - **Tipo modello**: regressione logistica o random forest
 
 In sintesi:
@@ -57,7 +57,7 @@ In sintesi:
 - **v1 / v2**: il modello **non usa le quote** per predire; le quote servono dopo per edge e value bet
 - **v3**: modello **consapevole delle quote** (solo partite con quote disponibili)
 
-La scelta resta salvata nel browser.
+Nota: il job giornaliero da riga di comando, se non specifichi altrimenti, usa ancora **v2**. L’**aggiornamento globale** dalla UI aggiorna invece tutte le combo modello presenti su disco.
 
 ### Margine di sicurezza e stati valore
 
@@ -133,6 +133,7 @@ Variabili importanti in `backend/.env` / `backend/properties/config.env`:
 - `DATABASE_URL` — connessione PostgreSQL
 - `API_TENNIS_KEY` / `API_TENNIS_BASE` — API tennis
 - `CORS_ORIGINS` — origini frontend consentite
+- `TELEGRAM_BOT_TOKEN` — solo se usi il bot (opzionale)
 
 API tipica: `http://localhost:8000`  
 Health check: `GET http://localhost:8000/health`
@@ -154,8 +155,8 @@ VITE_API_BASE_URL=http://localhost:8000
 
 ### Bot Telegram (opzionale)
 
-1. Avvia il backend
-2. Imposta `TELEGRAM_BOT_TOKEN` e le altre variabili Telegram in `.env`
+1. Avvia il backend (`alembic upgrade head` serve anche per la tabella analytics `telegram_bot_event`)
+2. Imposta in `backend/.env` almeno `TELEGRAM_BOT_TOKEN` (e opzionalmente `TELEGRAM_API_BASE_URL`, versione/modello, margine, ecc.)
 3. Esegui:
 
 ```bash
@@ -171,7 +172,7 @@ Con `/partite` ricevi le partite di oggi come in pagina **Partite** (Predetto, C
 
 Con `/statistiche` vedi un riepilogo immagine dell’andamento (partite singole e schedine, con profitto sulle schedine), sempre senza nomi modello.
 
-Nella dashboard web, la voce **Bot Telegram** mostra a te (admin) chi ha usato il bot e quali comandi: non è visibile agli utenti Telegram.
+Nella dashboard web, la voce **Bot Telegram** mostra a te (admin) chi ha usato il bot e quali comandi (filtri per periodo, utente, azione): non è visibile agli utenti Telegram.
 
 ---
 

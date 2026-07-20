@@ -81,6 +81,19 @@ CORS_ORIGIN_REGEX=^https?://(localhost|127\.0\.0\.1):\d+$
 
 Per gli import API tennis: `backend/properties/config.env` con `API_TENNIS_KEY` e `API_TENNIS_BASE` (vedi `config.env.example`).
 
+Bot Telegram (opzionale), stessi file `.env` / `config.env`:
+
+```env
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_API_BASE_URL=http://localhost:8000/api
+TELEGRAM_MODEL_VERSION=v3
+TELEGRAM_MODEL_NAME=logistic_regression
+TELEGRAM_MODEL_NAMES=logistic_regression,random_forest
+TELEGRAM_DEFAULT_STAKE=10
+TELEGRAM_SLIP_COUNT=9
+TELEGRAM_MIN_EDGE_PERCENT=2.0
+```
+
 Se lo schema esiste già senza Alembic: `alembic stamp head`.
 
 ### Frontend
@@ -198,8 +211,9 @@ Modulo `backend/src/entity/`.
 | `Player` | Giocatori |
 | `Standing` | Classifica corrente (non usata come rank pre-match ML) |
 | `MatchPrediction` | Predizione persistita (`event_key` + `model_version` + `model_name`) |
-| `BettingSlip` / `BettingSlipDay` / `BettingSlipPick` | Schedine e selezioni |
+| `BettingSlip` / `BettingSlipDay` / `BettingSlipPick` | Schedine e selezioni; pick con campi value (`void_odds`, `min_edge_percent`, `value_decision`, …) |
 | `GlobalUpdateRun` / `GlobalUpdateRunItem` | Stato aggiornamento globale e step per combo modello |
+| `TelegramBotEvent` | Accessi/comandi bot (`telegram_bot_event`; migrazione `0010`) |
 
 Modelli ML canonici in `app/models/ml.py`: `MLPlayer`, `MLTournament`, `MLMatch`, `RankingSnapshot`, `OddsSnapshot`, `FeatureSnapshot`.
 
@@ -293,6 +307,17 @@ Repository specializzati (eredita `CrudRepository`):
 #### `app/services/imports.py` / `import_state.py`
 
 Gestione refresh upcoming, purge fixture incomplete future, stato ultimo import su file/DB.
+
+#### `app/services/telegram_analytics.py`
+
+| Funzione | Ruolo |
+|----------|-------|
+| `record_telegram_event` | Insert evento in `telegram_bot_event` |
+| `record_telegram_event_safe` | Come sopra ma non solleva (usato dal bot) |
+| `list_telegram_events` | Lista paginata/filtrata per admin API |
+| `compute_telegram_stats` | KPI: totali, utenti unici, top action, by_action, by_day |
+
+Schema Pydantic: `app/schemas/telegram_analytics.py` (`TelegramBotEventRead`, `TelegramBotEventsResponse`, `TelegramBotStatsResponse`, …).
 
 ---
 
@@ -432,11 +457,9 @@ Client HTTP verso API tennis (chiavi da `config.env`).
 
 #### `jobs/generate_upcoming_predictions.py`
 
-`run_upcoming_prediction_generation` — seleziona modello (best metrics o nome esplicito) e chiama `predict_upcoming_fixtures`.
+`run_upcoming_prediction_generation` — seleziona modello (best metrics o nome esplicito) e chiama `predict_upcoming_fixtures`. Default CLI/job: `model_version=v2`.
 
-#### `jobs/all_models_daily_update.py`
-
-Variante multi-modello dell’aggiornamento giornaliero.
+Per aggiornare **tutte** le combo modello/versione con artefatto su disco usare l’**aggiornamento globale** (`POST /api/global-update` / UI), non un job separato.
 
 ---
 
@@ -465,13 +488,13 @@ Wrapper: `GlobalUpdateProvider`.
 | `BettingSlipsPage` | Calendario, tab modello, 9 slip a tier, colonna media quote bookmakers, margine globale (default 2%), status pick void / quota effettiva |
 | `BettingSlipModelStatsPage` | Tabella comparativa stats per modello |
 | `GlobalUpdateReportPage` | Report ultima run globale: errori, warning, fasi, combo |
-| `TelegramBotPage` | Analytics accessi/comandi bot Telegram (admin) |
+| `TelegramBotPage` | Analytics admin bot: KPI, filtri data/action/user, breakdown per giorno, storico eventi |
 
 ### Componenti / hook
 
 | Modulo | Ruolo |
 |--------|-------|
-| `Layout` | Sidebar, nav, slot `GlobalUpdateControls` |
+| `Layout` | Sidebar, nav (incl. Bot Telegram), slot `GlobalUpdateControls` |
 | `GlobalUpdateControls` | Start/cancel/status aggiornamento globale; link a report se ci sono errori |
 | `ModelControls` | Selettore versione/nome modello |
 | `Status` | `LoadingState` / `ErrorState` / `EmptyState` |
@@ -480,15 +503,15 @@ Wrapper: `GlobalUpdateProvider`.
 
 ### `services/apiClient.ts`
 
-Client `fetch` tipizzato verso le API montate (predictions, betting-slips, imports, global-update, single-match-value).  
+Client `fetch` tipizzato verso le API montate: predictions, betting-slips, imports, global-update, single-match-value, `getTelegramBotStats` / `getTelegramBotEvents`.  
 `ApiError` — errore HTTP con `status`.
 
 ### Utils
 
-- `utils/modelVersion.ts` — default `v3`, persistenza localStorage; `resolvePreferredModelVersion` su Predictions / Betting slips / Stats
+- `utils/modelVersion.ts` — default UI `v3`, persistenza localStorage; `resolvePreferredModelVersion` su Predictions / Betting slips / Stats
 - `utils/minEdge.ts` — classificazione PLAY/BORDERLINE/NO BET lato client
 - `utils/tennis.ts` — format date/score/superficie/nomi giocatore
-- `types/api.ts` — tipi TypeScript allineati agli schema Pydantic
+- `types/api.ts` — tipi TypeScript allineati agli schema Pydantic (incl. tipi Telegram analytics)
 
 ---
 
@@ -502,7 +525,16 @@ Client `fetch` tipizzato verso le API montate (predictions, betting-slips, impor
 | **v2** | Rank storico, Elo, forma, H2H, ATP | No (solo post-hoc) |
 | **v3** | Feature v2 + aggregati quote pre-match | Sì (solo match con odds) |
 
-Default UI/API: **v2**. Modelli tipici: `logistic_regression`, `random_forest`.
+Default:
+
+| Contesto | Versione |
+|----------|----------|
+| UI frontend (`DEFAULT_MODEL_VERSION`) | **v3** |
+| Bot Telegram (`TELEGRAM_MODEL_VERSION`) | **v3** |
+| Query param API REST (se omesso) | **v2** |
+| Job `daily_pipeline` / `generate_upcoming_predictions` | **v2** |
+
+Modelli tipici: `logistic_regression`, `random_forest`.
 
 ### Comandi tipici (da `backend/src`)
 
@@ -545,11 +577,13 @@ Modulo `app/telegram/`.
 | Modulo | Ruolo |
 |--------|-------|
 | `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 9), `telegram_min_edge_percent` (default 2.0) |
-| `client.BackendApiClient` | Chiama le stesse API FastAPI (`/betting-slips/daily`, `/betting-slips/stats/by-model`, `/predictions/stats/summary`, `/models-versions/results`, `/next-fixtures/predictions`, …) |
+| `client.BackendApiClient` | Chiama le stesse API FastAPI (`/betting-slips/daily`, `/betting-slips/stats/by-model`, `/predictions/stats/summary`, `/models-versions/results`, `/next-fixtures/predictions`, `/single-match-value`, …) |
 | `bot.build_application` / `main` | Polling + handler comandi |
 | `tracking.tracked` / `track_callback_query` | Persistenza accessi/click in `telegram_bot_event` (non blocca il bot se il DB fallisce) |
-| `services.telegram_analytics` | `record_telegram_event(_safe)`, `list_telegram_events`, `compute_telegram_stats` |
+| `fixture_value.enrich_fixture_value` | Void/valore su `/partite` (SMVA o fallback da probabilità modello) |
 | `messages` / `dates` / `images` / `slips_compare` / `public_labels` | Formattazione risposte, date Roma, PNG, confronto multi-serie, etichette pubbliche (accuratezza) |
+
+Service condiviso: `app/services/telegram_analytics.py` (vedi §4.4).
 
 **Comandi attivi:** `/start`, `/help`, `/schedine`, `/partite`, `/statistiche`.
 
@@ -570,9 +604,11 @@ python -m src.app.telegram.bot
 
 ## 9. Schema dati
 
-Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip e global update, `telegram_bot_event` (analytics accessi bot).
+Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `telegram_bot_event` (analytics accessi bot).
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
+
+Catena migrazioni recente (Alembic): `0008_global_update_runs` → `0009_pick_min_edge_fields` → `0010_telegram_bot_events`.
 
 ```bash
 cd backend
@@ -588,6 +624,4 @@ cd backend
 pytest
 ```
 
-Test rilevanti: `tests/test_betting_slips.py`, `test_global_update.py`, `test_predictor.py`, `test_dataset_builder.py`, `test_train_baseline.py`, `test_telegram_bot.py`, `test_telegram_analytics.py`, ecc.
-
-Frontend: test Vitest dove presenti (es. `ModelsControlPage.test.tsx`).
+Test rilevanti: `tests/test_betting_slips.py`, `test_global_update.py`, `test_predictor.py`, `test_dataset_builder.py`, `test_train_baseline.py`, `test_match_lifecycle.py`, `test_telegram_bot.py`, `test_telegram_analytics.py`, ecc.
