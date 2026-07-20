@@ -16,5 +16,33 @@
 /venv/
 /backend/.venv/
 /backend/venv/
-__pycache__/
 /backend/src/back_up_db/
+
+# Frontend
+frontend/node_modules/
+node_modules/
+
+# Dataset generati
+backend/data/processed/
+
+# Modelli addestrati
+backend/data/models/
+
+# Backup database
+backups/
+*.sql
+
+# Log
+*.log
+debug-*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Variabili locali
+.env
+.env.*
+!.env.example
