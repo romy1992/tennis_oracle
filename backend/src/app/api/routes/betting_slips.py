@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.src.app.api.deps import require_admin, require_admin_or_service
 from backend.src.app.db.session import get_db
 from backend.src.app.ml.model_versioning import ModelVersion
 from backend.src.app.schemas.betting_slips import (
@@ -21,6 +22,7 @@ from backend.src.app.services.betting_slips import (
     get_daily_betting_slips,
     refresh_betting_slips,
 )
+from backend.src.entity.admin_user import AdminUser
 
 
 router = APIRouter(prefix="/betting-slips", tags=["betting-slips"])
@@ -37,7 +39,11 @@ def read_daily_betting_slips(
     min_edge_percent: float = Query(default=2.0, ge=0.0, le=100.0),
     regenerate: bool = Query(default=False),
     db: Session = Depends(get_db),
+    _admin: AdminUser | None = Depends(require_admin_or_service),
 ) -> BettingSlipsDailyResponse:
+    # Mutating GET must be admin-only (service token / anonymous cannot regenerate).
+    if regenerate and _admin is None:
+        raise HTTPException(status_code=403, detail="Not authorized")
     try:
         return get_daily_betting_slips(
             db=db,
@@ -57,7 +63,7 @@ def read_daily_betting_slips(
         ) from exc
 
 
-@router.post("/daily", response_model=BettingSlipsDailyResponse)
+@router.post("/daily", response_model=BettingSlipsDailyResponse, dependencies=[Depends(require_admin)])
 def generate_daily_betting_slips(
     body: BettingSlipsGenerateRequest | None = None,
     slip_date: date | None = Query(default=None, alias="date"),
@@ -91,7 +97,7 @@ def generate_daily_betting_slips(
         ) from exc
 
 
-@router.get("/calendar", response_model=BettingSlipCalendarResponse)
+@router.get("/calendar", response_model=BettingSlipCalendarResponse, dependencies=[Depends(require_admin)])
 def read_betting_slip_calendar(
     model_version: ModelVersion = Query(default="v2"),
     model_name: str | None = Query(default=None),
@@ -110,7 +116,7 @@ def read_betting_slip_calendar(
         ) from exc
 
 
-@router.post("/refresh", response_model=BettingSlipsRefreshResponse)
+@router.post("/refresh", response_model=BettingSlipsRefreshResponse, dependencies=[Depends(require_admin)])
 def refresh_daily_betting_slips(
     slip_date: date | None = Query(default=None, alias="date"),
     model_version: ModelVersion = Query(default="v2"),
@@ -144,7 +150,7 @@ def refresh_daily_betting_slips(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/stats", response_model=BettingSlipStatsResponse)
+@router.get("/stats", response_model=BettingSlipStatsResponse, dependencies=[Depends(require_admin)])
 def read_betting_slip_stats(
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
@@ -178,7 +184,11 @@ def read_betting_slip_stats(
         ) from exc
 
 
-@router.get("/stats/by-model", response_model=BettingSlipModelStatsResponse)
+@router.get(
+    "/stats/by-model",
+    response_model=BettingSlipModelStatsResponse,
+    dependencies=[Depends(require_admin_or_service)],
+)
 def read_betting_slip_stats_by_model(
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),

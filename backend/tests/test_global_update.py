@@ -15,6 +15,13 @@ from backend.src.app.services.global_update import (
 )
 from backend.src.entity.base import Base
 from backend.src.entity.global_update_run import GlobalUpdateRun
+from backend.tests.auth_helpers import (
+    auth_header_for_admin,
+    clear_settings_override,
+    create_admin,
+    make_test_settings,
+    override_settings,
+)
 
 
 class GlobalUpdateServiceTest(unittest.TestCase):
@@ -26,6 +33,8 @@ class GlobalUpdateServiceTest(unittest.TestCase):
         )
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+        self.settings = make_test_settings()
+        override_settings(self.settings)
 
         def override_get_db():
             with self.Session() as session:
@@ -33,8 +42,12 @@ class GlobalUpdateServiceTest(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+        with self.Session() as session:
+            admin = create_admin(session)
+            self.auth_headers = auth_header_for_admin(admin, self.settings)
 
     def tearDown(self):
+        clear_settings_override()
         app.dependency_overrides.clear()
         self.engine.dispose()
 
@@ -78,14 +91,18 @@ class GlobalUpdateServiceTest(unittest.TestCase):
             type("C", (), {"model_version": "v2", "model_name": "logistic_regression"})(),
         ]
         with patch("backend.src.app.services.global_update._execute_global_update"):
-            response = self.client.post("/api/global-update", json={"force": True})
+            response = self.client.post(
+                "/api/global-update",
+                json={"force": True},
+                headers=self.auth_headers,
+            )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIn("run_id", payload)
         self.assertEqual(payload["status"], "pending")
 
     def test_get_status_endpoint_empty(self):
-        response = self.client.get("/api/global-update/status")
+        response = self.client.get("/api/global-update/status", headers=self.auth_headers)
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json())
 

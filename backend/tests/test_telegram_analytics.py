@@ -141,6 +141,17 @@ class TelegramAnalyticsApiTest(unittest.TestCase):
         )
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+        from backend.tests.auth_helpers import (
+            auth_header_for_admin,
+            clear_settings_override,
+            create_admin,
+            make_test_settings,
+            override_settings,
+        )
+
+        self._clear_settings_override = clear_settings_override
+        self.settings = make_test_settings()
+        override_settings(self.settings)
 
         def override_get_db():
             db = self.Session()
@@ -151,8 +162,12 @@ class TelegramAnalyticsApiTest(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+        with self.Session() as session:
+            admin = create_admin(session)
+            self.auth_headers = auth_header_for_admin(admin, self.settings)
 
     def tearDown(self):
+        self._clear_settings_override()
         app.dependency_overrides.clear()
         self.engine.dispose()
 
@@ -169,14 +184,14 @@ class TelegramAnalyticsApiTest(unittest.TestCase):
                 success=True,
             )
 
-        events_response = self.client.get("/api/telegram/events")
+        events_response = self.client.get("/api/telegram/events", headers=self.auth_headers)
         self.assertEqual(events_response.status_code, 200)
         events_payload = events_response.json()
         self.assertEqual(events_payload["total"], 1)
         self.assertEqual(events_payload["items"][0]["action"], "/partite")
         self.assertEqual(events_payload["items"][0]["username"], "dash")
 
-        stats_response = self.client.get("/api/telegram/stats")
+        stats_response = self.client.get("/api/telegram/stats", headers=self.auth_headers)
         self.assertEqual(stats_response.status_code, 200)
         stats_payload = stats_response.json()
         self.assertEqual(stats_payload["total_events"], 1)

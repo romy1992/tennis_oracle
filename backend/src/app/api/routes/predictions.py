@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.src.app.api.deps import require_admin, require_admin_or_service
 from backend.src.app.db.session import get_db
 from backend.src.app.ml.model_versioning import ModelVersion
 from backend.src.app.schemas.prediction import (
     DailyPredictionStatsResponse,
     FixturesWithPredictionsPage,
     NextFixtureRead,
-    NextFixtureWithPrediction,
     PredictionSummaryResponse,
 )
 from backend.src.app.services.predictions import (
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/next-fixtures", tags=["next-fixtures"])
 predictions_stats_router = APIRouter(prefix="/predictions/stats", tags=["predictions"])
 
 
-@router.get("", response_model=list[NextFixtureRead])
+@router.get("", response_model=list[NextFixtureRead], dependencies=[Depends(require_admin_or_service)])
 def read_next_fixtures(
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
@@ -48,7 +48,11 @@ def read_next_fixtures(
         ) from exc
 
 
-@router.get("/predictions", response_model=FixturesWithPredictionsPage)
+@router.get(
+    "/predictions",
+    response_model=FixturesWithPredictionsPage,
+    dependencies=[Depends(require_admin_or_service)],
+)
 def read_next_fixtures_predictions(
     model_version: ModelVersion = Query(default="v2"),
     model_name: str | None = Query(default=None),
@@ -81,7 +85,11 @@ def read_next_fixtures_predictions(
         ) from exc
 
 
-@predictions_stats_router.get("/daily", response_model=DailyPredictionStatsResponse)
+@predictions_stats_router.get(
+    "/daily",
+    response_model=DailyPredictionStatsResponse,
+    dependencies=[Depends(require_admin)],
+)
 def read_daily_prediction_stats(
     model_version: ModelVersion = Query(default="v2"),
     model_name: str | None = Query(default=None),
@@ -106,7 +114,11 @@ def read_daily_prediction_stats(
         ) from exc
 
 
-@predictions_stats_router.get("/summary", response_model=PredictionSummaryResponse)
+@predictions_stats_router.get(
+    "/summary",
+    response_model=PredictionSummaryResponse,
+    dependencies=[Depends(require_admin_or_service)],
+)
 def read_prediction_summary(
     model_version: ModelVersion = Query(default="v2"),
     model_name: str | None = Query(default=None),

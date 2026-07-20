@@ -60,6 +60,89 @@ a {
   color: #ffffff;
 }
 
+.sidebar-auth {
+  display: grid;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.sidebar-user {
+  color: #b7c0d1;
+  font-size: 14px;
+}
+
+.sidebar-auth .action-button {
+  background: transparent;
+  border-color: #3a4660;
+  color: #d7deea;
+}
+
+.sidebar-auth .action-button:hover:not(:disabled) {
+  border-color: #8ea2c7;
+  color: #ffffff;
+}
+
+.login-page {
+  align-items: center;
+  background:
+    radial-gradient(circle at top left, rgba(49, 87, 166, 0.18), transparent 40%),
+    linear-gradient(160deg, #e8eef7 0%, #f4f7fb 45%, #dfe7f3 100%);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.login-card {
+  background: #ffffff;
+  border: 1px solid #d7deea;
+  border-radius: 16px;
+  box-shadow: 0 18px 40px rgba(16, 24, 40, 0.08);
+  display: grid;
+  gap: 14px;
+  max-width: 420px;
+  padding: 32px;
+  width: 100%;
+}
+
+.login-card h1 {
+  font-size: 28px;
+  margin: 0;
+}
+
+.login-card p {
+  color: #65738a;
+  margin: 0 0 8px;
+}
+
+.login-card label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login-card input {
+  border: 1px solid #cfd8e6;
+  border-radius: 10px;
+  font: inherit;
+  padding: 12px 14px;
+}
+
+.login-card input:focus {
+  border-color: #3157a6;
+  outline: none;
+}
+
+.login-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  color: #b91c1c;
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
 .global-update-controls {
   display: grid;
   gap: 10px;

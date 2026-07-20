@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 
+import { useAuth } from "../auth/AuthContext";
 import { GlobalUpdateControls } from "./GlobalUpdateControls";
 
 const navItems = [
@@ -12,6 +13,8 @@ const navItems = [
 ];
 
 export function Layout() {
+  const { username, logout } = useAuth();
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -31,6 +34,12 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
+        <div className="sidebar-auth">
+          {username ? <span className="sidebar-user">{username}</span> : null}
+          <button type="button" className="action-button" onClick={() => void logout()}>
+            Esci
+          </button>
+        </div>
       </aside>
       <main className="content">
         <Outlet />

@@ -17,7 +17,6 @@ import type {
   ImportStatusResponse,
   MLModelVersion,
   ModelsVersionsResultsResponse,
-  NextFixtureWithPrediction,
   PredictionQueryParams,
   PredictionSummaryResponse,
   RefreshMatchesResponse,
@@ -28,6 +27,7 @@ import type {
   TelegramBotStatsParams,
   TelegramBotStatsResponse
 } from "../types/api";
+import { getStoredToken } from "../auth/session";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -39,6 +39,13 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
   }
+}
+
+type UnauthorizedHandler = () => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  unauthorizedHandler = handler;
 }
 
 function withQuery(
@@ -55,41 +62,77 @@ function withQuery(
   return `${path}${query ? `?${query}` : ""}`;
 }
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`);
-  if (!response.ok) {
-    let message = `HTTP ${response.status}`;
-    try {
-      const payload = (await response.json()) as { detail?: string };
-      message = payload.detail ?? message;
-    } catch {
-      // Keep the generic HTTP message when the backend does not return JSON.
+function authHeaders(extra?: HeadersInit): HeadersInit {
+  const headers = new Headers(extra);
+  const token = getStoredToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return headers;
+}
+
+async function parseError(response: Response): Promise<ApiError> {
+  let message = `HTTP ${response.status}`;
+  try {
+    const payload = (await response.json()) as { detail?: string | { msg?: string }[] };
+    if (typeof payload.detail === "string") {
+      message = payload.detail;
+    } else if (Array.isArray(payload.detail) && payload.detail[0]?.msg) {
+      message = payload.detail[0].msg;
     }
-    throw new ApiError(message, response.status);
+  } catch {
+    // Keep the generic HTTP message when the backend does not return JSON.
+  }
+  if (response.status === 401 && unauthorizedHandler) {
+    unauthorizedHandler();
+  }
+  return new ApiError(message, response.status);
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: authHeaders(init?.headers)
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  if (response.status === 204) {
+    return undefined as T;
   }
   return (await response.json()) as T;
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  return request<T>(path, {
     method: "POST",
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined
   });
-  if (!response.ok) {
-    let message = `HTTP ${response.status}`;
-    try {
-      const payload = (await response.json()) as { detail?: string };
-      message = payload.detail ?? message;
-    } catch {
-      // Keep the generic HTTP message when the backend does not return JSON.
-    }
-    throw new ApiError(message, response.status);
-  }
-  return (await response.json()) as T;
 }
 
+export type LoginResponse = {
+  access_token: string;
+  token_type: string;
+  expires_at: string;
+};
+
+export type AdminSessionResponse = {
+  id: number;
+  username: string;
+  is_active: boolean;
+  authenticated: boolean;
+};
+
 export const apiClient = {
+  login: (username: string, password: string) =>
+    request<LoginResponse>("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    }),
+  getSession: () => request<AdminSessionResponse>("/api/auth/me"),
+  logout: () => post<{ ok: boolean; message: string }>("/api/auth/logout"),
   getNextFixturesPredictions: (params: PredictionQueryParams = {}) =>
     request<FixturesWithPredictionsPage>(
       withQuery("/api/next-fixtures/predictions", params)

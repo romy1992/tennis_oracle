@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.src.app.api.deps import require_admin, require_admin_or_service
 from backend.src.app.db.session import get_db
 from backend.src.app.schemas.global_update import (
     GlobalUpdateReportRead,
@@ -17,12 +18,15 @@ from backend.src.app.services.global_update import (
     get_latest_run,
     get_models_versions_results,
     get_run_by_id,
-    reconcile_orphaned_runs,
     start_global_update,
 )
 
 
-router = APIRouter(prefix="/global-update", tags=["global-update"])
+router = APIRouter(
+    prefix="/global-update",
+    tags=["global-update"],
+    dependencies=[Depends(require_admin)],
+)
 results_router = APIRouter(prefix="/models-versions", tags=["models-versions"])
 
 
@@ -139,7 +143,11 @@ def read_global_update_report(
     return GlobalUpdateReportRead.model_validate(build_run_report(run))
 
 
-@results_router.get("/results", response_model=ModelsVersionsResultsResponse)
+@results_router.get(
+    "/results",
+    response_model=ModelsVersionsResultsResponse,
+    dependencies=[Depends(require_admin_or_service)],
+)
 def read_models_versions_results(
     target_date: str | None = Query(default=None, alias="date"),
     db: Session = Depends(get_db),

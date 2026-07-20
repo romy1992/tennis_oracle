@@ -562,8 +562,23 @@ class BettingSlipsRoutesTest(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+        from backend.tests.auth_helpers import (
+            auth_header_for_admin,
+            clear_settings_override,
+            create_admin,
+            make_test_settings,
+            override_settings,
+        )
+
+        self._clear_settings_override = clear_settings_override
+        self.settings = make_test_settings()
+        override_settings(self.settings)
+        with self.Session() as session:
+            admin = create_admin(session)
+            self.auth_headers = auth_header_for_admin(admin, self.settings)
 
     def tearDown(self):
+        self._clear_settings_override()
         app.dependency_overrides.clear()
         self.engine.dispose()
 
@@ -681,6 +696,7 @@ class BettingSlipsRoutesTest(unittest.TestCase):
         refresh = self.client.post(
             "/api/betting-slips/refresh",
             params={"date": self.today.isoformat(), "model_name": "random_forest"},
+            headers=self.auth_headers,
         )
         self.assertEqual(refresh.status_code, 200)
         self.assertEqual(len(refresh.json()["slips"]), len(first.json()["slips"]))
@@ -703,6 +719,7 @@ class BettingSlipsRoutesTest(unittest.TestCase):
         response = self.client.get(
             "/api/betting-slips/calendar",
             params={"model_name": "random_forest"},
+            headers=self.auth_headers,
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()

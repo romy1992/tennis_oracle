@@ -23,6 +23,10 @@ _SENSITIVE_KEYS = frozenset(
         "cookie",
         "set_cookie",
         "x_api_key",
+        "x_service_token",
+        "service_api_key",
+        "admin_jwt_secret",
+        "admin_password",
         "telegram_bot_token",
         "bot_token",
     }

@@ -1,4 +1,5 @@
 from backend.src.entity import (
+    AdminUser,
     BettingSlip,
     BettingSlipDay,
     BettingSlipPick,
@@ -26,6 +27,7 @@ from backend.src.app.models.ml import (
 
 __all__ = [
     "Base",
+    "AdminUser",
     "Event",
     "Fixture",
     "NextFixture",

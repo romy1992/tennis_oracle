@@ -10,6 +10,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[3]
 class TelegramSettings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_api_base_url: str = "http://localhost:8000/api"
+    # Same value as SERVICE_API_KEY on the API; sent as X-Service-Token.
+    telegram_service_api_key: str | None = None
     telegram_model_version: str = "v3"
     telegram_model_name: str | None = "logistic_regression"
     telegram_default_stake: float = 10.0

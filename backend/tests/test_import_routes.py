@@ -13,6 +13,13 @@ from backend.src.app.services.import_state import record_fixture_import
 from backend.src.app.services.imports import refresh_matches
 from backend.src.entity import Fixture, NextFixture
 from backend.src.entity.base import Base
+from backend.tests.auth_helpers import (
+    clear_settings_override,
+    create_admin,
+    auth_header_for_admin,
+    make_test_settings,
+    override_settings,
+)
 
 
 class ImportRoutesTest(unittest.TestCase):
@@ -24,6 +31,8 @@ class ImportRoutesTest(unittest.TestCase):
         )
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+        self.settings = make_test_settings()
+        override_settings(self.settings)
 
         def override_get_db():
             with self.Session() as session:
@@ -31,8 +40,12 @@ class ImportRoutesTest(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+        with self.Session() as session:
+            admin = create_admin(session)
+            self.auth_headers = auth_header_for_admin(admin, self.settings)
 
     def tearDown(self):
+        clear_settings_override()
         app.dependency_overrides.clear()
         self.engine.dispose()
 
@@ -62,7 +75,7 @@ class ImportRoutesTest(unittest.TestCase):
             days_back_start=1,
         )
 
-        response = self.client.get("/api/imports/status")
+        response = self.client.get("/api/imports/status", headers=self.auth_headers)
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -142,6 +155,7 @@ class ImportRoutesTest(unittest.TestCase):
         response = self.client.post(
             "/api/imports/refresh",
             params={"model_version": "v3", "force_next_import": "true"},
+            headers=self.auth_headers,
         )
 
         self.assertEqual(response.status_code, 200)

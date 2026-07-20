@@ -32,6 +32,8 @@ In pratica ti aiuta a:
 
 Dopo aver avviato frontend e backend (vedi [Avvio rapido](#avvio-rapido)), apri il sito (di solito `http://localhost:5173`).
 
+Alla prima apertura ti viene chiesto di **accedere come amministratore** (username e password configurati sul server). Senza login non puoi usare la dashboard. In basso nella sidebar trovi il tuo utente e il pulsante **Esci**.
+
 Nel menu laterale trovi:
 
 | Voce | A cosa serve |
@@ -134,6 +136,9 @@ Variabili importanti in `backend/.env` / `backend/properties/config.env`:
 - `API_TENNIS_KEY` / `API_TENNIS_BASE` — API tennis
 - `API_TENNIS_TIMEOUT` — timeout HTTP verso API tennis in secondi (opzionale, default 30)
 - `CORS_ORIGINS` — origini frontend consentite
+- `ADMIN_JWT_SECRET` — segreto per i token di accesso della dashboard (obbligatorio per il login)
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD` — usati solo alla prima creazione dell’admin se il database non ne ha ancora uno
+- `SERVICE_API_KEY` / `TELEGRAM_SERVICE_API_KEY` — opzionali; se impostati, il bot deve usare la stessa chiave verso l’API
 - `TELEGRAM_BOT_TOKEN` — solo se usi il bot (opzionale)
 
 API tipica: `http://localhost:8000`  
@@ -154,10 +159,12 @@ In `frontend/.env`:
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
+Apri il sito e accedi con l’account admin. Se non riesci a entrare, verifica sul backend `ADMIN_JWT_SECRET` e che esista un utente admin (creato al primo avvio da `ADMIN_USERNAME` / `ADMIN_PASSWORD`).
+
 ### Bot Telegram (opzionale)
 
-1. Avvia il backend (`alembic upgrade head` serve anche per la tabella analytics `telegram_bot_event`)
-2. Imposta in `backend/.env` almeno `TELEGRAM_BOT_TOKEN` (e opzionalmente `TELEGRAM_API_BASE_URL`, versione/modello, margine, ecc.)
+1. Avvia il backend (`alembic upgrade head` serve anche per le tabelle analytics e admin)
+2. Imposta in `backend/.env` almeno `TELEGRAM_BOT_TOKEN` (e opzionalmente `TELEGRAM_API_BASE_URL`, `TELEGRAM_SERVICE_API_KEY` allineata a `SERVICE_API_KEY`, versione/modello, margine, ecc.)
 3. Esegui:
 
 ```bash
@@ -190,6 +197,9 @@ Se usi un database cloud separato, il job giornaliero può anche **sincronizzare
 ---
 
 ## Domande frequenti
+
+**Come accedo alla dashboard?**  
+Serve un account amministratore. Al primo avvio del backend, se `ADMIN_USERNAME` e `ADMIN_PASSWORD` sono impostati e non esiste ancora nessun admin, viene creato automaticamente. Poi apri il sito e fai login.
 
 **Perché alcune partite non hanno pronostico?**  
 Mancano dati storici, odds (per `v3`), o l’aggiornamento non è ancora stato eseguito. In **Giocate**, le partite senza previsione salvata restano vuote: il pronostico va generato **prima** che la partita finisca (Aggiorna tutto / job giornaliero). In **Partite**, lo stato **Da generare** indica solo assenza di previsione salvata: non è lo stesso degli errori della run globale.

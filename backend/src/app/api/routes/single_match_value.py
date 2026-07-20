@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.src.app.api.deps import require_admin_or_service
 from backend.src.app.db.session import get_db
 from backend.src.app.ml.model_versioning import ModelVersion
 from backend.src.app.schemas.single_match_value import SingleMatchValueResponse
@@ -13,7 +14,7 @@ from backend.src.app.services.single_match_value import get_single_match_value_a
 router = APIRouter(prefix="/single-match-value", tags=["single-match-value"])
 
 
-@router.get("", response_model=SingleMatchValueResponse)
+@router.get("", response_model=SingleMatchValueResponse, dependencies=[Depends(require_admin_or_service)])
 def read_single_match_value_analysis(
     model_version: ModelVersion = Query(default="v2"),
     model_name: str | None = Query(default=None),
