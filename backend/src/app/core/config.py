@@ -24,6 +24,17 @@ class Settings(BaseSettings):
     ]
     cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1):\d+$"
 
+    # Admin auth (JWT). Never commit real secrets; set via env / config.env.
+    admin_jwt_secret: str = ""
+    admin_jwt_expire_minutes: int = 480
+    # Optional bootstrap credentials used only when admin_user table is empty.
+    admin_username: str | None = None
+    admin_password: str | None = None
+    # Separate bot/service protection (X-Service-Token). Not an admin JWT.
+    service_api_key: str | None = None
+    # When SERVICE_API_KEY is empty, allow anonymous reads on bot-shared endpoints.
+    allow_unauthenticated_service_reads: bool = True
+
     model_config = SettingsConfigDict(
         env_file=(
             ROOT_DIR / "properties" / "config.env",

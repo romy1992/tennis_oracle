@@ -12,6 +12,7 @@ from backend.src.app.scheduler import (
     start_global_update_scheduler,
     stop_global_update_scheduler,
 )
+from backend.src.app.services.auth import ensure_bootstrap_admin
 from backend.src.app.services.global_update import reconcile_orphaned_runs
 
 
@@ -29,6 +30,14 @@ async def lifespan(_app: FastAPI):
             logging.getLogger(__name__).info(
                 "Reconciled %s orphaned global update run(s) on startup.",
                 reconciled,
+            )
+        try:
+            ensure_bootstrap_admin(db, settings)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Failed to bootstrap admin user from environment."
             )
     start_global_update_scheduler()
     yield

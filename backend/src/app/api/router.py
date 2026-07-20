@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from backend.src.app.api.routes import (
+    auth,
     betting_slips,
     global_update,
     imports,
@@ -11,6 +12,7 @@ from backend.src.app.api.routes import (
 
 
 api_router = APIRouter()
+api_router.include_router(auth.router)
 api_router.include_router(imports.router)
 api_router.include_router(predictions.router)
 api_router.include_router(predictions.predictions_stats_router)

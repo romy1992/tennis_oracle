@@ -18,9 +18,19 @@ class BackendApiError(Exception):
 
 
 class BackendApiClient:
-    def __init__(self, base_url: str, *, timeout: float = 15.0):
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        timeout: float = 15.0,
+        service_api_key: str | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._service_api_key = (service_api_key or "").strip() or None
+        headers = {}
+        if self._service_api_key:
+            headers["X-Service-Token"] = self._service_api_key
+        self._client = httpx.AsyncClient(timeout=timeout, headers=headers or None)
 
     async def close(self) -> None:
         await self._client.aclose()

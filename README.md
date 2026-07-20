@@ -77,7 +77,15 @@ DEBUG=false
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tennis_db
 CORS_ORIGINS=["http://localhost:5173","http://localhost:5174","http://127.0.0.1:5173","http://127.0.0.1:5174"]
 CORS_ORIGIN_REGEX=^https?://(localhost|127\.0\.0\.1):\d+$
+ADMIN_JWT_SECRET=change-me-to-a-long-random-secret
+ADMIN_JWT_EXPIRE_MINUTES=480
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=change-me-strong-password
+SERVICE_API_KEY=
+ALLOW_UNAUTHENTICATED_SERVICE_READS=true
 ```
+
+All’avvio, se la tabella `admin_user` è vuota e sono impostati `ADMIN_USERNAME` / `ADMIN_PASSWORD`, viene creato il primo admin (password con bcrypt). Non inserire segreti reali nel repo: usa `backend/properties/config.env.example` come modello.
 
 Per gli import API tennis: `backend/properties/config.env` con `API_TENNIS_KEY`, `API_TENNIS_BASE` e opzionalmente `API_TENNIS_TIMEOUT` (secondi, default 30; vedi `config.env.example`). I log applicativi oscurano automaticamente chiavi e credenziali nelle URL/query.
 
@@ -86,6 +94,7 @@ Bot Telegram (opzionale), stessi file `.env` / `config.env`:
 ```env
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_API_BASE_URL=http://localhost:8000/api
+TELEGRAM_SERVICE_API_KEY=
 TELEGRAM_MODEL_VERSION=v3
 TELEGRAM_MODEL_NAME=logistic_regression
 TELEGRAM_MODEL_NAMES=logistic_regression,random_forest
@@ -93,6 +102,8 @@ TELEGRAM_DEFAULT_STAKE=10
 TELEGRAM_SLIP_COUNT=9
 TELEGRAM_MIN_EDGE_PERCENT=2.0
 ```
+
+`TELEGRAM_SERVICE_API_KEY` deve coincidere con `SERVICE_API_KEY` quando quest’ultima è valorizzata (header `X-Service-Token`).
 
 Se lo schema esiste già senza Alembic: `alembic stamp head`.
 
@@ -127,34 +138,51 @@ GLOBAL_UPDATE_ALLOW_CONCURRENT_RUNS=false
 Prefisso default: `/api` (`Settings.api_prefix`).  
 Documentazione interattiva: `http://localhost:8000/docs`.
 
+### Autenticazione
+
+| Tipo | Uso | Header |
+|------|-----|--------|
+| Admin JWT | Dashboard React e operazioni privilegiate | `Authorization: Bearer <access_token>` |
+| Service token | Solo endpoint di lettura usati dal bot Telegram | `X-Service-Token: <SERVICE_API_KEY>` |
+
+- `POST /api/auth/login` — username/password → access token con scadenza (`ADMIN_JWT_EXPIRE_MINUTES`)
+- `GET /api/auth/me` — verifica sessione admin (`require_admin`)
+- `POST /api/auth/logout` — logout stateless (il client elimina il token)
+- Dipendenze riutilizzabili: `require_admin`, `require_admin_or_service`, `require_service_token` in `app/api/deps.py`
+- Risposte: **401** non autenticato / token invalido; **403** autenticato ma non autorizzato (es. admin disabilitato, regenerate con solo service token)
+- Con `SERVICE_API_KEY` vuoto e `ALLOW_UNAUTHENTICATED_SERVICE_READS=true` (default locale) i GET del bot restano aperti; in produzione impostare la chiave e allineare `TELEGRAM_SERVICE_API_KEY`
+
 ### Montate in `api/router.py` (attive)
 
-| Metodo | Path | Handler | Ruolo |
-|--------|------|---------|-------|
-| GET | `/health` | `health.health` | Stato app |
-| GET | `/api/imports/status` | `imports.read_import_status` | Ultimo stato import |
-| POST | `/api/imports/refresh` | `imports.refresh_upcoming_matches` | Refresh next fixtures + predizioni |
-| POST | `/api/imports/fixtures` | `imports.import_completed_fixtures` | Import partite giocate |
-| GET | `/api/next-fixtures` | `predictions.read_next_fixtures` | Prossime partite |
-| GET | `/api/next-fixtures/predictions` | `predictions.read_next_fixtures_predictions` | Partite + predizione paginate |
-| GET | `/api/predictions/stats/daily` | `predictions.read_daily_prediction_stats` | Stats giornaliere |
-| GET | `/api/predictions/stats/summary` | `predictions.read_prediction_summary` | Riepilogo accuracy/ROI |
-| GET | `/api/single-match-value` | `single_match_value.read_single_match_value_analysis` | Analisi value bet (margine globale default 2%) |
-| GET | `/api/betting-slips/daily` | `betting_slips.read_daily_betting_slips` | Schedine del giorno (9 profili a tier) |
-| POST | `/api/betting-slips/daily` | `betting_slips.generate_daily_betting_slips` | Rigenera schedine del giorno |
-| GET | `/api/betting-slips/calendar` | `betting_slips.read_betting_slip_calendar` | Calendario giorni con schedine |
-| POST | `/api/betting-slips/refresh` | `betting_slips.refresh_daily_betting_slips` | Refresh import + rigenera schedine |
-| GET | `/api/betting-slips/stats` | `betting_slips.read_betting_slip_stats` | Stats schedine |
-| GET | `/api/betting-slips/stats/by-model` | `betting_slips.read_betting_slip_stats_by_model` | Stats per modello |
-| POST | `/api/global-update` | `global_update.trigger_global_update` | Avvia aggiornamento globale |
-| GET | `/api/global-update/status` | `global_update.read_global_update_status` | Run attiva |
-| GET | `/api/global-update/latest` | `global_update.read_latest_global_update` | Ultima run |
-| GET | `/api/global-update/{run_id}` | `global_update.read_global_update_run` | Dettaglio run |
-| GET | `/api/global-update/{run_id}/report` | `global_update.read_global_update_report` | Report run |
-| POST | `/api/global-update/{run_id}/cancel` | `global_update.cancel_global_update_run` | Annulla run |
-| GET | `/api/models-versions/results` | `global_update.read_models_versions_results` | Risultati per versione/modello |
-| GET | `/api/telegram/events` | `telegram.read_telegram_events` | Lista accessi/click bot (admin) |
-| GET | `/api/telegram/stats` | `telegram.read_telegram_stats` | Aggregati accessi bot (admin) |
+| Metodo | Path | Handler | Auth | Ruolo |
+|--------|------|---------|------|-------|
+| GET | `/health` | `health.health` | pubblica | Stato app |
+| POST | `/api/auth/login` | `auth.login` | pubblica | Login admin |
+| GET | `/api/auth/me` | `auth.read_session` | admin | Verifica sessione |
+| POST | `/api/auth/logout` | `auth.logout` | admin | Logout |
+| GET | `/api/imports/status` | `imports.read_import_status` | admin | Ultimo stato import |
+| POST | `/api/imports/refresh` | `imports.refresh_upcoming_matches` | admin | Refresh next fixtures + predizioni |
+| POST | `/api/imports/fixtures` | `imports.import_completed_fixtures` | admin | Import partite giocate |
+| GET | `/api/next-fixtures` | `predictions.read_next_fixtures` | admin o service | Prossime partite |
+| GET | `/api/next-fixtures/predictions` | `predictions.read_next_fixtures_predictions` | admin o service | Partite + predizione paginate |
+| GET | `/api/predictions/stats/daily` | `predictions.read_daily_prediction_stats` | admin | Stats giornaliere |
+| GET | `/api/predictions/stats/summary` | `predictions.read_prediction_summary` | admin o service | Riepilogo accuracy/ROI |
+| GET | `/api/single-match-value` | `single_match_value.read_single_match_value_analysis` | admin o service | Analisi value bet (margine globale default 2%) |
+| GET | `/api/betting-slips/daily` | `betting_slips.read_daily_betting_slips` | admin o service (`regenerate=true` → solo admin) | Schedine del giorno (9 profili a tier) |
+| POST | `/api/betting-slips/daily` | `betting_slips.generate_daily_betting_slips` | admin | Rigenera schedine del giorno |
+| GET | `/api/betting-slips/calendar` | `betting_slips.read_betting_slip_calendar` | admin | Calendario giorni con schedine |
+| POST | `/api/betting-slips/refresh` | `betting_slips.refresh_daily_betting_slips` | admin | Refresh import + rigenera schedine |
+| GET | `/api/betting-slips/stats` | `betting_slips.read_betting_slip_stats` | admin | Stats schedine |
+| GET | `/api/betting-slips/stats/by-model` | `betting_slips.read_betting_slip_stats_by_model` | admin o service | Stats per modello |
+| POST | `/api/global-update` | `global_update.trigger_global_update` | admin | Avvia aggiornamento globale |
+| GET | `/api/global-update/status` | `global_update.read_global_update_status` | admin | Run attiva |
+| GET | `/api/global-update/latest` | `global_update.read_latest_global_update` | admin | Ultima run |
+| GET | `/api/global-update/{run_id}` | `global_update.read_global_update_run` | admin | Dettaglio run |
+| GET | `/api/global-update/{run_id}/report` | `global_update.read_global_update_report` | admin | Report run |
+| POST | `/api/global-update/{run_id}/cancel` | `global_update.cancel_global_update_run` | admin | Annulla run |
+| GET | `/api/models-versions/results` | `global_update.read_models_versions_results` | admin o service | Risultati per versione/modello |
+| GET | `/api/telegram/events` | `telegram.read_telegram_events` | admin | Lista accessi/click bot (admin) |
+| GET | `/api/telegram/stats` | `telegram.read_telegram_stats` | admin | Aggregati accessi bot (admin) |
 
 ### Presenti nel codice ma non montate in `api_router` (legacy / opzionali)
 
@@ -170,13 +198,25 @@ Route definite in `matches.py`, `players.py`, `tournaments.py`, `ml.py` — **no
 
 | Simbolo | Ruolo |
 |---------|-------|
-| `lifespan` | All’avvio: `reconcile_orphaned_runs` + `start_global_update_scheduler`; allo shutdown ferma lo scheduler |
+| `lifespan` | All’avvio: `reconcile_orphaned_runs`, `ensure_bootstrap_admin`, `start_global_update_scheduler`; allo shutdown ferma lo scheduler |
 | `app` | Istanza FastAPI, CORS, mount health + `api_router` |
 
 #### `app/core/config.py` — `Settings`
 
-Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`.  
+Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `allow_unauthenticated_service_reads`).  
 `get_settings()` — settings cacheati (`lru_cache`).
+
+#### `app/core/security.py`
+
+`hash_password` / `verify_password` (bcrypt), `create_access_token` / `decode_access_token` (JWT HS256).
+
+#### `app/api/deps.py`
+
+Dipendenze FastAPI: `require_admin`, `require_admin_or_service`, `require_service_token`.
+
+#### `app/services/auth.py`
+
+`authenticate_admin`, `issue_access_token`, `ensure_bootstrap_admin` (primo admin da env se tabella vuota).
 
 #### `app/core/logging.py`
 
@@ -216,6 +256,7 @@ Modulo `backend/src/entity/`.
 | `BettingSlip` / `BettingSlipDay` / `BettingSlipPick` | Schedine e selezioni; pick con campi value (`void_odds`, `min_edge_percent`, `value_decision`, …) |
 | `GlobalUpdateRun` / `GlobalUpdateRunItem` | Stato aggiornamento globale e step per combo modello |
 | `TelegramBotEvent` | Accessi/comandi bot (`telegram_bot_event`; migrazione `0010`) |
+| `AdminUser` | Account amministratore (`admin_user`; migrazione `0011`; solo hash password) |
 
 Modelli ML canonici in `app/models/ml.py`: `MLPlayer`, `MLTournament`, `MLMatch`, `RankingSnapshot`, `OddsSnapshot`, `FeatureSnapshot`.
 
@@ -477,7 +518,8 @@ Per aggiornare **tutte** le combo modello/versione con artefatto su disco usare 
 
 | Path | Pagina |
 |------|--------|
-| `/` | Redirect → `/predictions` |
+| `/login` | `LoginPage` (pubblica) |
+| `/` | Redirect → `/predictions` (protetta) |
 | `/predictions` | `PredictionsPage` |
 | `/prediction-stats` | `PredictionStatsPage` |
 | `/betting-slips` | `BettingSlipsPage` |
@@ -485,12 +527,13 @@ Per aggiornare **tutte** le combo modello/versione con artefatto su disco usare 
 | `/global-update-report` | `GlobalUpdateReportPage` |
 | `/telegram-bot` | `TelegramBotPage` |
 
-Wrapper: `GlobalUpdateProvider`.
+Wrapper: `AuthProvider` → route protette con `ProtectedRoute` → `GlobalUpdateProvider` + `Layout`.
 
 ### Pagine
 
 | Componente | Ruolo |
 |------------|-------|
+| `LoginPage` | Login admin; salva access token in `localStorage` |
 | `PredictionsPage` | Lista partite+predizioni; margine globale (default 2%); void/decision in riga |
 | `PredictionStatsPage` | Summary e serie giornaliere accuracy/ROI |
 | `BettingSlipsPage` | Calendario, tab modello, 9 slip a tier, colonna media quote bookmakers, margine globale (default 2%), status pick void / quota effettiva |
@@ -502,16 +545,19 @@ Wrapper: `GlobalUpdateProvider`.
 
 | Modulo | Ruolo |
 |--------|-------|
-| `Layout` | Sidebar, nav (incl. Bot Telegram), slot `GlobalUpdateControls` |
+| `ProtectedRoute` | Redirect a `/login` se non autenticato |
+| `Layout` | Sidebar, nav, logout, slot `GlobalUpdateControls` |
 | `GlobalUpdateControls` | Start/cancel/status aggiornamento globale; link a report se ci sono errori |
 | `ModelControls` | Selettore versione/nome modello |
 | `Status` | `LoadingState` / `ErrorState` / `EmptyState` |
 | `MetricCard` | Card metrica |
 | `useGlobalUpdate` | Context: polling status, start/cancel |
+| `auth/AuthContext` | Sessione admin, login/logout, restore da token |
 
 ### `services/apiClient.ts`
 
-Client `fetch` tipizzato verso le API montate: predictions, betting-slips, imports, global-update, single-match-value, `getTelegramBotStats` / `getTelegramBotEvents`.  
+Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, betting-slips, imports, global-update, single-match-value, Telegram analytics.  
+Invia `Authorization: Bearer` quando presente; su **401** notifica il handler di sessione scaduta.  
 `ApiError` — errore HTTP con `status`.
 
 ### Utils

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.src.app.api.deps import require_admin
 from backend.src.app.db.session import get_db
 from backend.src.app.schemas.telegram_analytics import (
     TelegramBotEventsResponse,
@@ -15,7 +16,11 @@ from backend.src.app.services.telegram_analytics import (
 )
 
 
-router = APIRouter(prefix="/telegram", tags=["telegram"])
+router = APIRouter(
+    prefix="/telegram",
+    tags=["telegram"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 @router.get("/events", response_model=TelegramBotEventsResponse)

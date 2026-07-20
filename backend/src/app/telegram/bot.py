@@ -493,7 +493,10 @@ def _api(context: ContextTypes.DEFAULT_TYPE) -> BackendApiClient:
 
 async def _post_init(application: Application) -> None:
     settings = application.bot_data["settings"]
-    application.bot_data["api_client"] = BackendApiClient(settings.telegram_api_base_url)
+    application.bot_data["api_client"] = BackendApiClient(
+        settings.telegram_api_base_url,
+        service_api_key=settings.telegram_service_api_key,
+    )
 
 
 async def _post_shutdown(application: Application) -> None:

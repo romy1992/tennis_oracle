@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.src.app.api.deps import require_admin
 from backend.src.app.db.session import get_db
 from backend.src.app.ml.model_versioning import ModelVersion
 from backend.src.app.schemas.imports import (
@@ -14,7 +15,11 @@ from backend.src.app.services.import_state import get_import_status
 from backend.src.app.services.imports import import_played_fixtures, refresh_matches
 
 
-router = APIRouter(prefix="/imports", tags=["imports"])
+router = APIRouter(
+    prefix="/imports",
+    tags=["imports"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 @router.get("/status", response_model=ImportStatusResponse)
