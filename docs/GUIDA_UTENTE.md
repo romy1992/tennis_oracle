@@ -122,7 +122,7 @@ Puoi anche **annullare** un aggiornamento in corso. Se è già in esecuzione un 
 ```bash
 cd backend
 pip install -r requirements.txt
-cp .env.example .env
+cp .env .env
 # oppure configura anche properties/config.env
 alembic upgrade head
 uvicorn src.app.main:app --reload
@@ -143,7 +143,7 @@ Health check: `GET http://localhost:8000/health`
 ```bash
 cd frontend
 npm install
-cp .env.example .env
+cp .env .env
 npm run dev
 ```
 
