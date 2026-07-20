@@ -132,6 +132,7 @@ Variabili importanti in `backend/.env` / `backend/properties/config.env`:
 
 - `DATABASE_URL` — connessione PostgreSQL
 - `API_TENNIS_KEY` / `API_TENNIS_BASE` — API tennis
+- `API_TENNIS_TIMEOUT` — timeout HTTP verso API tennis in secondi (opzionale, default 30)
 - `CORS_ORIGINS` — origini frontend consentite
 - `TELEGRAM_BOT_TOKEN` — solo se usi il bot (opzionale)
 

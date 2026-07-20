@@ -185,32 +185,6 @@ def get_single_match_value_analysis(
     baseline_min_edge = (
         DEFAULT_MIN_EDGE_PERCENT if min_edge_percent is None else float(min_edge_percent)
     )
-    #region agent log
-    try:
-        import json as _json
-        from pathlib import Path as _Path
-        from datetime import datetime as _dt
-        _Path(r"c:\Users\trott\git\tennis_oracle\debug-839b99.log").open("a", encoding="utf-8").write(
-            _json.dumps({
-                "sessionId": "839b99",
-                "runId": "pre-fix",
-                "hypothesisId": "B",
-                "location": "single_match_value.py:get_single_match_value_analysis",
-                "message": "server received min_edge_percent",
-                "data": {
-                    "min_edge_percent_arg": min_edge_percent,
-                    "baseline_min_edge": baseline_min_edge,
-                    "is_none": min_edge_percent is None,
-                    "model_version": model_version,
-                    "model_name": model_name,
-                    "status": status,
-                },
-                "timestamp": int(_dt.now().timestamp() * 1000),
-            }) + "\n"
-        )
-    except Exception:
-        pass
-    #endregion
     contexts = _single_match_contexts(
         db,
         model_version=model_version,

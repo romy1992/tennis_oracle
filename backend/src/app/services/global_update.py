@@ -31,27 +31,6 @@ from backend.src.service.import_next_fixtures import run_daily_next_fixture_impo
 
 logger = logging.getLogger(__name__)
 
-#region agent log
-def _agent_log(hypothesis_id: str, location: str, message: str, data: dict | None = None) -> None:
-    import json
-    import time
-    from pathlib import Path
-
-    try:
-        log_path = Path(__file__).resolve().parents[4] / "debug-ce07cd.log"
-        payload = {
-            "sessionId": "ce07cd",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        with log_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, default=str) + "\n")
-    except Exception:
-        pass
-#endregion
 
 MODEL_NAMES = ("logistic_regression", "random_forest")
 RUNNING_STATUSES = ("pending", "running")
@@ -500,28 +479,7 @@ def _execute_global_update(run_id: int, days_forward: int, days_back_fixtures: i
 
                 try:
                     fixtures = upcoming_fixtures_by_version.get(combo.model_version, [])
-                    #region agent log
-                    _agent_log(
-                        "H4",
-                        "global_update.py:combo_start",
-                        "combo processing start",
-                        {
-                            "run_id": run.id,
-                            "combo": f"{combo.model_version}/{combo.model_name}",
-                            "index": index,
-                            "fixtures_count": len(fixtures),
-                        },
-                    )
-                    #endregion
                     if fixtures:
-                        #region agent log
-                        _agent_log(
-                            "H1",
-                            "global_update.py:before_predict",
-                            "starting predict_upcoming_fixtures",
-                            {"run_id": run.id, "fixtures_count": len(fixtures)},
-                        )
-                        #endregion
                         def _progress_callback(fixture_index: int, fixture_total: int) -> None:
                             if (
                                 fixture_total > 0
@@ -546,17 +504,6 @@ def _execute_global_update(run_id: int, days_forward: int, days_back_fixtures: i
                             progress_callback=_progress_callback,
                             should_cancel=lambda: is_cancel_requested(run_id),
                         )
-                        #region agent log
-                        _agent_log(
-                            "H1",
-                            "global_update.py:after_predict",
-                            "finished predict_upcoming_fixtures",
-                            {
-                                "run_id": run.id,
-                                "predictions_count": len(predictions),
-                            },
-                        )
-                        #endregion
                         predictions_count = sum(
                             1 for p in predictions if p.get("prob_player_1_win") is not None
                         )
@@ -565,14 +512,6 @@ def _execute_global_update(run_id: int, days_forward: int, days_back_fixtures: i
 
                     # Generate betting slips for today
                     try:
-                        #region agent log
-                        _agent_log(
-                            "H2",
-                            "global_update.py:before_slips",
-                            "starting get_daily_betting_slips",
-                            {"run_id": run.id},
-                        )
-                        #endregion
                         _update_run_phase(
                             db,
                             run,
@@ -586,14 +525,6 @@ def _execute_global_update(run_id: int, days_forward: int, days_back_fixtures: i
                             model_name=combo.model_name,
                             regenerate=True,
                         )
-                        #region agent log
-                        _agent_log(
-                            "H2",
-                            "global_update.py:after_slips",
-                            "finished get_daily_betting_slips",
-                            {"run_id": run.id, "slips_count": len(daily.slips)},
-                        )
-                        #endregion
                         slips_count = len(daily.slips)
                         item_warnings.extend(daily.warnings)
                     except Exception as slip_exc:

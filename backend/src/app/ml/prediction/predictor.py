@@ -504,35 +504,6 @@ def predict_upcoming_fixtures(
     if not fixtures:
         return []
 
-    #region agent log
-    def _agent_log_pred(hypothesis_id: str, location: str, message: str, data: dict | None = None) -> None:
-        import json
-        import time
-        from pathlib import Path
-
-        try:
-            log_path = Path(__file__).resolve().parents[5] / "debug-ce07cd.log"
-            payload = {
-                "sessionId": "ce07cd",
-                "hypothesisId": hypothesis_id,
-                "location": location,
-                "message": message,
-                "data": data or {},
-                "timestamp": int(time.time() * 1000),
-            }
-            with log_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(payload, default=str) + "\n")
-        except Exception:
-            pass
-
-    _agent_log_pred(
-        "H1",
-        "predictor.py:predict_upcoming_start",
-        "predict loop start",
-        {"fixtures_count": len(fixtures), "model_version": model_version, "model_name": model_name},
-    )
-    #endregion
-
     feature_builder = PreMatchFeatureBuilder.from_db(db, model_version=model_version)
     predictions: list[dict[str, Any]] = []
     predicted_at = datetime.now()
@@ -541,14 +512,6 @@ def predict_upcoming_fixtures(
         if should_cancel and should_cancel():
             if persist:
                 db.commit()
-            #region agent log
-            _agent_log_pred(
-                "H4",
-                "predictor.py:predict_cancelled",
-                "predict loop cancelled",
-                {"fixture_index": fixture_index, "total": len(fixtures)},
-            )
-            #endregion
             raise PredictUpcomingCancelled()
 
         result = predict_fixture(
@@ -558,20 +521,6 @@ def predict_upcoming_fixtures(
             model_name=model_name,
         )
         predictions.append(result)
-        #region agent log
-        if fixture_index == 0 or (fixture_index + 1) % 25 == 0 or fixture_index + 1 == len(fixtures):
-            _agent_log_pred(
-                "H2",
-                "predictor.py:predict_progress",
-                "fixture batch processed",
-                {
-                    "fixture_index": fixture_index + 1,
-                    "total": len(fixtures),
-                    "event_key": fixture.event_key,
-                    "has_prob": result.get("prob_player_1_win") is not None,
-                },
-            )
-        #endregion
 
         if progress_callback is not None:
             progress_callback(fixture_index + 1, len(fixtures))
@@ -602,14 +551,6 @@ def predict_upcoming_fixtures(
     if persist:
         db.commit()
 
-    #region agent log
-    _agent_log_pred(
-        "H1",
-        "predictor.py:predict_upcoming_end",
-        "predict loop end",
-        {"predictions_count": len(predictions)},
-    )
-    #endregion
 
     return predictions
 

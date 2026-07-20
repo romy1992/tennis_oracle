@@ -30,6 +30,7 @@ from backend.src.entity import (
     Tournament,
 )
 from backend.src.entity.base import Base
+from backend.src.utility.sensitive_data import sanitize_url
 
 _ = (Event, Tournament, Fixture, NextFixture, MatchPrediction, Standing, Player)
 
@@ -96,15 +97,8 @@ class DatabaseMigrator:
         self.target_engine = create_engine(self.target_url)
 
     def _mask_url(self, url: str) -> str:
-        if "@" not in url:
-            return url
-        prefix, host_part = url.split("@", 1)
-        if "://" in prefix:
-            scheme, creds = prefix.split("://", 1)
-            if ":" in creds:
-                user, _ = creds.split(":", 1)
-                return f"{scheme}://{user}:***@{host_part}"
-        return f"***@{host_part}"
+        """Mask DB credentials in connection URLs (delegates to shared sanitizer)."""
+        return sanitize_url(url)
 
     def ensure_target_schema(self) -> None:
         """Verifica che lo schema di destinazione sia già gestito da Alembic."""

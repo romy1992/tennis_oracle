@@ -79,7 +79,7 @@ CORS_ORIGINS=["http://localhost:5173","http://localhost:5174","http://127.0.0.1:
 CORS_ORIGIN_REGEX=^https?://(localhost|127\.0\.0\.1):\d+$
 ```
 
-Per gli import API tennis: `backend/properties/config.env` con `API_TENNIS_KEY` e `API_TENNIS_BASE` (vedi `config.env.example`).
+Per gli import API tennis: `backend/properties/config.env` con `API_TENNIS_KEY`, `API_TENNIS_BASE` e opzionalmente `API_TENNIS_TIMEOUT` (secondi, default 30; vedi `config.env.example`). I log applicativi oscurano automaticamente chiavi e credenziali nelle URL/query.
 
 Bot Telegram (opzionale), stessi file `.env` / `config.env`:
 
@@ -180,7 +180,9 @@ Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update
 
 #### `app/core/logging.py`
 
-`configure_logging()` — setup logging applicativo.
+`configure_logging()` — setup logging applicativo standard/strutturato.  
+Non esistono endpoint o file temporanei di ingest per sessioni agent (`/api/debug/agent-log` rimosso).  
+Per URL/header/payload esterni usare sempre `utility/sensitive_data` prima di scrivere nei log (vedi `request_api`, migrator DB, client Telegram).
 
 #### `app/db/session.py`
 
@@ -438,7 +440,13 @@ Import classifiche/giocatori e bootstrap eventi/tornei.
 
 #### `utility/request_api.py`
 
-Client HTTP verso API tennis (chiavi da `config.env`).
+Client HTTP verso API tennis (chiavi da `config.env`).  
+Timeout esplicito (`API_TENNIS_TIMEOUT`, default 30s). Errori tipizzati: timeout, rete, HTTP, risposta non valida.  
+I log non contengono credenziali: URL/query/params vengono sanificati via `utility/sensitive_data.py` (APIkey, token, password, Authorization, Cookie, …). Il dict `params` del chiamante non viene mutato.
+
+#### `utility/sensitive_data.py`
+
+Sanitizzazione centralizzata per log: `sanitize_url`, `sanitize_headers`, `sanitize_payload`, `sanitize_text`.
 
 ---
 

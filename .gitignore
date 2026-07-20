@@ -32,9 +32,10 @@ backend/data/models/
 backups/
 *.sql
 
-# Log
+# Log (tutti i file di log, inclusi debug-*.log e log applicativi)
 *.log
-debug-*.log
+logs/
+**/logs/
 
 # Python
 __pycache__/

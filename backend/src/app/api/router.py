@@ -2,7 +2,6 @@ from fastapi import APIRouter
 
 from backend.src.app.api.routes import (
     betting_slips,
-    debug_agent_log,
     global_update,
     imports,
     predictions,
@@ -20,4 +19,3 @@ api_router.include_router(single_match_value.router)
 api_router.include_router(global_update.router)
 api_router.include_router(global_update.results_router)
 api_router.include_router(telegram.router)
-api_router.include_router(debug_agent_log.router)
