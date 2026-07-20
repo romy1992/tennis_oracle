@@ -105,8 +105,9 @@ class BackendApiClient:
         model_version: str,
         model_name: str | None,
         stake: float,
-        slip_count: int = 5,
+        slip_count: int = 9,
         picks_per_slip: int = 5,
+        min_edge_percent: float = 2.0,
     ) -> dict[str, Any]:
         payload = await self._get(
             "/betting-slips/daily",
@@ -117,6 +118,97 @@ class BackendApiClient:
                 "stake": stake,
                 "slip_count": slip_count,
                 "picks_per_slip": picks_per_slip,
+                "min_edge_percent": min_edge_percent,
+            },
+        )
+        return payload if isinstance(payload, dict) else {}
+
+    async def models_versions_results(self, *, target_date: date | None = None) -> dict[str, Any]:
+        payload = await self._get(
+            "/models-versions/results",
+            {"date": target_date.isoformat() if target_date else None},
+        )
+        return payload if isinstance(payload, dict) else {}
+
+    async def model_names_for_version(
+        self,
+        *,
+        model_version: str,
+        target_date: date | None = None,
+        fallback: list[str] | None = None,
+    ) -> list[str]:
+        fallback_names = fallback or ["logistic_regression", "random_forest"]
+        try:
+            payload = await self.models_versions_results(target_date=target_date)
+        except BackendApiError:
+            return list(fallback_names)
+
+        for entry in payload.get("versions") or []:
+            if entry.get("version") != model_version:
+                continue
+            names = [
+                str(model.get("model"))
+                for model in (entry.get("models") or [])
+                if model.get("model")
+            ]
+            return names or list(fallback_names)
+        return list(fallback_names)
+
+    async def single_match_value(
+        self,
+        *,
+        from_date: date,
+        to_date: date,
+        model_version: str,
+        model_name: str | None,
+        min_edge_percent: float = 2.0,
+        status: str = "upcoming",
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        payload = await self._get(
+            "/single-match-value",
+            {
+                "from": from_date.isoformat(),
+                "to": to_date.isoformat(),
+                "model_version": model_version,
+                "model_name": model_name,
+                "min_edge_percent": min_edge_percent,
+                "status": status,
+                "limit": limit,
+            },
+        )
+        return payload if isinstance(payload, dict) else {}
+
+    async def prediction_summary(
+        self,
+        *,
+        model_version: str,
+        model_name: str | None = None,
+    ) -> dict[str, Any]:
+        payload = await self._get(
+            "/predictions/stats/summary",
+            {
+                "model_version": model_version,
+                "model_name": model_name,
+            },
+        )
+        return payload if isinstance(payload, dict) else {}
+
+    async def betting_slip_stats_by_model(
+        self,
+        *,
+        stake: float,
+        all_time: bool = True,
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> dict[str, Any]:
+        payload = await self._get(
+            "/betting-slips/stats/by-model",
+            {
+                "stake": stake,
+                "all_time": all_time,
+                "from": from_date.isoformat() if from_date else None,
+                "to": to_date.isoformat() if to_date else None,
             },
         )
         return payload if isinstance(payload, dict) else {}

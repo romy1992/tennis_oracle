@@ -42,6 +42,12 @@ from backend.src.app.schemas.betting_slips import (
     BettingSlipStatsResponse,
     BettingSlipStatsSummary,
 )
+from backend.src.app.services.match_lifecycle import (
+    MatchLifecycleStatus,
+    classify_match_lifecycle,
+    is_void_for_betting,
+    match_lifecycle_label,
+)
 from backend.src.app.services.predictions import COMPLETED_WINNERS, _predictions_by_event_key, _resolve_model_name
 from backend.src.app.services.single_match_value import (
     DEFAULT_MIN_EDGE_PERCENT,
@@ -50,8 +56,8 @@ from backend.src.app.services.single_match_value import (
     classify_single_bet_value,
 )
 
-PickStatus = Literal["pending", "won", "lost"]
-SlipStatus = Literal["pending", "won", "lost"]
+PickStatus = Literal["pending", "won", "lost", "void"]
+SlipStatus = Literal["pending", "won", "lost", "void"]
 ValueDecision = Literal["PLAY", "BORDERLINE", "NO BET"]
 
 DEFAULT_STAKE = 10.0
@@ -852,9 +858,9 @@ def _load_outcome_context(
     event_keys: list[int],
     model_version: ModelVersion,
     model_name: str,
-) -> tuple[dict[int, MatchPrediction], dict[int, Fixture]]:
+) -> tuple[dict[int, MatchPrediction], dict[int, Fixture], dict[int, NextFixture]]:
     if not event_keys:
-        return {}, {}
+        return {}, {}, {}
 
     predictions = {
         prediction.event_key: prediction
@@ -872,6 +878,12 @@ def _load_outcome_context(
             select(Fixture).where(Fixture.event_key.in_(event_keys))
         ).all()
     }
+    next_fixtures = {
+        fixture.event_key: fixture
+        for fixture in db.scalars(
+            select(NextFixture).where(NextFixture.event_key.in_(event_keys))
+        ).all()
+    }
     #region agent log
     _agent_debug_log(
         "H2,H3",
@@ -884,6 +896,7 @@ def _load_outcome_context(
             "model_name": model_name,
             "prediction_count": len(predictions),
             "fixture_count": len(fixtures),
+            "next_fixture_count": len(next_fixtures),
             "missing_prediction_sample": [key for key in sorted(set(event_keys)) if key not in predictions][:10],
             "missing_fixture_sample": [key for key in sorted(set(event_keys)) if key not in fixtures][:10],
             "fixture_winner_values": sorted({fixture.event_winner for fixture in fixtures.values() if fixture.event_winner})[:10],
@@ -891,7 +904,39 @@ def _load_outcome_context(
         },
     )
     #endregion
-    return predictions, fixtures
+    return predictions, fixtures, next_fixtures
+
+
+def _resolve_match_lifecycle(
+    event_key: int,
+    *,
+    fixtures: dict[int, Fixture],
+    next_fixtures: dict[int, NextFixture],
+    actual_winner: str | None,
+):
+    fixture = fixtures.get(event_key)
+    next_fixture = next_fixtures.get(event_key)
+    event_status = None
+    event_final_result = None
+    event_live = None
+    is_completed = None
+    if fixture is not None:
+        event_status = fixture.event_status
+        event_final_result = fixture.event_final_result
+        event_live = fixture.event_live
+        is_completed = fixture.event_winner in COMPLETED_WINNERS
+    elif next_fixture is not None:
+        event_status = next_fixture.event_status
+        is_completed = bool(next_fixture.is_completed)
+
+    lifecycle = classify_match_lifecycle(
+        event_status=event_status,
+        event_winner=actual_winner,
+        event_final_result=event_final_result,
+        event_live=event_live,
+        is_completed=is_completed,
+    )
+    return lifecycle, event_status
 
 
 def _resolve_actual_winner(
@@ -964,19 +1009,39 @@ def _actual_winner_label(
 def _resolve_pick_status(
     pick: BettingSlipPick,
     actual_winner: str | None,
+    *,
+    match_lifecycle_status: MatchLifecycleStatus | None = None,
 ) -> tuple[PickStatus, bool | None]:
-    if actual_winner is None:
-        return "pending", None
-    is_correct = pick.predicted_winner == actual_winner
-    return ("won" if is_correct else "lost"), is_correct
+    if actual_winner in COMPLETED_WINNERS:
+        is_correct = pick.predicted_winner == actual_winner
+        return ("won" if is_correct else "lost"), is_correct
+    if match_lifecycle_status is not None and is_void_for_betting(
+        match_lifecycle_status,
+        actual_winner,
+    ):
+        return "void", None
+    return "pending", None
 
 
 def _resolve_slip_status(pick_statuses: list[PickStatus]) -> SlipStatus:
-    if any(status == "lost" for status in pick_statuses):
+    active = [status for status in pick_statuses if status != "void"]
+    if not active:
+        return "void"
+    if any(status == "lost" for status in active):
         return "lost"
-    if pick_statuses and all(status == "won" for status in pick_statuses):
+    if all(status == "won" for status in active):
         return "won"
     return "pending"
+
+
+def _effective_combined_odds(picks: list[BettingSlipPickRead]) -> float | None:
+    active = [pick for pick in picks if pick.pick_status != "void" and pick.odds is not None]
+    if not active:
+        return None
+    product = 1.0
+    for pick in active:
+        product *= float(pick.odds)
+    return round(product, 4)
 
 
 def _resolve_pick_value_fields(
@@ -1071,11 +1136,25 @@ def _pick_read(
     *,
     predictions: dict[int, MatchPrediction],
     fixtures: dict[int, Fixture],
+    next_fixtures: dict[int, NextFixture],
     min_edge_percent: float | None = None,
 ) -> BettingSlipPickRead:
     actual_winner = _resolve_actual_winner(pick, predictions, fixtures)
-    pick_status, is_correct = _resolve_pick_status(pick, actual_winner)
+    lifecycle, event_status = _resolve_match_lifecycle(
+        pick.event_key,
+        fixtures=fixtures,
+        next_fixtures=next_fixtures,
+        actual_winner=actual_winner,
+    )
+    pick_status, is_correct = _resolve_pick_status(
+        pick,
+        actual_winner,
+        match_lifecycle_status=lifecycle,
+    )
     value_fields = _resolve_pick_value_fields(pick, min_edge_percent=min_edge_percent)
+    void_reason = None
+    if pick_status == "void":
+        void_reason = match_lifecycle_label(lifecycle)
     return BettingSlipPickRead(
         event_key=pick.event_key,
         event_date=pick.event_date,
@@ -1103,6 +1182,10 @@ def _pick_read(
         pick_status=pick_status,
         actual_winner_label=_actual_winner_label(actual_winner, pick),
         is_correct=is_correct,
+        match_lifecycle_status=lifecycle,
+        match_lifecycle_label=match_lifecycle_label(lifecycle),
+        event_status=event_status,
+        void_reason=void_reason,
     )
 
 
@@ -1111,6 +1194,7 @@ def _slip_read(
     *,
     predictions: dict[int, MatchPrediction],
     fixtures: dict[int, Fixture],
+    next_fixtures: dict[int, NextFixture],
     stake: float,
     min_edge_percent: float | None = None,
 ) -> BettingSlipRead:
@@ -1119,6 +1203,7 @@ def _slip_read(
             pick,
             predictions=predictions,
             fixtures=fixtures,
+            next_fixtures=next_fixtures,
             min_edge_percent=min_edge_percent,
         )
         for pick in sorted(slip.picks, key=lambda item: item.sort_order)
@@ -1128,13 +1213,26 @@ def _slip_read(
     picks_won = sum(1 for status in pick_statuses if status == "won")
     picks_lost = sum(1 for status in pick_statuses if status == "lost")
     picks_pending = sum(1 for status in pick_statuses if status == "pending")
+    picks_void = sum(1 for status in pick_statuses if status == "void")
     combined_probability_estimate = 1.0
     for pick in pick_reads:
+        if pick.pick_status == "void":
+            continue
         if pick.model_prob is not None:
             combined_probability_estimate *= pick.model_prob
     combined_probability_estimate = round(combined_probability_estimate, 6)
-    potential_return = round(stake * slip.combined_odds, 2)
-    potential_profit = round(potential_return - stake, 2)
+    effective_combined_odds = _effective_combined_odds(pick_reads)
+    if slip_status == "void":
+        potential_return = round(stake, 2)
+        potential_profit = 0.0
+    else:
+        odds_for_potential = (
+            effective_combined_odds
+            if effective_combined_odds is not None
+            else slip.combined_odds
+        )
+        potential_return = round(stake * odds_for_potential, 2)
+        potential_profit = round(potential_return - stake, 2)
     resolved_combined_odds = 1.0
     for pick in pick_reads:
         if pick.pick_status == "won" and pick.odds is not None:
@@ -1157,8 +1255,10 @@ def _slip_read(
         picks_won=picks_won,
         picks_lost=picks_lost,
         picks_pending=picks_pending,
+        picks_void=picks_void,
         picks_total=len(pick_reads),
         resolved_combined_odds=resolved_combined_odds,
+        effective_combined_odds=effective_combined_odds,
         theoretical_profit_if_won=theoretical_profit_if_won,
         generated_at=slip.generated_at,
     )
@@ -1182,12 +1282,13 @@ def _build_daily_response(
         model_name=model_name,
     )
     event_keys = [pick.event_key for slip in slips for pick in slip.picks]
-    predictions, fixtures = _load_outcome_context(db, event_keys, model_version, model_name)
+    predictions, fixtures, next_fixtures = _load_outcome_context(db, event_keys, model_version, model_name)
     slip_reads = [
         _slip_read(
             slip,
             predictions=predictions,
             fixtures=fixtures,
+            next_fixtures=next_fixtures,
             stake=stake,
             min_edge_percent=min_edge_percent,
         )
@@ -1466,9 +1567,11 @@ def _pct(numerator: int, denominator: int) -> float | None:
 
 def _slip_profit_units(slip: BettingSlipRead, stake: float) -> float:
     if slip.slip_status == "won":
-        return stake * slip.combined_odds - stake
+        odds = slip.effective_combined_odds if slip.effective_combined_odds is not None else slip.combined_odds
+        return stake * odds - stake
     if slip.slip_status == "lost":
         return -stake
+    # pending and void: stake refund / neutral
     return 0.0
 
 
@@ -1516,8 +1619,9 @@ def compute_betting_slip_stats(
     model_names = {slip.model_name for slip in slips}
     predictions: dict[int, MatchPrediction] = {}
     fixtures: dict[int, Fixture] = {}
+    next_fixtures: dict[int, NextFixture] = {}
     for model_name_for_context in model_names or {resolved_model_name}:
-        model_predictions, model_fixtures = _load_outcome_context(
+        model_predictions, model_fixtures, model_next_fixtures = _load_outcome_context(
             db,
             event_keys,
             model_version,
@@ -1525,18 +1629,27 @@ def compute_betting_slip_stats(
         )
         predictions.update(model_predictions)
         fixtures.update(model_fixtures)
+        next_fixtures.update(model_next_fixtures)
 
     slips_by_date: dict[date, list[BettingSlipRead]] = defaultdict(list)
     profile_stats: dict[str, dict[str, int | str]] = defaultdict(
-        lambda: {"slips_won": 0, "slips_lost": 0, "slips_pending": 0, "slips_total": 0}
+        lambda: {
+            "slips_won": 0,
+            "slips_lost": 0,
+            "slips_pending": 0,
+            "slips_void": 0,
+            "slips_total": 0,
+        }
     )
 
     summary_slips_won = 0
     summary_slips_lost = 0
     summary_slips_pending = 0
+    summary_slips_void = 0
     summary_picks_won = 0
     summary_picks_lost = 0
     summary_picks_pending = 0
+    summary_picks_void = 0
     summary_picks_total = 0
 
     for slip in slips:
@@ -1544,6 +1657,7 @@ def compute_betting_slip_stats(
             slip,
             predictions=predictions,
             fixtures=fixtures,
+            next_fixtures=next_fixtures,
             stake=stake,
         )
         slips_by_date[slip.slip_date].append(slip_read)
@@ -1557,6 +1671,9 @@ def compute_betting_slip_stats(
         elif slip_read.slip_status == "lost":
             profile["slips_lost"] = int(profile["slips_lost"]) + 1
             summary_slips_lost += 1
+        elif slip_read.slip_status == "void":
+            profile["slips_void"] = int(profile["slips_void"]) + 1
+            summary_slips_void += 1
         else:
             profile["slips_pending"] = int(profile["slips_pending"]) + 1
             summary_slips_pending += 1
@@ -1564,6 +1681,7 @@ def compute_betting_slip_stats(
         summary_picks_won += slip_read.picks_won
         summary_picks_lost += slip_read.picks_lost
         summary_picks_pending += slip_read.picks_pending
+        summary_picks_void += slip_read.picks_void
         summary_picks_total += slip_read.picks_total
 
     days: list[BettingSlipStatsDay] = []
@@ -1573,9 +1691,11 @@ def compute_betting_slip_stats(
         day_slips_won = sum(1 for slip in day_slips if slip.slip_status == "won")
         day_slips_lost = sum(1 for slip in day_slips if slip.slip_status == "lost")
         day_slips_pending = sum(1 for slip in day_slips if slip.slip_status == "pending")
+        day_slips_void = sum(1 for slip in day_slips if slip.slip_status == "void")
         day_picks_won = sum(slip.picks_won for slip in day_slips)
         day_picks_lost = sum(slip.picks_lost for slip in day_slips)
         day_picks_pending = sum(slip.picks_pending for slip in day_slips)
+        day_picks_void = sum(slip.picks_void for slip in day_slips)
         day_picks_total = sum(slip.picks_total for slip in day_slips)
         day_profits = [
             _slip_profit_units(slip, stake)
@@ -1591,10 +1711,12 @@ def compute_betting_slip_stats(
                 slips_won=day_slips_won,
                 slips_lost=day_slips_lost,
                 slips_pending=day_slips_pending,
+                slips_void=day_slips_void,
                 picks_total=day_picks_total,
                 picks_won=day_picks_won,
                 picks_lost=day_picks_lost,
                 picks_pending=day_picks_pending,
+                picks_void=day_picks_void,
                 slip_win_rate_pct=_pct(day_slips_won, day_slips_won + day_slips_lost),
                 pick_hit_rate_pct=_pct(day_picks_won, day_picks_won + day_picks_lost),
                 theoretical_profit_units=day_profit_units,
@@ -1608,7 +1730,12 @@ def compute_betting_slip_stats(
     total_resolved_slips = summary_slips_won + summary_slips_lost
     total_resolved_picks = summary_picks_won + summary_picks_lost
     total_profit_units = round(
-        sum(_slip_profit_units(slip, stake) for slips in slips_by_date.values() for slip in slips if slip.slip_status in {"won", "lost"}),
+        sum(
+            _slip_profit_units(slip, stake)
+            for slips in slips_by_date.values()
+            for slip in slips
+            if slip.slip_status in {"won", "lost"}
+        ),
         2,
     )
     total_stake = stake * len(
@@ -1627,6 +1754,7 @@ def compute_betting_slip_stats(
             slips_won=int(stats["slips_won"]),
             slips_lost=int(stats["slips_lost"]),
             slips_pending=int(stats["slips_pending"]),
+            slips_void=int(stats["slips_void"]),
             slips_total=int(stats["slips_total"]),
             slip_win_rate_pct=_pct(
                 int(stats["slips_won"]),
@@ -1646,10 +1774,12 @@ def compute_betting_slip_stats(
             slips_won=summary_slips_won,
             slips_lost=summary_slips_lost,
             slips_pending=summary_slips_pending,
+            slips_void=summary_slips_void,
             picks_total=summary_picks_total,
             picks_won=summary_picks_won,
             picks_lost=summary_picks_lost,
             picks_pending=summary_picks_pending,
+            picks_void=summary_picks_void,
             slip_win_rate_pct=_pct(summary_slips_won, total_resolved_slips),
             pick_hit_rate_pct=_pct(summary_picks_won, total_resolved_picks),
             theoretical_profit_units=total_profit_units,
@@ -1714,11 +1844,13 @@ def compute_betting_slip_model_stats(
                 slips_won=summary.slips_won,
                 slips_lost=summary.slips_lost,
                 slips_pending=summary.slips_pending,
+                slips_void=summary.slips_void,
                 slip_win_rate_pct=summary.slip_win_rate_pct,
                 picks_total=summary.picks_total,
                 picks_won=summary.picks_won,
                 picks_lost=summary.picks_lost,
                 picks_pending=summary.picks_pending,
+                picks_void=summary.picks_void,
                 pick_hit_rate_pct=summary.pick_hit_rate_pct,
                 theoretical_profit_units=summary.theoretical_profit_units,
                 theoretical_roi_pct=summary.theoretical_roi_pct,

@@ -121,11 +121,13 @@ def iter_date_chunks(start: date, end: date, max_span_days: int = API_FIXTURES_M
 
 
 def is_match_completed(payload: dict[str, Any]) -> bool:
-    winner = payload.get("event_winner")
-    if winner in COMPLETED_WINNERS:
-        return True
-    result = payload.get("event_final_result")
-    return bool(result and result != "-")
+    """Promote only when API provides a bettable winner.
+
+    Cancelled/postponed/abandoned matches may carry odd ``event_final_result``
+    values; those must stay in ``next_fixture`` with their ``event_status`` so
+    settlement can void picks on-read without inventing a winner.
+    """
+    return payload.get("event_winner") in COMPLETED_WINNERS
 
 
 def _surface_for_tournament(tournament_key: int | None) -> str | None:

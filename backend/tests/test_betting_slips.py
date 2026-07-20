@@ -384,9 +384,15 @@ class BettingSlipsServiceTest(unittest.TestCase):
         self.assertEqual(_resolve_pick_status(pick, "First Player"), ("won", True))
         self.assertEqual(_resolve_pick_status(pick, "Second Player"), ("lost", False))
         self.assertEqual(_resolve_pick_status(pick, None), ("pending", None))
+        self.assertEqual(
+            _resolve_pick_status(pick, None, match_lifecycle_status="cancelled"),
+            ("void", None),
+        )
         self.assertEqual(_resolve_slip_status(["won", "pending"]), "pending")
         self.assertEqual(_resolve_slip_status(["won", "lost"]), "lost")
         self.assertEqual(_resolve_slip_status(["won", "won"]), "won")
+        self.assertEqual(_resolve_slip_status(["won", "void", "won"]), "won")
+        self.assertEqual(_resolve_slip_status(["void", "void"]), "void")
 
     def test_calendar_includes_history_and_upcoming_window(self):
         future_date = date.today() + timedelta(days=3)

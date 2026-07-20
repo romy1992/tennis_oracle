@@ -76,38 +76,64 @@ function valueDecisionClass(decision: string | null | undefined) {
 function pickDotClass(status: BettingSlipPick["pick_status"]) {
   if (status === "won") return "win";
   if (status === "lost") return "loss";
+  if (status === "void") return "void";
   return "pending";
 }
 
 function slipStatusLabel(status: BettingSlip["slip_status"], historicalOutcomesMissing = false) {
   if (status === "won") return "Presa";
   if (status === "lost") return "Persa";
+  if (status === "void") return "Annullata";
   if (historicalOutcomesMissing) return "Esito mancante";
   return "In corso";
 }
 
 function computeStakeValues(slip: BettingSlip, stake: number) {
-  const potentialReturn = stake * slip.combined_odds;
+  const oddsForPayout =
+    slip.effective_combined_odds != null && slip.picks_void
+      ? slip.effective_combined_odds
+      : slip.effective_combined_odds != null && slip.slip_status === "won"
+        ? slip.effective_combined_odds
+        : slip.combined_odds;
+  const displayOdds =
+    slip.effective_combined_odds != null &&
+    (slip.picks_void ?? 0) > 0
+      ? slip.effective_combined_odds
+      : slip.combined_odds;
+  const potentialReturn = stake * displayOdds;
   const potentialProfit = potentialReturn - stake;
   let actualOutcome: number | null = null;
   if (slip.slip_status === "won") {
-    actualOutcome = potentialReturn;
+    actualOutcome = stake * (slip.effective_combined_odds ?? oddsForPayout);
   } else if (slip.slip_status === "lost") {
     actualOutcome = -stake;
+  } else if (slip.slip_status === "void") {
+    actualOutcome = 0;
   }
-  return { potentialReturn, potentialProfit, actualOutcome };
+  return { potentialReturn, potentialProfit, actualOutcome, displayOdds };
 }
 
 function buildSlipClipboard(slip: BettingSlip, stake: number) {
-  const lines = slip.picks.map(
-    (pick) =>
-      `${formatTime(pick.event_time)} ${pick.tournament_name ?? "-"} | ${pick.player_1 ?? "?"} vs ${pick.player_2 ?? "?"} -> ${pick.predicted_winner_label ?? "-"} @ ${formatOdds(pick.odds)} (void ${formatOdds(pick.void_odds)}, margine ${formatSignedPct(pick.edge_percent)})`
-  );
-  const { potentialReturn } = computeStakeValues(slip, stake);
+  const lines = slip.picks.map((pick) => {
+    const statusNote =
+      pick.pick_status === "void"
+        ? ` [ANNULLATA: ${pick.void_reason ?? pick.match_lifecycle_label ?? "void"}]`
+        : pick.match_lifecycle_status &&
+            pick.match_lifecycle_status !== "scheduled" &&
+            pick.match_lifecycle_status !== "finished"
+          ? ` [${pick.match_lifecycle_label}]`
+          : "";
+    return `${formatTime(pick.event_time)} ${pick.tournament_name ?? "-"} | ${pick.player_1 ?? "?"} vs ${pick.player_2 ?? "?"} -> ${pick.predicted_winner_label ?? "-"} @ ${formatOdds(pick.odds)} (void ${formatOdds(pick.void_odds)}, margine ${formatSignedPct(pick.edge_percent)})${statusNote}`;
+  });
+  const { potentialReturn, displayOdds } = computeStakeValues(slip, stake);
+  const oddsLine =
+    (slip.picks_void ?? 0) > 0 && slip.effective_combined_odds != null
+      ? `Quota originale: ${formatOdds(slip.combined_odds)} | Quota effettiva: ${formatOdds(slip.effective_combined_odds)}`
+      : `Quota combinata: ${formatOdds(displayOdds)}`;
   return [
-    `${slip.label} (${slip.slip_status})`,
+    `${slip.label} (${slipStatusLabel(slip.slip_status)})`,
     ...lines,
-    `Quota combinata: ${formatOdds(slip.combined_odds)} | Puntata: ${formatMoney(stake)} | Vincita potenziale: ${formatMoney(potentialReturn)}`
+    `${oddsLine} | Puntata: ${formatMoney(stake)} | Vincita potenziale: ${formatMoney(potentialReturn)}`
   ].join("\n");
 }
 
@@ -265,7 +291,11 @@ function SlipCard({
   historicalOutcomesMissing: boolean;
   globalMinEdge: number;
 }) {
-  const { potentialReturn, potentialProfit, actualOutcome } = computeStakeValues(slip, stake);
+  const { potentialReturn, potentialProfit, actualOutcome, displayOdds } = computeStakeValues(slip, stake);
+  const hasRecalculatedOdds =
+    (slip.picks_void ?? 0) > 0 &&
+    slip.effective_combined_odds != null &&
+    slip.effective_combined_odds !== slip.combined_odds;
 
   async function copySlip() {
     await navigator.clipboard.writeText(buildSlipClipboard(slip, stake));
@@ -283,7 +313,8 @@ function SlipCard({
             {slipStatusLabel(slip.slip_status, historicalOutcomesMissing)}
           </span>
           <span className="slip-pick-counter">
-            {slip.picks_won}/{slip.picks_total} pick corrette
+            {slip.picks_won}/{slip.picks_total - (slip.picks_void ?? 0)} pick corrette
+            {(slip.picks_void ?? 0) > 0 ? ` · ${slip.picks_void} annullate` : ""}
           </span>
         </div>
       </header>
@@ -308,20 +339,24 @@ function SlipCard({
           <tbody>
             {slip.picks.map((pick) => {
               const display = resolvePickDisplay(pick, globalMinEdge);
+              const pickTitle =
+                pick.pick_status === "won"
+                  ? "Presa"
+                  : pick.pick_status === "lost"
+                    ? "Persa"
+                    : pick.pick_status === "void"
+                      ? pick.void_reason ?? pick.match_lifecycle_label ?? "Annullata"
+                      : pick.match_lifecycle_label && pick.match_lifecycle_status === "postponed"
+                        ? pick.match_lifecycle_label
+                        : historicalOutcomesMissing
+                          ? "Esito non disponibile"
+                          : "In corso";
               return (
-              <tr key={pick.event_key}>
+              <tr key={pick.event_key} className={pick.pick_status === "void" ? "pick-void" : undefined}>
                 <td className="slip-col-status">
                   <span
                     className={`result-dot ${pickDotClass(pick.pick_status)}`}
-                    title={
-                      pick.pick_status === "won"
-                        ? "Presa"
-                        : pick.pick_status === "lost"
-                          ? "Persa"
-                          : historicalOutcomesMissing
-                            ? "Esito non disponibile"
-                          : "In corso"
-                    }
+                    title={pickTitle}
                   />
                 </td>
                 <td className="slip-col-time">{formatTime(pick.event_time)}</td>
@@ -330,6 +365,13 @@ function SlipCard({
                 </td>
                 <td className="slip-col-match">
                   {pick.player_1 ?? "?"} vs {pick.player_2 ?? "?"}
+                  {pick.match_lifecycle_label &&
+                  pick.match_lifecycle_status &&
+                  !["scheduled", "finished"].includes(pick.match_lifecycle_status) ? (
+                    <small className={`match-lifecycle-chip ${pick.match_lifecycle_status}`}>
+                      {pick.match_lifecycle_label}
+                    </small>
+                  ) : null}
                 </td>
                 <td className="slip-col-pick">
                   <strong>{pick.predicted_winner_label ?? "-"}</strong>
@@ -363,8 +405,11 @@ function SlipCard({
       <footer className="slip-card-footer">
         <div className="slip-metrics-grid">
           <div>
-            <span>Quota combinata</span>
-            <strong>{formatOdds(slip.combined_odds)}</strong>
+            <span>{hasRecalculatedOdds ? "Quota effettiva" : "Quota combinata"}</span>
+            <strong>{formatOdds(displayOdds)}</strong>
+            {hasRecalculatedOdds ? (
+              <small className="slip-odds-note">Originale {formatOdds(slip.combined_odds)}</small>
+            ) : null}
           </div>
           <div>
             <span>Puntata</span>
@@ -403,7 +448,8 @@ export function BettingSlipsPage() {
   const [selectedDate, setSelectedDate] = useState<string>(() => todayLocalISODate());
   const [dailyByModel, setDailyByModel] = useState<Record<string, BettingSlipsDailyResponse>>({});
   const [dayStatsByModel, setDayStatsByModel] = useState<Record<string, BettingSlipStatsResponse>>({});
-  const [overallStats, setOverallStats] = useState<BettingSlipStatsResponse | null>(null);
+  const [overallStatsByModel, setOverallStatsByModel] = useState<Record<string, BettingSlipStatsResponse>>({});
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [stake, setStake] = useState(10);
   const [minEdgePercent, setMinEdgePercent] = useState(2);
   const [loading, setLoading] = useState(true);
@@ -419,6 +465,13 @@ export function BettingSlipsPage() {
       [],
     [availableVersions, activeVersion]
   );
+
+  useEffect(() => {
+    if (!activeModels.length) return;
+    if (!selectedModel || !activeModels.includes(selectedModel)) {
+      setSelectedModel(activeModels[0]);
+    }
+  }, [activeModels, selectedModel]);
 
   useEffect(() => {
     async function loadCatalog() {
@@ -471,22 +524,28 @@ export function BettingSlipsPage() {
         })
       )
     );
-    const overallStatsData = await apiClient.getBettingSlipStats({
-      model_version: activeVersion,
-      model_name: models[0],
-      all_time: true,
-      stake
-    });
+    const overallStatsResponses = await Promise.all(
+      models.map((modelName) =>
+        apiClient.getBettingSlipStats({
+          model_version: activeVersion,
+          model_name: modelName,
+          all_time: true,
+          stake
+        })
+      )
+    );
 
     const dailyMap: Record<string, BettingSlipsDailyResponse> = {};
     const statsMap: Record<string, BettingSlipStatsResponse> = {};
+    const overallMap: Record<string, BettingSlipStatsResponse> = {};
     models.forEach((modelName, index) => {
       dailyMap[modelName] = dailyResponses[index];
       statsMap[modelName] = dayStatsResponses[index];
+      overallMap[modelName] = overallStatsResponses[index];
     });
     setDailyByModel(dailyMap);
     setDayStatsByModel(statsMap);
-    setOverallStats(overallStatsData);
+    setOverallStatsByModel(overallMap);
   }, [stake, activeVersion, activeModels]);
 
   useEffect(() => {
@@ -577,11 +636,12 @@ export function BettingSlipsPage() {
 
   const pastDays = calendar?.days.filter((day) => day.is_past) ?? [];
   const upcomingDays = calendar?.days.filter((day) => !day.is_past) ?? [];
+  const selectedDaily = selectedModel ? dailyByModel[selectedModel] : undefined;
+  const selectedDayStats = selectedModel ? dayStatsByModel[selectedModel] ?? null : null;
+  const selectedOverallStats = selectedModel ? overallStatsByModel[selectedModel] ?? null : null;
   const historicalOutcomesMissing =
     Boolean(selectedCalendarDay?.is_past) &&
-    Object.values(dailyByModel).some((daily) =>
-      daily.slips.some((slip) => slip.picks_pending > 0)
-    );
+    Boolean(selectedDaily?.slips.some((slip) => slip.picks_pending > 0));
 
   return (
     <section className="page">
@@ -636,6 +696,21 @@ export function BettingSlipsPage() {
         </div>
       ) : null}
 
+      {activeModels.length ? (
+        <div className="tab-list" aria-label="Modelli">
+          {activeModels.map((modelName) => (
+            <button
+              key={modelName}
+              type="button"
+              className={selectedModel === modelName ? "active" : undefined}
+              onClick={() => setSelectedModel(modelName)}
+            >
+              {modelName}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {calendar ? (
         <article className="panel">
           <div className="panel-header">
@@ -684,22 +759,15 @@ export function BettingSlipsPage() {
 
       {actionMessage ? <p className="action-success">{actionMessage}</p> : null}
       {error ? <p className="action-error">{error}</p> : null}
-      {Object.values(dailyByModel).some((daily) => daily.candidate_pool_size >= 0) ? (
-        <p className="note">
-          Pool PLAY disponibile:{" "}
-          {Object.entries(dailyByModel)
-            .map(([modelName, daily]) => `${modelName}: ${daily.candidate_pool_size}`)
-            .join(" · ")}
-        </p>
+      {selectedDaily && selectedDaily.candidate_pool_size >= 0 ? (
+        <p className="note">Pool PLAY disponibile: {selectedDaily.candidate_pool_size}</p>
       ) : null}
 
-      {Object.values(dailyByModel).flatMap((daily) =>
-        daily.warnings.map((warning) => (
-          <p key={`${daily.model_name}-${warning}`} className="note">
-            {daily.model_name}: {warning}
-          </p>
-        ))
-      )}
+      {selectedDaily?.warnings.map((warning) => (
+        <p key={`${selectedDaily.model_name}-${warning}`} className="note">
+          {warning}
+        </p>
+      ))}
 
       <div className="panel stake-panel">
         <label htmlFor="stake-input">Simula puntata</label>
@@ -729,51 +797,46 @@ export function BettingSlipsPage() {
         <span><span className="result-dot win" /> Presa</span>
         <span><span className="result-dot loss" /> Persa</span>
         <span><span className="result-dot pending" /> In corso</span>
+        <span><span className="result-dot void" /> Annullata</span>
       </div>
 
-      {!loadingDay && !Object.values(dailyByModel).some((daily) => daily.slips.length) ? (
+      {!loadingDay && selectedModel && !selectedDaily?.slips.length ? (
         <EmptyState
           title="Nessuna schedina disponibile per questo giorno"
           message='Seleziona un altro giorno o usa "Aggiorna tutto" nella sidebar.'
         />
       ) : null}
 
-      {!loadingDay
-        ? activeModels.map((modelName) => {
-            const daily = dailyByModel[modelName];
-            if (!daily?.slips.length) return null;
-            return (
-              <section key={modelName} className="panel">
-                <h3>{modelName}</h3>
-                <div className="slip-list">
-                  {daily.slips.map((slip) => (
-                    <SlipCard
-                      key={`${modelName}-${slip.slip_key}`}
-                      slip={slip}
-                      stake={stake}
-                      historicalOutcomesMissing={historicalOutcomesMissing}
-                      globalMinEdge={minEdgePercent}
-                    />
-                  ))}
-                </div>
-                <SlipStatsPanel
-                  title={`Statistiche ${modelName}`}
-                  subtitle={`Risultati per ${formatDate(selectedDate)}.`}
-                  stats={dayStatsByModel[modelName] ?? null}
-                />
-              </section>
-            );
-          })
-        : null}
+      {!loadingDay && selectedDaily?.slips.length ? (
+        <section className="slip-list">
+          {selectedDaily.slips.map((slip) => (
+            <SlipCard
+              key={`${selectedModel}-${slip.slip_key}`}
+              slip={slip}
+              stake={stake}
+              historicalOutcomesMissing={historicalOutcomesMissing}
+              globalMinEdge={minEdgePercent}
+            />
+          ))}
+        </section>
+      ) : null}
+
+      {!loadingDay ? (
+        <SlipStatsPanel
+          title="Statistiche giorno"
+          subtitle={`Risultati per ${formatDate(selectedDate)}${selectedModel ? ` · ${selectedModel}` : ""}.`}
+          stats={selectedDayStats}
+        />
+      ) : null}
 
       <SlipStatsPanel
         title="Statistiche complessive"
         subtitle={
-          overallStats
-            ? `Storico completo dal ${formatDate(overallStats.from_date)} al ${formatDate(overallStats.to_date)}.`
+          selectedOverallStats
+            ? `Storico completo dal ${formatDate(selectedOverallStats.from_date)} al ${formatDate(selectedOverallStats.to_date)}${selectedModel ? ` · ${selectedModel}` : ""}.`
             : "Storico completo di tutte le schedine salvate."
         }
-        stats={overallStats}
+        stats={selectedOverallStats}
       />
 
       <p className="disclaimer">

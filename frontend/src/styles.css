@@ -88,6 +88,17 @@ a {
   color: #fecaca;
 }
 
+.global-update-meta .action-error-link {
+  color: #fecaca;
+  font-size: 0.875em;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.global-update-meta .action-error-link:hover {
+  color: #fee2e2;
+}
+
 .nav-section-label {
   color: #8d99ad;
   font-size: 12px;
@@ -209,6 +220,54 @@ input {
 
 .panel-header h3 {
   margin: 0;
+}
+
+.report-run-header {
+  background: #ffffff;
+  border: 1px solid #e4e9f2;
+  border-radius: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+  padding: 16px 20px;
+}
+
+.report-run-meta,
+.report-run-times {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.report-run-times small {
+  color: #65738a;
+}
+
+.report-message-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.report-message-list li {
+  border-radius: 12px;
+  padding: 12px 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.report-message-list.errors li {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.report-message-list.warnings li {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
 }
 
 .detail-grid {
@@ -415,6 +474,51 @@ input {
   background: #94a3b8;
 }
 
+.result-dot.void {
+  background: #64748b;
+  box-shadow: inset 0 0 0 2px #cbd5e1;
+}
+
+.pick-void td {
+  opacity: 0.72;
+}
+
+.pick-void .slip-col-odds,
+.pick-void .slip-col-pick {
+  text-decoration: line-through;
+}
+
+.match-lifecycle-chip {
+  display: block;
+  color: #b45309;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 2px;
+  text-decoration: none;
+}
+
+.match-lifecycle-chip.cancelled,
+.match-lifecycle-chip.abandoned,
+.match-lifecycle-chip.unknown_problem {
+  color: #9f1239;
+}
+
+.match-lifecycle-chip.postponed {
+  color: #b45309;
+}
+
+.match-lifecycle-chip.live {
+  color: #0369a1;
+}
+
+.slip-odds-note {
+  color: #64748b;
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
 .player-search-row {
   display: grid;
   gap: 8px;
@@ -510,6 +614,12 @@ input {
 .slip-status-badge.pending {
   background: #e2e8f0;
   color: #475569;
+}
+
+.slip-status-badge.void {
+  background: #e2e8f0;
+  color: #334155;
+  text-decoration: line-through;
 }
 
 .slip-table-wrap {

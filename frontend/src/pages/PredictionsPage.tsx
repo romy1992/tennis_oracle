@@ -779,11 +779,13 @@ export function PredictionsPage() {
                           );
                         })}
                         <td>
-                          {fixture.is_completed
-                            ? "Giocata"
-                            : hasAnyPrediction
-                              ? "Da giocare"
-                              : "Da generare"}
+                          {fixture.match_lifecycle_label
+                            ? fixture.match_lifecycle_label
+                            : fixture.is_completed
+                              ? "Giocata"
+                              : hasAnyPrediction
+                                ? "Da giocare"
+                                : "Da generare"}
                         </td>
                       </tr>
                     );

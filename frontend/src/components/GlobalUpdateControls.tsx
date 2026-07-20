@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { useGlobalUpdate } from "../hooks/useGlobalUpdate";
 import { ApiError } from "../services/apiClient";
@@ -94,7 +95,9 @@ export function GlobalUpdateControls() {
             </small>
           ) : null}
           {status.errors.length ? (
-            <small className="action-error">{status.errors.length} errori</small>
+            <Link to="/global-update-report" className="action-error-link">
+              {status.errors.length} errori
+            </Link>
           ) : null}
           {actionError ? <small className="action-error">{actionError}</small> : null}
         </div>

@@ -6,7 +6,8 @@ const navItems = [
   { to: "/predictions", label: "Partite" },
   { to: "/betting-slips", label: "Consiglio schedina" },
   { to: "/betting-slip-model-stats", label: "Statistiche schedine" },
-  { to: "/prediction-stats", label: "Statistiche previsioni" }
+  { to: "/prediction-stats", label: "Statistiche previsioni" },
+  { to: "/global-update-report", label: "Report aggiornamento" }
 ];
 
 export function Layout() {
