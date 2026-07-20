@@ -9,13 +9,15 @@
 3. **Genera previsioni salvate** in `match_prediction` per le prossime partite, scegliendo automaticamente il modello migliore dalle metriche della versione attiva
 4. **Sync cloud** verso `DATABASE_TARGET_URL` con upsert
 
+Default CLI: `--prediction-model-version v2` (una sola versione/modello). Per aggiornare **tutte** le combo con artefatto `.pkl` su disco usa invece l’aggiornamento globale dall’API/UI (`POST /api/global-update`). Frontend e bot Telegram defaultano a **v3**.
+
 Policy previsioni: il job mantiene una riga per `event_key + model_version + model_name`.
 Le righe future/non risolte vengono aggiornate se il job gira di nuovo; le righe gia
 valutabili con `actual_winner` non vengono sovrascritte, cosi lo storico resta
 confrontabile con i risultati importati.
 
 Policy modello: se `--prediction-model-name` non viene passato, il job legge
-`baseline_metrics.json` / `baseline_v2_metrics.json` e sceglie il modello con
+le metriche della versione richiesta e sceglie il modello con
 `roc_auc` piu alto; se non disponibile usa `accuracy`, poi `log_loss` piu basso.
 `roc_auc` e il criterio primario perche le previsioni esposte sono probabilita,
 quindi serve premiare la capacita discriminante del modello.
@@ -24,6 +26,12 @@ Comando unico (dalla root del repository):
 
 ```bash
 python3 -m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v2
+```
+
+Esempio con v3:
+
+```bash
+python3 -m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v3
 ```
 
 ## Configurazione (`backend/properties/config.env`)
