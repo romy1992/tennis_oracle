@@ -248,14 +248,26 @@ Repository specializzati (eredita `CrudRepository`):
 | `get_betting_slip_calendar` | Giorni con presenza/assenza slip |
 | `get_daily_betting_slips` | Legge o genera slip del giorno con `min_edge_percent` globale |
 | `refresh_betting_slips` | Rigenera forzando delete/upsert |
-| `compute_betting_slip_stats` | ROI/winrate per profilo e giorno |
+| `compute_betting_slip_stats` | ROI/winrate per profilo e giorno (profitto su `effective_combined_odds`) |
 | `compute_betting_slip_model_stats` | Stats aggregate per versione/modello |
+| `_resolve_pick_status` / `_resolve_slip_status` | Settlement on-read: `pending`/`won`/`lost`/`void`; void ignorati per win; slip tutta void → `void` |
+| `effective_combined_odds` | Prodotto quote dei soli pick non-void (quota originale resta in `combined_odds`) |
+
+#### `app/services/match_lifecycle.py`
+
+| Simbolo | Ruolo |
+|---------|-------|
+| `classify_match_lifecycle` | Normalizza `event_status`/winner → `scheduled`/`live`/`finished`/`postponed`/`cancelled`/`abandoned`/`walkover`/`retired`/`unknown_problem` |
+| `is_void_for_betting` | Pick void se status terminale senza winner bettable (cancelled/abandoned/…); postponed resta pending |
+| `match_lifecycle_label` | Label IT per UI/Telegram |
+
+**Nota naming:** `void_odds` = quota void/break-even del modello (`1/P`). Non confondere con `pick_status="void"` (partita annullata / non scommettibile).
 
 #### `app/services/single_match_value.py`
 
 | Funzione | Ruolo |
 |----------|-------|
-| `calculate_void_odds` | Quota di break-even data P(modello) |
+| `calculate_void_odds` | Quota void / break-even data P(modello) |
 | `calculate_match_min_edge_percent` | Helper overround (opzionale); il default operativo è `DEFAULT_MIN_EDGE_PERCENT = 2` |
 | `calculate_expected_roi` | ROI atteso quota vs probabilità |
 | `classify_single_bet_value` | `PLAY` / `NO BET` / `BORDERLINE` rispetto a void + margine |
@@ -437,6 +449,7 @@ Variante multi-modello dell’aggiornamento giornaliero.
 | `/prediction-stats` | `PredictionStatsPage` |
 | `/betting-slips` | `BettingSlipsPage` |
 | `/betting-slip-model-stats` | `BettingSlipModelStatsPage` |
+| `/global-update-report` | `GlobalUpdateReportPage` |
 
 Wrapper: `GlobalUpdateProvider`.
 
@@ -446,15 +459,16 @@ Wrapper: `GlobalUpdateProvider`.
 |------------|-------|
 | `PredictionsPage` | Lista partite+predizioni; margine globale (default 2%); void/decision in riga |
 | `PredictionStatsPage` | Summary e serie giornaliere accuracy/ROI |
-| `BettingSlipsPage` | Calendario, 9 slip a tier, margine globale (default 2%) |
+| `BettingSlipsPage` | Calendario, tab modello, 9 slip a tier, margine globale (default 2%), status pick void / quota effettiva |
 | `BettingSlipModelStatsPage` | Tabella comparativa stats per modello |
+| `GlobalUpdateReportPage` | Report ultima run globale: errori, warning, fasi, combo |
 
 ### Componenti / hook
 
 | Modulo | Ruolo |
 |--------|-------|
 | `Layout` | Sidebar, nav, slot `GlobalUpdateControls` |
-| `GlobalUpdateControls` | Start/cancel/status aggiornamento globale |
+| `GlobalUpdateControls` | Start/cancel/status aggiornamento globale; link a report se ci sono errori |
 | `ModelControls` | Selettore versione/nome modello |
 | `Status` | `LoadingState` / `ErrorState` / `EmptyState` |
 | `MetricCard` | Card metrica |
@@ -526,12 +540,18 @@ Modulo `app/telegram/`.
 
 | Modulo | Ruolo |
 |--------|-------|
-| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, model version/stake default |
-| `client.BackendApiClient` | Chiama le stesse API FastAPI |
+| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 9), `telegram_min_edge_percent` (default 2.0) |
+| `client.BackendApiClient` | Chiama le stesse API FastAPI (`/betting-slips/daily`, `/betting-slips/stats/by-model`, `/predictions/stats/summary`, `/models-versions/results`, `/next-fixtures/predictions`, …) |
 | `bot.build_application` / `main` | Polling + handler comandi |
-| `messages` / `dates` / `images` | Formattazione risposte, date Roma, immagini |
+| `messages` / `dates` / `images` / `slips_compare` / `public_labels` | Formattazione risposte, date Roma, PNG, confronto multi-serie, etichette pubbliche (accuratezza) |
 
-Comandi: `/start`, `/help`, `/pronostici`, `/giorno <0-10>`, `/10giorni`, `/schedine […]`, `/partite […]`, `/cerca <nome>`.
+**Comandi attivi:** `/start`, `/help`, `/schedine`, `/partite`, `/statistiche`.
+
+`/schedine` carica le schedine di tutti i modelli della versione configurata. Se i contenuti coincidono (stessi match e stessi vincitori previsti) ne mostra una sola serie; se differiscono anche solo per una partita/pick, mostra entrambe con etichetta pubblica basata sull’accuratezza (es. `Serie A · accuratezza 58.2%`), senza nomi tecnici. Il messaggio introduttivo contiene solo data e legenda stati (Presa / Persa / In corso / Annullata). Pick void escludono la quota dalla combinata effettiva.
+
+`/partite` allinea la pagina **Partite**: tabella Ora/Torneo/Surface/Match/Predetto/Conf./Void/Valore/Stato (stato partita normalizzato), void+valore via SMVA (fallback da probabilità modello), multi-serie se i predittori differiscono (stesse etichette pubbliche), intro solo data+legenda stati.
+
+`/statistiche` mostra PNG di confronto (partite + schedine con profitto/ROI) usando le stesse etichette pubbliche. Comandi pronostici (`/pronostici`, `/giorno`, `/10giorni`, `/cerca`) restano nel codice ma non sono registrati.
 
 ```bash
 cd backend

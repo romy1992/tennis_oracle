@@ -10,6 +10,7 @@ import type {
   DailyPredictionStatsResponse,
   DailyStatsParams,
   FixturesWithPredictionsPage,
+  GlobalUpdateReportRead,
   GlobalUpdateRunRead,
   GlobalUpdateStartResponse,
   ImportFixturesResponse,
@@ -140,6 +141,8 @@ export const apiClient = {
     post<GlobalUpdateStartResponse>(`/api/global-update/${runId}/cancel`, {}),
   getGlobalUpdateRun: (runId: number) =>
     request<GlobalUpdateRunRead>(`/api/global-update/${runId}`),
+  getGlobalUpdateReport: (runId: number) =>
+    request<GlobalUpdateReportRead>(`/api/global-update/${runId}/report`),
   getModelsVersionsResults: (params: { date?: string } = {}) =>
     request<ModelsVersionsResultsResponse>(withQuery("/api/models-versions/results", params))
 };

@@ -20,6 +20,11 @@ class ImportNextFixturesTest(unittest.TestCase):
             module.is_match_completed({"event_winner": "First Player"})
         )
         self.assertFalse(module.is_match_completed({"event_winner": None}))
+        self.assertFalse(
+            module.is_match_completed(
+                {"event_winner": None, "event_final_result": "2 - 0", "event_status": "Cancelled"}
+            )
+        )
 
     def test_iso_week_bounds(self):
         week_start, week_end = module.iso_week_bounds(date(2026, 6, 21))

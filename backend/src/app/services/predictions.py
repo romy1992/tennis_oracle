@@ -25,6 +25,10 @@ from backend.src.app.schemas.prediction import (
     PredictionModelBreakdown,
     PredictionSummaryResponse,
 )
+from backend.src.app.services.match_lifecycle import (
+    classify_match_lifecycle,
+    match_lifecycle_label,
+)
 
 FixturePredictionStatus = Literal["upcoming", "played", "all"]
 PredictionOutcome = Literal["all", "won", "lost"]
@@ -529,6 +533,28 @@ def _predictions_by_event_key_with_fallback(
     return prediction_by_key
 
 
+def _attach_lifecycle_fields(
+    base: NextFixtureRead,
+    *,
+    event_winner: str | None = None,
+    event_final_result: str | None = None,
+    event_live: str | None = None,
+) -> NextFixtureRead:
+    lifecycle = classify_match_lifecycle(
+        event_status=base.event_status,
+        event_winner=event_winner,
+        event_final_result=event_final_result,
+        event_live=event_live,
+        is_completed=base.is_completed,
+    )
+    return base.model_copy(
+        update={
+            "match_lifecycle_status": lifecycle,
+            "match_lifecycle_label": match_lifecycle_label(lifecycle),
+        }
+    )
+
+
 def _wrap_upcoming_fixture(
     fixture: NextFixture,
     stored_prediction: MatchPrediction | None,
@@ -537,7 +563,7 @@ def _wrap_upcoming_fixture(
     prediction = (
         _prediction_read(stored_prediction, fixture_odds) if stored_prediction else None
     )
-    base = NextFixtureRead.model_validate(fixture)
+    base = _attach_lifecycle_fields(NextFixtureRead.model_validate(fixture))
     return NextFixtureWithPrediction(
         **base.model_dump(),
         prediction=prediction,
@@ -550,7 +576,12 @@ def _wrap_played_fixture(
     stored_prediction: MatchPrediction | None,
 ) -> NextFixtureWithPrediction:
     fixture_odds = _fixture_odds(fixture)
-    base = _fixture_read_from_completed_fixture(fixture)
+    base = _attach_lifecycle_fields(
+        _fixture_read_from_completed_fixture(fixture),
+        event_winner=fixture.event_winner,
+        event_final_result=fixture.event_final_result,
+        event_live=fixture.event_live,
+    )
     if stored_prediction is None:
         return NextFixtureWithPrediction(
             **base.model_dump(),

@@ -12,12 +12,14 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from .client import BackendApiClient, BackendApiError
 from .config import TelegramSettings, get_telegram_settings
 from .dates import parse_date_or_offset, prediction_window, today_rome
-from .images import render_betting_slip_png, render_fixtures_png
+from .images import render_betting_slip_png, render_bot_stats_png, render_fixtures_png
 from .messages import (
     format_betting_slips,
     format_betting_slip_photo_caption,
     format_betting_slip_text,
     format_betting_slips_intro,
+    format_bot_stats_intro,
+    format_bot_stats_text,
     format_fixture_group_text,
     format_fixtures,
     format_fixtures_intro,
@@ -27,6 +29,13 @@ from .messages import (
     format_predictions_summary,
     split_message,
 )
+from .fixture_value import enrich_fixtures_with_value
+from .public_labels import (
+    accuracy_by_model_name,
+    build_public_labels,
+    build_stats_series,
+)
+from .slips_compare import select_distinct_fixture_models, select_distinct_model_payloads
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +46,7 @@ WELCOME_TEXT = """Ciao, sono il bot di tennis_oracle.
 Comandi attivi:
 /schedine - schedine di oggi
 /partite - partite di oggi
+/statistiche - andamento bot
 
 Pronostici a scopo informativo/statistico, non garanzie di risultato."""
 
@@ -148,6 +158,12 @@ async def ten_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     target_date = today_rome()
     settings = _settings(context)
+    api = _api(context)
+    fallback_models = [
+        name.strip()
+        for name in settings.telegram_model_names.split(",")
+        if name.strip()
+    ] or ["logistic_regression", "random_forest"]
     # region agent log
     _agent_log(
         "H1,H4",
@@ -162,22 +178,53 @@ async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     # endregion
     try:
-        payload = await _api(context).daily_betting_slips(
-            slip_date=target_date,
+        model_names = await api.model_names_for_version(
             model_version=settings.telegram_model_version,
-            model_name=settings.telegram_model_name,
-            stake=settings.telegram_default_stake,
+            target_date=target_date,
+            fallback=fallback_models,
         )
+        payloads: list[dict] = []
+        for model_name in model_names:
+            payload = await api.daily_betting_slips(
+                slip_date=target_date,
+                model_version=settings.telegram_model_version,
+                model_name=model_name,
+                stake=settings.telegram_default_stake,
+                slip_count=settings.telegram_slip_count,
+                min_edge_percent=settings.telegram_min_edge_percent,
+            )
+            payloads.append(payload)
     except BackendApiError as exc:
         await _reply(update, exc.message)
         return
 
-    await _reply_betting_slips(update, payload)
+    selected = select_distinct_model_payloads(
+        payloads,
+        preferred_model_name=settings.telegram_model_name,
+    )
+    public_labels = await _public_labels_for_models(
+        api,
+        model_version=settings.telegram_model_version,
+        model_names=[str(payload.get("model_name") or "") for payload in selected],
+    )
+    await _reply_betting_slips(
+        update,
+        selected,
+        min_edge_percent=settings.telegram_min_edge_percent,
+        slip_date=str(target_date),
+        public_labels=public_labels,
+    )
 
 
 async def partite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     target_date = today_rome()
     settings = _settings(context)
+    api = _api(context)
+    fallback_models = [
+        name.strip()
+        for name in settings.telegram_model_names.split(",")
+        if name.strip()
+    ] or ["logistic_regression", "random_forest"]
     # region agent log
     _agent_log(
         "H1,H2,H3",
@@ -191,19 +238,117 @@ async def partite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     # endregion
     try:
-        items = await _api(context).predictions(
+        model_names = await api.model_names_for_version(
             model_version=settings.telegram_model_version,
-            model_name=settings.telegram_model_name,
-            from_date=target_date,
-            to_date=target_date,
-            status="upcoming",
-            limit=200,
+            target_date=target_date,
+            fallback=fallback_models,
+        )
+        model_items: list[tuple[str, list[dict]]] = []
+        for model_name in model_names:
+            items = await api.predictions(
+                model_version=settings.telegram_model_version,
+                model_name=model_name,
+                from_date=target_date,
+                to_date=target_date,
+                status="upcoming",
+                limit=200,
+            )
+            smva_items: list[dict] = []
+            try:
+                smva = await api.single_match_value(
+                    from_date=target_date,
+                    to_date=target_date,
+                    model_version=settings.telegram_model_version,
+                    model_name=model_name,
+                    min_edge_percent=settings.telegram_min_edge_percent,
+                    status="upcoming",
+                    limit=200,
+                )
+                smva_items = list(smva.get("items") or [])
+            except BackendApiError:
+                logger.exception("SMVA non disponibile per Telegram /partite; uso fallback locale.")
+            enriched = enrich_fixtures_with_value(
+                items,
+                min_edge_percent=settings.telegram_min_edge_percent,
+                smva_items=smva_items,
+            )
+            model_items.append((model_name, enriched))
+    except BackendApiError as exc:
+        await _reply(update, exc.message)
+        return
+
+    selected = select_distinct_fixture_models(
+        model_items,
+        preferred_model_name=settings.telegram_model_name,
+    )
+    public_labels = await _public_labels_for_models(
+        api,
+        model_version=settings.telegram_model_version,
+        model_names=[name for name, _items in selected],
+    )
+    await _reply_fixtures(
+        update,
+        selected,
+        target_date,
+        min_edge_percent=settings.telegram_min_edge_percent,
+        public_labels=public_labels,
+    )
+
+
+async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = _settings(context)
+    api = _api(context)
+    fallback_models = [
+        name.strip()
+        for name in settings.telegram_model_names.split(",")
+        if name.strip()
+    ] or ["logistic_regression", "random_forest"]
+    try:
+        model_names = await api.model_names_for_version(
+            model_version=settings.telegram_model_version,
+            target_date=today_rome(),
+            fallback=fallback_models,
+        )
+        prediction_summary = await api.prediction_summary(
+            model_version=settings.telegram_model_version,
+        )
+        slip_stats = await api.betting_slip_stats_by_model(
+            stake=settings.telegram_default_stake,
+            all_time=True,
         )
     except BackendApiError as exc:
         await _reply(update, exc.message)
         return
 
-    await _reply_fixtures(update, items, target_date)
+    series = build_stats_series(
+        model_names=model_names,
+        model_version=settings.telegram_model_version,
+        prediction_summary=prediction_summary,
+        slip_stats=slip_stats,
+    )
+    from_date = slip_stats.get("from_date")
+    to_date = slip_stats.get("to_date")
+    await _reply(
+        update,
+        format_bot_stats_intro(from_date=from_date, to_date=to_date),
+    )
+    if not series:
+        await _reply(update, "Nessuna statistica disponibile.")
+        return
+    try:
+        image = render_bot_stats_png(
+            series,
+            from_date=str(from_date) if from_date else None,
+            to_date=str(to_date) if to_date else None,
+        )
+        if update.message:
+            await update.message.reply_photo(
+                photo=image,
+                caption="Andamento bot · partite e schedine",
+            )
+    except Exception:
+        logger.exception("Impossibile generare immagine statistiche Telegram.")
+        await _reply(update, format_bot_stats_text(series))
 
 
 async def cerca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -239,58 +384,137 @@ async def _reply(update: Update, text: str) -> None:
         await update.message.reply_text(chunk)
 
 
-async def _reply_betting_slips(update: Update, payload: dict) -> None:
+async def _reply_betting_slips(
+    update: Update,
+    payloads: list[dict] | dict,
+    *,
+    min_edge_percent: float = 2.0,
+    slip_date: str | None = None,
+    public_labels: dict[str, str] | None = None,
+) -> None:
     if not update.message:
         return
 
-    slips = payload.get("slips") or []
-    if not slips:
-        await _reply(update, format_betting_slips(payload))
+    if isinstance(payloads, dict):
+        payloads = [payloads]
+
+    non_empty = [payload for payload in payloads if payload.get("slips")]
+    if not non_empty:
+        empty_payload = payloads[0] if payloads else {"date": slip_date, "slips": []}
+        await _reply(update, format_betting_slips(empty_payload, min_edge_percent=min_edge_percent))
         return
 
-    await _reply(update, format_betting_slips_intro(payload))
-    slip_date = str(payload.get("date") or "")
-    for slip in slips:
-        try:
-            image = render_betting_slip_png(slip, slip_date=slip_date)
-            await update.message.reply_photo(
-                photo=image,
-                caption=format_betting_slip_photo_caption(slip),
-            )
-        except Exception:
-            logger.exception("Impossibile generare immagine schedina Telegram.")
-            await _reply(
-                update,
-                "Immagine non disponibile, invio il riepilogo testuale.\n\n"
-                f"{format_betting_slip_text(slip)}",
-            )
+    resolved_date = slip_date or str(non_empty[0].get("date") or "oggi")
+    show_series_labels = len(non_empty) > 1
+    labels = public_labels or {}
+    await _reply(
+        update,
+        format_betting_slips_intro(slip_date=resolved_date, min_edge_percent=min_edge_percent),
+    )
+
+    for payload in non_empty:
+        model_name = str(payload.get("model_name") or "")
+        series_label = labels.get(model_name) if show_series_labels else None
+        stake = payload.get("stake")
+        for slip in payload.get("slips") or []:
+            try:
+                image = render_betting_slip_png(
+                    slip,
+                    slip_date=resolved_date,
+                    stake=stake,
+                    min_edge_percent=min_edge_percent,
+                    series_label=series_label,
+                )
+                await update.message.reply_photo(
+                    photo=image,
+                    caption=format_betting_slip_photo_caption(slip, series_label=series_label),
+                )
+            except Exception:
+                logger.exception("Impossibile generare immagine schedina Telegram.")
+                await _reply(
+                    update,
+                    "Immagine non disponibile, invio il riepilogo testuale.\n\n"
+                    f"{format_betting_slip_text(slip, series_label=series_label)}",
+                )
 
 
-async def _reply_fixtures(update: Update, items: list[dict], target_date) -> None:
+async def _reply_fixtures(
+    update: Update,
+    model_items: list[tuple[str, list[dict]]] | list[dict],
+    target_date,
+    *,
+    min_edge_percent: float = 2.0,
+    public_labels: dict[str, str] | None = None,
+) -> None:
     if not update.message:
         return
 
-    if not items:
-        await _reply(update, format_fixtures(items, target_date))
+    if not model_items:
+        await _reply(update, format_fixtures([], target_date))
         return
 
-    await _reply(update, format_fixtures_intro(items, target_date))
-    total = len(items)
-    for start, group in _groups(items, size=20):
-        end = start + len(group) - 1
-        try:
-            image = render_fixtures_png(group, target_date=str(target_date), start_index=start)
-            await update.message.reply_photo(
-                photo=image,
-                caption=format_fixtures_photo_caption(target_date, start, end, total),
-            )
-        except Exception:
-            logger.exception("Impossibile generare immagine partite Telegram.")
-            await _reply(
-                update,
-                "Immagine non disponibile, invio il riepilogo testuale.\n\n"
-                f"{format_fixture_group_text(group, start_index=start)}",
-            )
+    # Backward-compatible: plain list of fixtures from a single model.
+    if isinstance(model_items[0], dict):
+        typed_items: list[tuple[str, list[dict]]] = [("", list(model_items))]  # type: ignore[arg-type]
+    else:
+        typed_items = [(str(name), list(items)) for name, items in model_items]  # type: ignore[misc]
+
+    non_empty = [(name, items) for name, items in typed_items if items]
+    if not non_empty:
+        await _reply(update, format_fixtures([], target_date))
+        return
+
+    show_series_labels = len(non_empty) > 1
+    labels = public_labels or {}
+    await _reply(update, format_fixtures_intro(target_date=target_date))
+
+    for model_name, items in non_empty:
+        series_label = labels.get(model_name) if show_series_labels else None
+        total = len(items)
+        for start, group in _groups(items, size=15):
+            end = start + len(group) - 1
+            try:
+                image = render_fixtures_png(
+                    group,
+                    target_date=str(target_date),
+                    start_index=start,
+                    series_label=series_label,
+                    min_edge_percent=min_edge_percent,
+                )
+                await update.message.reply_photo(
+                    photo=image,
+                    caption=format_fixtures_photo_caption(
+                        target_date,
+                        start,
+                        end,
+                        total,
+                        series_label=series_label,
+                    ),
+                )
+            except Exception:
+                logger.exception("Impossibile generare immagine partite Telegram.")
+                await _reply(
+                    update,
+                    "Immagine non disponibile, invio il riepilogo testuale.\n\n"
+                    f"{format_fixture_group_text(group, start_index=start, series_label=series_label)}",
+                )
+
+
+async def _public_labels_for_models(
+    api: BackendApiClient,
+    *,
+    model_version: str,
+    model_names: list[str],
+) -> dict[str, str]:
+    names = [name for name in model_names if name]
+    if not names:
+        return {}
+    try:
+        summary = await api.prediction_summary(model_version=model_version)
+        accuracy_map = accuracy_by_model_name(summary)
+    except BackendApiError:
+        accuracy_map = {}
+    return build_public_labels(names, accuracy_by_model=accuracy_map)
 
 
 def _groups(items: list[dict], *, size: int) -> list[tuple[int, list[dict]]]:
@@ -350,6 +574,7 @@ def build_application(settings: TelegramSettings | None = None) -> Application:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("schedine", schedine))
     application.add_handler(CommandHandler("partite", partite))
+    application.add_handler(CommandHandler("statistiche", statistiche))
     application.add_handler(MessageHandler(filters.ALL, log_unhandled_update))
     # Comandi temporaneamente disabilitati. Lasciare il codice degli handler
     # pronto per riattivazione futura.

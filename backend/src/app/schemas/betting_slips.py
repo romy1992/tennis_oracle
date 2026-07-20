@@ -4,8 +4,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-PickStatus = Literal["pending", "won", "lost"]
-SlipStatus = Literal["pending", "won", "lost"]
+PickStatus = Literal["pending", "won", "lost", "void"]
+SlipStatus = Literal["pending", "won", "lost", "void"]
 
 
 class BettingSlipsGenerateRequest(BaseModel):
@@ -41,6 +41,10 @@ class BettingSlipPickRead(BaseModel):
     pick_status: PickStatus = "pending"
     actual_winner_label: str | None = None
     is_correct: bool | None = None
+    match_lifecycle_status: str | None = None
+    match_lifecycle_label: str | None = None
+    event_status: str | None = None
+    void_reason: str | None = None
 
 
 class BettingSlipRead(BaseModel):
@@ -58,8 +62,10 @@ class BettingSlipRead(BaseModel):
     picks_won: int = 0
     picks_lost: int = 0
     picks_pending: int = 0
+    picks_void: int = 0
     picks_total: int = 0
     resolved_combined_odds: float | None = None
+    effective_combined_odds: float | None = None
     theoretical_profit_if_won: float | None = None
     generated_at: datetime | None = None
 
@@ -113,10 +119,12 @@ class BettingSlipStatsDay(BaseModel):
     slips_won: int
     slips_lost: int
     slips_pending: int
+    slips_void: int = 0
     picks_total: int
     picks_won: int
     picks_lost: int
     picks_pending: int
+    picks_void: int = 0
     slip_win_rate_pct: float | None = None
     pick_hit_rate_pct: float | None = None
     theoretical_profit_units: float = 0.0
@@ -129,6 +137,7 @@ class BettingSlipStatsProfile(BaseModel):
     slips_won: int
     slips_lost: int
     slips_pending: int = 0
+    slips_void: int = 0
     slips_total: int = 0
     slip_win_rate_pct: float | None = None
 
@@ -138,10 +147,12 @@ class BettingSlipStatsSummary(BaseModel):
     slips_won: int
     slips_lost: int
     slips_pending: int
+    slips_void: int = 0
     picks_total: int
     picks_won: int
     picks_lost: int
     picks_pending: int
+    picks_void: int = 0
     slip_win_rate_pct: float | None = None
     pick_hit_rate_pct: float | None = None
     theoretical_profit_units: float = 0.0
@@ -166,11 +177,13 @@ class BettingSlipModelStatsRow(BaseModel):
     slips_won: int
     slips_lost: int
     slips_pending: int
+    slips_void: int = 0
     slip_win_rate_pct: float | None = None
     picks_total: int
     picks_won: int
     picks_lost: int
     picks_pending: int
+    picks_void: int = 0
     pick_hit_rate_pct: float | None = None
     theoretical_profit_units: float = 0.0
     theoretical_roi_pct: float | None = None

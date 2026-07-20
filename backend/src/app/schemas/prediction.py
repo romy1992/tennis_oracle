@@ -27,6 +27,8 @@ class NextFixtureRead(BaseModel):
     source: str | None
     is_completed: bool | None
     moved_to_fixture_at: datetime | None
+    match_lifecycle_status: str | None = None
+    match_lifecycle_label: str | None = None
 
 
 class MatchPredictionRead(BaseModel):

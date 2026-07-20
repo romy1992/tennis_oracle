@@ -57,6 +57,54 @@ def _format_decimal(value: float | None) -> str:
     return f"{value:.2f}"
 
 
+def _format_event_time(value: Any) -> str:
+    if value is None:
+        return "-"
+    text = str(value)
+    return text[:5] if len(text) >= 5 else text
+
+
+def _format_signed_percent(value: float | None) -> str:
+    if value is None:
+        return "-"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:.1f}%"
+
+
+def _format_signed_roi(value: float | None) -> str:
+    if value is None:
+        return "-"
+    percent = value * 100
+    sign = "+" if percent > 0 else ""
+    return f"{sign}{percent:.1f}%"
+
+
+def slip_status_label(status: str | None) -> str:
+    if status == "won":
+        return "Presa"
+    if status == "lost":
+        return "Persa"
+    if status == "void":
+        return "Annullata"
+    return "In corso"
+
+
+def pick_status_label(status: str | None) -> str:
+    if status == "won":
+        return "Presa"
+    if status == "lost":
+        return "Persa"
+    if status == "void":
+        return "Annullata"
+    return "In corso"
+
+
+STATUS_LEGEND = (
+    "● Verde = Presa\n● Rosso = Persa\n● Grigio = In corso\n● Barrato/grigio scuro = Annullata"
+)
+VALUE_LEGEND = "PLAY = valore | BORDERLINE = vicino void | NO BET = sotto valore"
+
+
 def predicted_winner_name(item: dict[str, Any]) -> str | None:
     prediction = item.get("prediction") or {}
     raw_winner = prediction.get("predicted_winner")
@@ -155,11 +203,21 @@ def format_fixtures(items: list[dict[str, Any]], target_date: date | str) -> str
     return "\n\n".join(lines)
 
 
-def format_fixtures_intro(items: list[dict[str, Any]], target_date: date | str) -> str:
-    return f"Partite di oggi ({target_date}): {len(items)}"
+def format_fixtures_intro(
+    items: list[dict[str, Any]] | None = None,
+    target_date: date | str | None = None,
+) -> str:
+    del items  # count kept out of intro; legend-only like /schedine
+    resolved = target_date or "oggi"
+    return f"Partite di oggi ({resolved})\n\n{STATUS_LEGEND}"
 
 
-def format_fixture_group_text(items: list[dict[str, Any]], *, start_index: int = 1) -> str:
+def format_fixture_group_text(
+    items: list[dict[str, Any]],
+    *,
+    start_index: int = 1,
+    series_label: str | None = None,
+) -> str:
     # region agent log
     _agent_log(
         "H2,H3",
@@ -191,15 +249,31 @@ def format_fixture_group_text(items: list[dict[str, Any]], *, start_index: int =
     )
     # endregion
     lines = []
+    if series_label:
+        lines.append(series_label)
     for index, item in enumerate(items, start=start_index):
-        tournament_parts = [item.get("tournament_name"), item.get("tournament_round"), item.get("surface")]
-        tournament = " / ".join(str(part) for part in tournament_parts if part) or "Torneo n.d."
-        lines.append(f"{index}. {_format_date_time(item)}\n{_match_title(item)}\n{tournament}\n{format_fixture_prediction(item)}")
+        tournament = item.get("tournament_name") or "-"
+        surface = item.get("surface") or "-"
+        lines.append(
+            f"{index}. {_format_event_time(item.get('event_time'))} | {tournament} | {surface}\n"
+            f"{_match_title(item)}\n"
+            f"{format_fixture_prediction(item)}"
+        )
     return "\n\n".join(lines)
 
 
-def format_fixtures_photo_caption(target_date: date | str, start_index: int, end_index: int, total: int) -> str:
-    return f"Partite oggi {target_date} | {start_index}-{end_index} di {total}"
+def format_fixtures_photo_caption(
+    target_date: date | str,
+    start_index: int,
+    end_index: int,
+    total: int,
+    *,
+    series_label: str | None = None,
+) -> str:
+    lines = [f"Partite oggi {target_date} | {start_index}-{end_index} di {total}"]
+    if series_label:
+        lines.append(series_label)
+    return "\n".join(lines)
 
 
 def format_fixture_prediction(item: dict[str, Any]) -> str:
@@ -209,9 +283,13 @@ def format_fixture_prediction(item: dict[str, Any]) -> str:
         return f"Pronostico: n.d. ({warning})"
 
     winner = predicted_winner_name(item) or "n.d."
-    odds = prediction.get("predicted_winner_odds")
     confidence = prediction.get("confidence")
-    return f"Vincitore: {winner} | Quota {_format_decimal(odds)} | Vittoria {_format_percent(confidence)}"
+    void_odds = item.get("void_odds")
+    value = item.get("value_decision") or "-"
+    return (
+        f"Predetto: {winner} | Conf. {_format_percent(confidence)} | "
+        f"Void {_format_decimal(void_odds)} | Valore {value}"
+    )
 
 
 def format_player_search(items: list[dict[str, Any]], player: str) -> str:
@@ -223,23 +301,49 @@ def format_player_search(items: list[dict[str, Any]], player: str) -> str:
     return "\n\n".join(lines)
 
 
-def format_betting_slips_intro(payload: dict[str, Any]) -> str:
-    slip_date = payload.get("date") or "oggi"
-    stake = payload.get("stake")
-    lines = [f"Schedine di oggi ({slip_date})", f"Stake: {_format_decimal(stake)}", DISCLAIMER]
-    warnings = payload.get("warnings") or []
-    if warnings:
-        lines.append(f"Note: {'; '.join(warnings)}")
-    return "\n".join(lines)
+def format_betting_slips_intro(
+    payload: dict[str, Any] | None = None,
+    *,
+    slip_date: str | None = None,
+    min_edge_percent: float = 2.0,
+) -> str:
+    del min_edge_percent  # kept for call-site compatibility; not shown in intro
+    resolved_date = slip_date or (payload or {}).get("date") or "oggi"
+    return f"Schedine di oggi ({resolved_date})\n\n{STATUS_LEGEND}"
 
 
-def format_betting_slip_text(slip: dict[str, Any]) -> str:
+def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None = None) -> str:
+    status = slip_status_label(slip.get("slip_status"))
+    picks_won = slip.get("picks_won")
+    picks_total = slip.get("picks_total") or len(slip.get("picks") or [])
     lines = [
         f"Schedina: {slip.get('label') or slip.get('slip_key') or 'Schedina'}",
-        f"Quota combinata: {_format_decimal(slip.get('combined_odds'))}",
-        f"Ritorno potenziale: {_format_decimal(slip.get('potential_return'))}",
-        f"Profitto potenziale: {_format_decimal(slip.get('potential_profit'))}",
     ]
+    if series_label:
+        lines.append(series_label)
+    lines.append(f"Stato: {status} | {picks_won}/{picks_total} pick corrette")
+    picks_void = slip.get("picks_void") or 0
+    if picks_void:
+        lines.append(f"Pick annullate: {picks_void} (escluse dalla quota effettiva)")
+    description = slip.get("description")
+    if description:
+        lines.append(str(description))
+    effective = slip.get("effective_combined_odds")
+    combined = slip.get("combined_odds")
+    if picks_void and effective is not None and effective != combined:
+        odds_line = (
+            f"Quota originale: {_format_decimal(combined)} | "
+            f"Quota effettiva: {_format_decimal(effective)}"
+        )
+    else:
+        odds_line = f"Quota combinata: {_format_decimal(combined)}"
+    lines.extend(
+        [
+            odds_line,
+            f"Ritorno potenziale: {_format_decimal(slip.get('potential_return'))}",
+            f"Profitto potenziale: {_format_decimal(slip.get('potential_profit'))}",
+        ]
+    )
 
     picks = slip.get("picks") or []
     # region agent log
@@ -268,26 +372,57 @@ def format_betting_slip_text(slip: dict[str, Any]) -> str:
         lines.append("Nessun pick disponibile.")
         return "\n".join(lines)
 
-    lines.append("Pick:")
+    lines.append("Pick (Ora | Torneo | Match | Pick | Quota | Void | Edge | ROI | Valore | Conf.):")
     for index, pick in enumerate(picks, start=1):
         winner = slip_pick_winner_name(pick) or "n.d."
+        tournament = pick.get("tournament_name") or "-"
+        value = pick.get("value_decision") or "-"
+        lifecycle_note = ""
+        if pick.get("pick_status") == "void":
+            lifecycle_note = f" · {pick.get('void_reason') or pick.get('match_lifecycle_label') or 'Annullata'}"
+        elif pick.get("match_lifecycle_label") and pick.get("match_lifecycle_status") not in {
+            None,
+            "scheduled",
+            "finished",
+        }:
+            lifecycle_note = f" · {pick.get('match_lifecycle_label')}"
         lines.append(
-            f"{index}. {_match_title(pick)}\n"
-            f"   Vincitore: {winner} | quota {_format_decimal(pick.get('odds'))} | "
-            f"conf. {_format_percent(pick.get('confidence'))}"
+            f"{index}. [{pick_status_label(pick.get('pick_status'))}] "
+            f"{_format_event_time(pick.get('event_time'))} | {tournament} | {_match_title(pick)}{lifecycle_note}\n"
+            f"   Pick: {winner} | Q {_format_decimal(pick.get('odds'))} | "
+            f"Void {_format_decimal(pick.get('void_odds'))} | "
+            f"Edge {_format_signed_percent(pick.get('edge_percent'))} | "
+            f"ROI {_format_signed_roi(pick.get('expected_roi'))} | "
+            f"{value} | Conf. {_format_percent(pick.get('confidence'))}"
         )
     return "\n".join(lines)
 
 
-def format_betting_slip_photo_caption(slip: dict[str, Any]) -> str:
+def format_betting_slip_photo_caption(
+    slip: dict[str, Any],
+    *,
+    series_label: str | None = None,
+) -> str:
     label = slip.get("label") or slip.get("slip_key") or "Schedina"
-    return (
-        f"{label} | Quota {_format_decimal(slip.get('combined_odds'))} | "
+    status = slip_status_label(slip.get("slip_status"))
+    picks_won = slip.get("picks_won")
+    picks_total = slip.get("picks_total") or len(slip.get("picks") or [])
+    lines = [f"{label} | {status} | {picks_won}/{picks_total} pick"]
+    if series_label:
+        lines.append(series_label)
+    lines.append(
+        f"Quota {_format_decimal(slip.get('combined_odds'))} | "
         f"Profitto {_format_decimal(slip.get('potential_profit'))}"
     )
+    return "\n".join(lines)
 
 
-def format_betting_slips(payload: dict[str, Any]) -> str:
+def format_betting_slips(
+    payload: dict[str, Any],
+    *,
+    min_edge_percent: float = 2.0,
+    series_label: str | None = None,
+) -> str:
     slips = payload.get("slips") or []
     slip_date = payload.get("date") or "oggi"
     if not slips:
@@ -295,11 +430,78 @@ def format_betting_slips(payload: dict[str, Any]) -> str:
         suffix = f"\n\nNote: {'; '.join(warnings)}" if warnings else ""
         return f"Nessuna schedina disponibile per {slip_date}.{suffix}\n\n{DISCLAIMER}"
 
-    lines = [format_betting_slips_intro(payload)]
+    lines = [format_betting_slips_intro(payload, min_edge_percent=min_edge_percent)]
     for slip in slips:
         lines.append("")
-        lines.append(format_betting_slip_text(slip))
+        lines.append(format_betting_slip_text(slip, series_label=series_label))
     return "\n".join(lines)
+
+
+def format_bot_stats_intro(
+    *,
+    from_date: Any = None,
+    to_date: Any = None,
+) -> str:
+    if from_date and to_date:
+        range_text = f"{from_date} → {to_date}"
+    else:
+        range_text = "storico completo"
+    return (
+        f"Statistiche bot ({range_text})\n"
+        "Confronto delle predizioni senza nomi tecnici.\n"
+        f"{DISCLAIMER}"
+    )
+
+
+def format_bot_stats_text(series: list[dict[str, Any]]) -> str:
+    if not series:
+        return "Nessuna statistica disponibile."
+
+    lines = ["Andamento predizioni"]
+    for entry in series:
+        prediction = entry.get("prediction") or {}
+        slip = entry.get("slip") or {}
+        lines.extend(
+            [
+                "",
+                str(entry.get("label") or "Predizione"),
+                (
+                    f"Partite: accuratezza {_format_stats_pct(prediction.get('accuracy_pct'))} | "
+                    f"risolte {prediction.get('predictions_resolved', 0)} | "
+                    f"corrette {prediction.get('predictions_correct', 0)} | "
+                    f"perse {prediction.get('predictions_lost', 0)} | "
+                    f"in corso {prediction.get('pending', 0)}"
+                ),
+                (
+                    f"Profitto partite: {_format_stats_decimal(prediction.get('theoretical_profit_units'))} | "
+                    f"ROI {_format_stats_pct(prediction.get('theoretical_roi_pct'))}"
+                ),
+                (
+                    f"Schedine: win rate {_format_stats_pct(slip.get('slip_win_rate_pct'))} | "
+                    f"prese {slip.get('slips_won', 0)} | "
+                    f"perse {slip.get('slips_lost', 0)} | "
+                    f"in corso {slip.get('slips_pending', 0)}"
+                ),
+                (
+                    f"Hit pick {_format_stats_pct(slip.get('pick_hit_rate_pct'))} | "
+                    f"Profitto schedine {_format_stats_decimal(slip.get('theoretical_profit_units'))} | "
+                    f"ROI {_format_stats_pct(slip.get('theoretical_roi_pct'))}"
+                ),
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _format_stats_pct(value: float | None) -> str:
+    if value is None:
+        return "n.d."
+    return f"{float(value):.1f}%"
+
+
+def _format_stats_decimal(value: float | None) -> str:
+    if value is None:
+        return "n.d."
+    return f"{float(value):+.2f}"
 
 
 def _agent_log(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:

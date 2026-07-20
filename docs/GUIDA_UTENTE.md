@@ -36,12 +36,13 @@ Nel menu laterale trovi:
 
 | Voce | A cosa serve |
 |------|----------------|
-| **Partite** | Elenco partite con pronostico, quota void e stato valore (PLAY / BORDERLINE / NO BET) |
+| **Partite** | Elenco partite con pronostico, quota void e stato valore (PLAY / BORDERLINE / NO BET) e stato partita (da giocare, rinviata, annullata, …) |
 | **Consiglio schedina** | Fino a 9 schedine per giorno a difficoltà crescente: 3 solo Play, 3 Play+Borderline, 3 miste |
 | **Statistiche schedine** | Confronto risultati delle schedine tra modelli/versioni |
 | **Statistiche previsioni** | Accuratezza e metriche delle previsioni nel tempo |
+| **Report aggiornamento** | Esito dell’ultima run “Aggiorna tutto”: errori, warning, fasi e combo modello |
 
-In alto nella sidebar c’è anche il controllo **Aggiornamento globale**: importa partite, genera previsioni per tutti i modelli disponibili e aggiorna le schedine.
+In alto nella sidebar c’è anche il controllo **Aggiornamento globale**: importa partite, genera previsioni per tutti i modelli disponibili e aggiorna le schedine. Se compaiono errori (es. “4 errori”), il conteggio è cliccabile e apre **Report aggiornamento**.
 
 ### Come scegliere modello e versione
 
@@ -65,7 +66,21 @@ Per ogni partita con quote e pronostico il sistema calcola:
 
 1. **Quota void** — break-even dalla probabilità del modello (`1 / probabilità`)
 2. **Margine di sicurezza** — percentuale sopra la void richiesta per un PLAY (impostata in alto)
-3. **Stato** — `PLAY` (quota abbastanza sopra void), `BORDERLINE` (sopra void ma sotto il margine), `NO BET` (sotto void)
+3. **Stato valore** — `PLAY` (quota abbastanza sopra void), `BORDERLINE` (sopra void ma sotto il margine), `NO BET` (sotto void)
+
+**Non confondere** la colonna Void (quota break-even) con una partita **annullata**: se una partita è cancellata / abbandonata / senza esito scommettibile, il pick in schedina diventa **Annullato** e la sua quota non conta più nella quota combinata.
+
+### Stato partita e schedine ridotte
+
+Nella colonna **Stato** (Partite) e nei dettagli pick (Schedine) vedi anche se la partita è rinviata, annullata, abbandonata, walkover, ecc.
+
+Regole sulle schedine:
+
+- pick di una partita **non disputata in modo definitivo** → **Annullato** (escluso dalla quota)
+- se restano solo pick presi + eventuali annullati → schedina **Presa**, con **quota effettiva** senza le gambe annullate
+- rinvio (ancora da giocare) → pick **In corso**, schedina resta in corso
+- se **tutti** i pick sono annullati → schedina **Annullata** (puntata restituita / profitto 0)
+- walkover / ritiro **con vincitore** → conteggiati come presa/persa normalmente
 
 ### Consiglio schedine (difficoltà)
 
@@ -76,6 +91,8 @@ Alla generazione/rigenerazione compaiono tipicamente **9 schedine**:
 - **3 Miste** — possono includere anche NO BET (più aggressive / rischiose)
 
 Dentro ogni gruppo ci sono varianti (sicura / bilanciata / value). Se i candidati del giorno non bastano, alcune schedine possono mancare o avere meno pick: controlla i messaggi di avviso in pagina.
+
+Usa i tab in alto (versione e modello) per passare da un modello all’altro: vedi una sola lista di schedine alla volta, non entrambe insieme.
 
 ### Aggiornamento globale
 
@@ -145,7 +162,13 @@ cd backend
 python -m src.app.telegram.bot
 ```
 
-Comandi tipici: `/start`, `/help`, `/pronostici`, `/giorno`, `/10giorni`, `/schedine`, `/partite`, `/cerca`.
+Comandi attivi: `/start`, `/help`, `/schedine`, `/partite`, `/statistiche`.
+
+Con `/schedine` ricevi le stesse schedine della pagina **Consiglio schedina** (fino a 9, con Void/Edge/ROI/Valore e stato pick). Se i due motori del giorno producono schedine diverse, il bot le mostra entrambe etichettate con l’accuratezza storica (senza nomi tecnici); se sono uguali ne manda una sola. Il primo messaggio indica solo la data e la legenda degli esiti: verde = Presa, rosso = Persa, grigio = In corso, grigio scuro = Annullata.
+
+Con `/partite` ricevi le partite di oggi come in pagina **Partite** (Predetto, Conf., Void, Valore, Stato). Anche qui, se i motori danno pronostici diversi li vedi entrambi con etichetta accuratezza; l’intro è solo data + legenda stati.
+
+Con `/statistiche` vedi un riepilogo immagine dell’andamento (partite singole e schedine, con profitto sulle schedine), sempre senza nomi modello.
 
 ---
 
@@ -164,7 +187,10 @@ Se usi un database cloud separato, il job giornaliero può anche **sincronizzare
 ## Domande frequenti
 
 **Perché alcune partite non hanno pronostico?**  
-Mancano dati storici, odds (per `v3`), o l’aggiornamento non è ancora stato eseguito. In **Giocate**, le partite senza previsione salvata restano vuote: il pronostico va generato **prima** che la partita finisca (Aggiorna tutto / job giornaliero).
+Mancano dati storici, odds (per `v3`), o l’aggiornamento non è ancora stato eseguito. In **Giocate**, le partite senza previsione salvata restano vuote: il pronostico va generato **prima** che la partita finisca (Aggiorna tutto / job giornaliero). In **Partite**, lo stato **Da generare** indica solo assenza di previsione salvata: non è lo stesso degli errori della run globale.
+
+**Cosa sono gli errori sotto “Aggiorna tutto”?**  
+Sono fallimenti della run (import o elaborazione di una combo modello/versione). Aprili da **Report aggiornamento** (o cliccando sul conteggio errori). Una run può risultare “completata con errori” se alcune combo vanno a buon fine e altre no.
 
 **Cosa significa PLAY / NO BET / BORDERLINE?**  
 Confronta la quota di mercato con la **quota void** del modello, più il **margine di sicurezza** impostato in alto nella pagina. PLAY = abbastanza sopra void; BORDERLINE = sopra void ma sotto il margine; NO BET = sotto void.

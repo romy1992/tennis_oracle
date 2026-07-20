@@ -78,6 +78,8 @@ export type NextFixture = {
   source: string | null;
   is_completed: boolean | null;
   moved_to_fixture_at: string | null;
+  match_lifecycle_status?: string | null;
+  match_lifecycle_label?: string | null;
 };
 
 export type MatchPrediction = {
@@ -481,8 +483,8 @@ export type MLModelComparison = {
   warnings: string[];
 };
 
-export type PickStatus = "pending" | "won" | "lost";
-export type SlipStatus = "pending" | "won" | "lost";
+export type PickStatus = "pending" | "won" | "lost" | "void";
+export type SlipStatus = "pending" | "won" | "lost" | "void";
 
 export type BettingSlipPick = {
   event_key: number;
@@ -511,6 +513,10 @@ export type BettingSlipPick = {
   pick_status: PickStatus;
   actual_winner_label: string | null;
   is_correct: boolean | null;
+  match_lifecycle_status?: string | null;
+  match_lifecycle_label?: string | null;
+  event_status?: string | null;
+  void_reason?: string | null;
 };
 
 export type BettingSlip = {
@@ -528,8 +534,10 @@ export type BettingSlip = {
   picks_won: number;
   picks_lost: number;
   picks_pending: number;
+  picks_void?: number;
   picks_total: number;
   resolved_combined_odds: number | null;
+  effective_combined_odds?: number | null;
   theoretical_profit_if_won: number | null;
   generated_at: string | null;
 };
@@ -726,6 +734,29 @@ export type GlobalUpdateStartResponse = {
   run_id: number;
   status: GlobalUpdateStatus;
   message: string;
+};
+
+export type GlobalUpdateReportPhase = {
+  phase?: string;
+  status?: string;
+  duration_seconds?: number;
+  error?: string;
+  [key: string]: unknown;
+};
+
+export type GlobalUpdateReportRead = {
+  run_id: number;
+  run_date: string;
+  origin: "manual" | "cron";
+  status: GlobalUpdateStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  summary: Record<string, unknown>;
+  phases: GlobalUpdateReportPhase[];
+  items: GlobalUpdateRunItemRead[];
+  errors: string[];
+  warnings: string[];
 };
 
 export type ModelsVersionsResultsResponse = {
