@@ -43,6 +43,12 @@ __pycache__/
 venv/
 
 # Variabili locali
+<<<<<<< HEAD
+.env
+.env.*
+!.env.example
+=======
 #.env
 #.env.*
 #!.env.example
+>>>>>>> cursor/config_v3
