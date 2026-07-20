@@ -64,7 +64,7 @@ Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espon
 ```bash
 cd backend
 pip install -r requirements.txt
-cp .env.example .env
+cp .env .env
 alembic upgrade head
 uvicorn src.app.main:app --reload
 ```
@@ -101,7 +101,7 @@ Se lo schema esiste già senza Alembic: `alembic stamp head`.
 ```bash
 cd frontend
 npm install
-cp .env.example .env
+cp .env .env
 npm run dev
 ```
 

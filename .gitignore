@@ -7,8 +7,8 @@
 /.idea
 *.pyc
 /logs/
-/backend/.env
-/frontend/.env
+#/backend/.env
+#/frontend/.env
 /frontend/dist/
 /frontend/node_modules/
 /backend/data/processed/*.csv
@@ -43,6 +43,6 @@ __pycache__/
 venv/
 
 # Variabili locali
-.env
-.env.*
-!.env.example
+#.env
+#.env.*
+#!.env.example
