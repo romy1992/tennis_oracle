@@ -157,6 +157,13 @@ class ImportRoutesTest(unittest.TestCase):
         mock_next_import.assert_called_once()
         mock_import_played.assert_called_once()
 
+    def test_debug_agent_log_endpoint_removed(self):
+        response = self.client.post(
+            "/api/debug/agent-log",
+            json={"message": "should-not-exist"},
+        )
+        self.assertEqual(response.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

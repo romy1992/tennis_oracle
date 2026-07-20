@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
 import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from pathlib import Path
 from typing import Literal
 
 from sqlalchemy import delete, func, select
@@ -64,22 +62,6 @@ DEFAULT_STAKE = 10.0
 DEFAULT_SLIP_COUNT = 9
 DEFAULT_PICKS_PER_SLIP = 5
 
-#region agent log
-def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    payload = {
-        "sessionId": "8c43c3",
-        "runId": "pre-fix",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(datetime.now().timestamp() * 1000),
-    }
-    try:
-        Path(r"c:\Users\trott\git\tennis_oracle\debug-8c43c3.log").open("a", encoding="utf-8").write(json.dumps(payload, default=str) + "\n")
-    except Exception:
-        pass
-#endregion
 
 SLIP_PROFILES: tuple[dict[str, object], ...] = (
     {
@@ -884,26 +866,6 @@ def _load_outcome_context(
             select(NextFixture).where(NextFixture.event_key.in_(event_keys))
         ).all()
     }
-    #region agent log
-    _agent_debug_log(
-        "H2,H3",
-        "backend/src/app/services/betting_slips.py:_load_outcome_context",
-        "Loaded outcome context for betting slip picks",
-        {
-            "event_keys_count": len(event_keys),
-            "unique_event_keys_count": len(set(event_keys)),
-            "model_version": model_version,
-            "model_name": model_name,
-            "prediction_count": len(predictions),
-            "fixture_count": len(fixtures),
-            "next_fixture_count": len(next_fixtures),
-            "missing_prediction_sample": [key for key in sorted(set(event_keys)) if key not in predictions][:10],
-            "missing_fixture_sample": [key for key in sorted(set(event_keys)) if key not in fixtures][:10],
-            "fixture_winner_values": sorted({fixture.event_winner for fixture in fixtures.values() if fixture.event_winner})[:10],
-            "prediction_winner_values": sorted({prediction.actual_winner for prediction in predictions.values() if prediction.actual_winner})[:10],
-        },
-    )
-    #endregion
     return predictions, fixtures, next_fixtures
 
 
@@ -946,54 +908,12 @@ def _resolve_actual_winner(
 ) -> str | None:
     prediction = predictions.get(pick.event_key)
     if prediction is not None and prediction.actual_winner in COMPLETED_WINNERS:
-        #region agent log
-        _agent_debug_log(
-            "H2,H3",
-            "backend/src/app/services/betting_slips.py:_resolve_actual_winner",
-            "Resolved pick winner from prediction",
-            {
-                "event_key": pick.event_key,
-                "predicted_winner": pick.predicted_winner,
-                "actual_winner": prediction.actual_winner,
-                "source": "prediction",
-            },
-        )
-        #endregion
         return prediction.actual_winner
 
     fixture = fixtures.get(pick.event_key)
     if fixture is not None and fixture.event_winner in COMPLETED_WINNERS:
-        #region agent log
-        _agent_debug_log(
-            "H2,H3",
-            "backend/src/app/services/betting_slips.py:_resolve_actual_winner",
-            "Resolved pick winner from fixture",
-            {
-                "event_key": pick.event_key,
-                "predicted_winner": pick.predicted_winner,
-                "actual_winner": fixture.event_winner,
-                "source": "fixture",
-            },
-        )
-        #endregion
         return fixture.event_winner
 
-    #region agent log
-    _agent_debug_log(
-        "H2,H3",
-        "backend/src/app/services/betting_slips.py:_resolve_actual_winner",
-        "Could not resolve pick winner",
-        {
-            "event_key": pick.event_key,
-            "predicted_winner": pick.predicted_winner,
-            "prediction_found": prediction is not None,
-            "prediction_actual_winner": prediction.actual_winner if prediction is not None else None,
-            "fixture_found": fixture is not None,
-            "fixture_event_winner": fixture.event_winner if fixture is not None else None,
-            "completed_winners": sorted(COMPLETED_WINNERS),
-        },
-    )
-    #endregion
     return None
 
 
@@ -1088,37 +1008,6 @@ def _resolve_pick_value_fields(
         void_odds=void_odds,
         min_edge_percent=float(effective_min_edge),
     )
-    # #region agent log
-    if pick.value_decision != value_decision:
-        try:
-            from pathlib import Path
-            import json as _json
-            from datetime import datetime as _dt
-
-            Path(r"c:\Users\trott\git\tennis_oracle\debug-839b99.log").open("a", encoding="utf-8").write(
-                _json.dumps(
-                    {
-                        "sessionId": "839b99",
-                        "runId": "post-fix",
-                        "hypothesisId": "G",
-                        "location": "betting_slips.py:_resolve_pick_value_fields",
-                        "message": "reclassified pick with effective margin",
-                        "data": {
-                            "effective_min_edge": float(effective_min_edge),
-                            "stored_decision": pick.value_decision,
-                            "new_decision": value_decision,
-                            "odds": pick.odds,
-                            "void_odds": void_odds,
-                        },
-                        "timestamp": int(_dt.now().timestamp() * 1000),
-                    },
-                    default=str,
-                )
-                + "\n"
-            )
-        except Exception:
-            pass
-    # #endregion
     return {
         "void_odds": round(void_odds, 4),
         "edge_absolute": round(edge_absolute, 4),
@@ -1302,30 +1191,6 @@ def _build_daily_response(
         response_warnings.append(
             "historical_outcomes_missing: alcuni esiti non sono disponibili nel database; usa Aggiorna dopo aver ripristinato l'import API."
         )
-    #region agent log
-    _agent_debug_log(
-        "H2,H3,H5",
-        "backend/src/app/services/betting_slips.py:_build_daily_response",
-        "Built betting slips daily response",
-        {
-            "slip_date": slip_date,
-            "model_version": model_version,
-            "model_name": model_name,
-            "slip_count": len(slip_reads),
-            "slip_status_counts": {
-                "won": sum(1 for slip in slip_reads if slip.slip_status == "won"),
-                "lost": sum(1 for slip in slip_reads if slip.slip_status == "lost"),
-                "pending": sum(1 for slip in slip_reads if slip.slip_status == "pending"),
-            },
-            "pick_status_counts": {
-                "won": sum(pick.pick_status == "won" for slip in slip_reads for pick in slip.picks),
-                "lost": sum(pick.pick_status == "lost" for slip in slip_reads for pick in slip.picks),
-                "pending": pending_picks_count,
-            },
-            "warnings": response_warnings,
-        },
-    )
-    #endregion
     return BettingSlipsDailyResponse(
         date=slip_date,
         model_version=model_version,
@@ -1465,46 +1330,8 @@ def refresh_betting_slips(
 
     target_date = slip_date or date.today()
     resolved_model_name, model_warning = _resolve_betting_model_name(model_version, model_name)
-    #region agent log
-    _agent_debug_log(
-        "H1,H5",
-        "backend/src/app/services/betting_slips.py:refresh_betting_slips",
-        "Starting betting slip refresh",
-        {
-            "target_date": target_date,
-            "model_version": model_version,
-            "model_name": model_name,
-            "resolved_model_name": resolved_model_name,
-            "days_back": days_back,
-        },
-    )
-    #endregion
     effective_days_back = max(days_back, max((date.today() - target_date).days, 0))
-    #region agent log
-    _agent_debug_log(
-        "H1",
-        "backend/src/app/services/betting_slips.py:refresh_betting_slips",
-        "Resolved played fixtures import window for selected betting slip date",
-        {
-            "target_date": target_date,
-            "requested_days_back": days_back,
-            "effective_days_back": effective_days_back,
-        },
-    )
-    #endregion
     import_summary = import_played_fixtures(db, days_back=effective_days_back)
-    #region agent log
-    _agent_debug_log(
-        "H1",
-        "backend/src/app/services/betting_slips.py:refresh_betting_slips",
-        "Finished played fixtures import for betting slip refresh",
-        {
-            "target_date": target_date,
-            "days_back": days_back,
-            "import_summary": import_summary,
-        },
-    )
-    #endregion
     if _model_artifact_exists(model_version, resolved_model_name):
         refresh_summary = refresh_matches(
             db,

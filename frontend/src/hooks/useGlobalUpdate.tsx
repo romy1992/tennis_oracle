@@ -22,25 +22,6 @@ export function GlobalUpdateProvider({ children }: { children: React.ReactNode }
 
   const refreshStatus = useCallback(async () => {
     const next = await apiClient.getGlobalUpdateStatus();
-    //region agent log
-    fetch("http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ce07cd" },
-      body: JSON.stringify({
-        sessionId: "ce07cd",
-        hypothesisId: "H5",
-        location: "useGlobalUpdate.tsx:refreshStatus",
-        message: "polled global update status",
-        data: {
-          status: next?.status ?? null,
-          progress_pct: next?.progress_pct ?? null,
-          current_phase: next?.current_phase ?? null,
-          run_id: next?.id ?? null
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    //endregion
     setStatus(next);
     return next;
   }, []);

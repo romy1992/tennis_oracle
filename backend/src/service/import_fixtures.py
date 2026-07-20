@@ -1,36 +1,17 @@
 import logging
-import json
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from backend.src.entity import Fixture
 from backend.src.repository.fixture_repository import FixtureRepository
 from backend.src.repository.tournaments_repository import TournamentsRepository
 from backend.src.service.import_stading_player import refresh_standing_players
 from backend.src.utility.request_api import request_api
+from backend.src.utility.sensitive_data import sanitize_payload
 
 tournaments_repo = TournamentsRepository()
 fixtures_repo = FixtureRepository()
 
 logging.basicConfig(level=logging.INFO)
-
-
-#region agent log
-def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    payload = {
-        "sessionId": "8c43c3",
-        "runId": "pre-fix",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(datetime.now().timestamp() * 1000),
-    }
-    try:
-        Path(r"c:\Users\trott\git\tennis_oracle\debug-8c43c3.log").open("a", encoding="utf-8").write(json.dumps(payload, default=str) + "\n")
-    except Exception:
-        pass
-#endregion
 
 
 def import_all_fixtures(date_start="2000-01-01", date_stop=None, params=None):
@@ -124,7 +105,7 @@ def import_fixtures_by_params(params):
         if not isinstance(response, list):
             logging.warning(
                 "Unexpected get_fixtures payload type for params=%s: %s",
-                params,
+                sanitize_payload(params),
                 type(response).__name__,
             )
             return
@@ -148,29 +129,6 @@ def import_fixtures_by_params(params):
             existing_payloads = [
                 fixture for fixture in response if fixture.get("event_key") in search_fixture_key
             ]
-            #region agent log
-            _agent_debug_log(
-                "H6",
-                "backend/src/service/import_fixtures.py:import_fixtures_by_params",
-                "Fetched played fixtures and compared them with existing rows",
-                {
-                    "params": params,
-                    "response_count": len(response),
-                    "existing_count": len(existing_payloads),
-                    "existing_with_winner_count": sum(1 for fixture in existing_payloads if fixture.get("event_winner")),
-                    "new_count": sum(1 for fixture in response if fixture.get("event_key") not in search_fixture_key),
-                    "existing_winner_sample": [
-                        {
-                            "event_key": fixture.get("event_key"),
-                            "event_winner": fixture.get("event_winner"),
-                            "event_status": fixture.get("event_status"),
-                        }
-                        for fixture in existing_payloads
-                        if fixture.get("event_winner")
-                    ][:10],
-                },
-            )
-            #endregion
             # Filtro le partite scaricate per evitare di inserire partite già presenti nel database e le salvo
             fixtures = [Fixture(**fixture) for fixture in response
                         if fixture.get("event_key") not in search_fixture_key]
@@ -203,9 +161,13 @@ def import_fixtures_by_params(params):
                 fixtures_repo.save_all(fixtures)
                 logging.info(f"Imported {len(fixtures)} fixtures")
         else:
-            logging.info(f"No new fixtures to import for params: {params}")
+            logging.info("No new fixtures to import for params: %s", sanitize_payload(params))
     except Exception as e:
-        logging.error(f"Error in API request: {e} with params: {params}")
+        logging.error(
+            "Error in API request: %s with params: %s",
+            e,
+            sanitize_payload(params),
+        )
         raise
 
 
@@ -226,7 +188,7 @@ def run_daily_fixture_import(days_back_start: int = 1, days_back_stop: int = 0):
     date_start, date_stop = calculate_date(days_back_start, days_back_stop)
     params = {"date_start": date_start, "date_stop": date_stop}
 
-    logging.info("Avvio import fixtures: %s", params)
+    logging.info("Avvio import fixtures: %s", sanitize_payload(params))
     import_fixtures_by_params(params)
     logging.info("Import fixtures completato.")
 

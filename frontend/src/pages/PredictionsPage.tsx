@@ -20,43 +20,6 @@ import {
 } from "../utils/modelVersion";
 import { formatDate } from "../utils/tennis";
 
-// #region agent log
-function agentLog(payload: {
-  hypothesisId: string;
-  location: string;
-  message: string;
-  data?: Record<string, unknown>;
-  runId?: string;
-}) {
-  const body = {
-    sessionId: "839b99",
-    runId: payload.runId ?? "post-fix",
-    hypothesisId: payload.hypothesisId,
-    location: payload.location,
-    message: payload.message,
-    data: payload.data ?? {},
-    timestamp: Date.now()
-  };
-  const encoded = JSON.stringify(body);
-  fetch("http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "839b99" },
-    body: encoded
-  }).catch(() => {});
-  // Prefer 127.0.0.1 (known-good in this session); also try localhost / VITE base.
-  for (const base of [
-    "http://127.0.0.1:8000",
-    "http://localhost:8000",
-    import.meta.env.VITE_API_BASE_URL
-  ].filter(Boolean)) {
-    fetch(`${base}/api/debug/agent-log`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: encoded
-    }).catch(() => {});
-  }
-}
-// #endregion
 
 type FixtureStatusFilter = "upcoming" | "played" | "all";
 type OutcomeFilter = "all" | "won" | "lost";
@@ -148,11 +111,6 @@ function resolveValueItem(
   const item = analysis?.items.find((entry) => entry.match_id === eventKey);
   if (item) {
     const decision = classifySingleBetValue(item.market_odds, item.void_odds, globalMinEdge);
-    // #region agent log
-    if (globalMinEdge === 0 || item.decision !== decision) {
-      fetch('http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'839b99'},body:JSON.stringify({sessionId:'839b99',runId:'pre-fix',hypothesisId:'C,D',location:'PredictionsPage.tsx:resolveValueItem',message:'classify from SMVA item',data:{eventKey,globalMinEdge,marketOdds:item.market_odds,voidOdds:item.void_odds,apiDecision:item.decision,clientDecision:decision,playThreshold:item.void_odds*(1+globalMinEdge/100)},timestamp:Date.now()})}).catch(()=>{});
-    }
-    // #endregion
     return {
       void_odds: item.void_odds,
       decision
@@ -170,11 +128,6 @@ function resolveValueItem(
   }
   const voidOdds = 1 / modelProb;
   const decision = classifySingleBetValue(marketOdds, voidOdds, globalMinEdge);
-  // #region agent log
-  if (globalMinEdge === 0) {
-    fetch('http://127.0.0.1:7516/ingest/51ba4cbe-10fb-4c0d-94ec-cc65bebcec2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'839b99'},body:JSON.stringify({sessionId:'839b99',runId:'pre-fix',hypothesisId:'C,D',location:'PredictionsPage.tsx:resolveValueItem',message:'classify from prediction fallback',data:{eventKey,globalMinEdge,marketOdds,voidOdds,clientDecision:decision,playThreshold:voidOdds*(1+globalMinEdge/100)},timestamp:Date.now()})}).catch(()=>{});
-  }
-  // #endregion
   return {
     void_odds: voidOdds,
     decision
@@ -299,14 +252,6 @@ export function PredictionsPage() {
       )
     );
 
-    // #region agent log
-    agentLog({
-      hypothesisId: "B",
-      location: "PredictionsPage.tsx:loadPageData",
-      message: "fetching fixtures+SMVA (margin not a reload trigger)",
-      data: { statusFilter, activeVersion, models }
-    });
-    // #endregion
     // Fetch odds/void once; PLAY/BORDERLINE/NO BET is reclassified client-side from minEdgePercent.
     const valueResponses = await Promise.all(
       models.map((modelName) =>
@@ -361,17 +306,6 @@ export function PredictionsPage() {
     }
     return counts;
   }, [fixtures, singleValueByModel, modelNames, minEdgePercent]);
-
-  useEffect(() => {
-    // #region agent log
-    agentLog({
-      hypothesisId: "C,E",
-      location: "PredictionsPage.tsx:decisionCounts",
-      message: "visible page decision counts for current margin",
-      data: { minEdgePercent, decisionCounts, fixtureCount: fixtures.length }
-    });
-    // #endregion
-  }, [minEdgePercent, decisionCounts, fixtures.length]);
 
   useEffect(() => {
     async function load() {
@@ -456,14 +390,6 @@ export function PredictionsPage() {
               onChange={(event) => {
                 const raw = event.target.value;
                 const next = Number(raw) || 0;
-                // #region agent log
-                agentLog({
-                  hypothesisId: "A",
-                  location: "PredictionsPage.tsx:minEdge.onChange",
-                  message: "margin input changed",
-                  data: { raw, parsed: Number(raw), next, previous: minEdgePercent }
-                });
-                // #endregion
                 setMinEdgePercent(next);
               }}
               disabled={globalUpdating || importingFixtures}
