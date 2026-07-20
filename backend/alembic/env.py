@@ -32,6 +32,7 @@ from backend.src.app.db.base import (  # noqa: E402
     Player,
     RankingSnapshot,
     Standing,
+    TelegramBotEvent,
     Tournament,
 )
 
@@ -46,6 +47,7 @@ _ = (
     BettingSlipPick,
     Standing,
     Player,
+    TelegramBotEvent,
     FeatureSnapshot,
     MLMatch,
     MLPlayer,

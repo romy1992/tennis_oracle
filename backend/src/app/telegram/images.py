@@ -41,7 +41,7 @@ _TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Torneo", 200),
     ("Match", 260),
     ("Pick", 150),
-    ("Quota", 72),
+    ("Media quote\nbookmakers", 100),
     ("Void", 72),
     ("Edge", 84),
     ("ROI", 84),
@@ -66,7 +66,7 @@ def render_betting_slip_png(
     width = 1580
     margin = 36
     row_height = 46
-    header_height = 40
+    header_height = 44
     background = "#f6f8fb"
     card = "#ffffff"
     text = "#16202a"
@@ -166,7 +166,11 @@ def render_betting_slip_png(
     draw.rectangle((table_left, y, table_left + table_width, y + header_height), fill=header_bg)
     for col_label, col_width in _TABLE_COLUMNS:
         if col_label:
-            draw.text((x + 6, y + 10), col_label, font=fonts["tiny"], fill=muted)
+            label_lines = col_label.split("\n")
+            line_gap = 14 if len(label_lines) > 1 else 0
+            text_y = y + (4 if len(label_lines) > 1 else 10)
+            for line_index, line in enumerate(label_lines):
+                draw.text((x + 6, text_y + line_index * line_gap), line, font=fonts["tiny"], fill=muted)
         draw.line((x, y, x, y + header_height), fill=grid, width=1)
         x += col_width
     draw.line((table_left + table_width, y, table_left + table_width, y + header_height), fill=grid, width=1)

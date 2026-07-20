@@ -328,7 +328,7 @@ function SlipCard({
               <th>Torneo</th>
               <th>Match</th>
               <th>Pick</th>
-              <th>Quota</th>
+              <th className="slip-col-odds">Media quote bookmakers</th>
               <th>Void</th>
               <th>Edge</th>
               <th>ROI</th>

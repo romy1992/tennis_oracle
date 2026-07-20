@@ -10,6 +10,7 @@ from backend.src.entity import (
     NextFixture,
     Player,
     Standing,
+    TelegramBotEvent,
     Tournament,
 )
 from backend.src.entity.base import Base
@@ -37,6 +38,7 @@ __all__ = [
     "Player",
     "Standing",
     "Tournament",
+    "TelegramBotEvent",
     "FeatureSnapshot",
     "MLMatch",
     "MLPlayer",

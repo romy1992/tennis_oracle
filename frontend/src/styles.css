@@ -665,7 +665,14 @@ input {
   white-space: nowrap;
 }
 
-.slip-col-odds,
+.slip-col-odds {
+  text-align: right;
+  white-space: normal;
+  min-width: 110px;
+  max-width: 130px;
+  line-height: 1.2;
+}
+
 .slip-col-confidence,
 .slip-col-value {
   text-align: right;
@@ -996,6 +1003,14 @@ input {
   border: 1px solid #e4e9f2;
   border-radius: 16px;
   overflow-x: auto;
+}
+
+.mini-bar {
+  background: #94a3b8;
+  border-radius: 999px;
+  height: 8px;
+  max-width: 220px;
+  min-width: 4px;
 }
 
 table {
