@@ -22,7 +22,11 @@ import type {
   PredictionSummaryResponse,
   RefreshMatchesResponse,
   SingleMatchValueQueryParams,
-  SingleMatchValueResponse
+  SingleMatchValueResponse,
+  TelegramBotEventsParams,
+  TelegramBotEventsResponse,
+  TelegramBotStatsParams,
+  TelegramBotStatsResponse
 } from "../types/api";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -144,5 +148,9 @@ export const apiClient = {
   getGlobalUpdateReport: (runId: number) =>
     request<GlobalUpdateReportRead>(`/api/global-update/${runId}/report`),
   getModelsVersionsResults: (params: { date?: string } = {}) =>
-    request<ModelsVersionsResultsResponse>(withQuery("/api/models-versions/results", params))
+    request<ModelsVersionsResultsResponse>(withQuery("/api/models-versions/results", params)),
+  getTelegramBotStats: (params: TelegramBotStatsParams = {}) =>
+    request<TelegramBotStatsResponse>(withQuery("/api/telegram/stats", params)),
+  getTelegramBotEvents: (params: TelegramBotEventsParams = {}) =>
+    request<TelegramBotEventsResponse>(withQuery("/api/telegram/events", params))
 };

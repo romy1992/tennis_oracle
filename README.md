@@ -140,6 +140,8 @@ Documentazione interattiva: `http://localhost:8000/docs`.
 | GET | `/api/global-update/{run_id}/report` | `global_update.read_global_update_report` | Report run |
 | POST | `/api/global-update/{run_id}/cancel` | `global_update.cancel_global_update_run` | Annulla run |
 | GET | `/api/models-versions/results` | `global_update.read_models_versions_results` | Risultati per versione/modello |
+| GET | `/api/telegram/events` | `telegram.read_telegram_events` | Lista accessi/click bot (admin) |
+| GET | `/api/telegram/stats` | `telegram.read_telegram_stats` | Aggregati accessi bot (admin) |
 
 ### Presenti nel codice ma non montate in `api_router` (legacy / opzionali)
 
@@ -450,6 +452,7 @@ Variante multi-modello dell’aggiornamento giornaliero.
 | `/betting-slips` | `BettingSlipsPage` |
 | `/betting-slip-model-stats` | `BettingSlipModelStatsPage` |
 | `/global-update-report` | `GlobalUpdateReportPage` |
+| `/telegram-bot` | `TelegramBotPage` |
 
 Wrapper: `GlobalUpdateProvider`.
 
@@ -459,9 +462,10 @@ Wrapper: `GlobalUpdateProvider`.
 |------------|-------|
 | `PredictionsPage` | Lista partite+predizioni; margine globale (default 2%); void/decision in riga |
 | `PredictionStatsPage` | Summary e serie giornaliere accuracy/ROI |
-| `BettingSlipsPage` | Calendario, tab modello, 9 slip a tier, margine globale (default 2%), status pick void / quota effettiva |
+| `BettingSlipsPage` | Calendario, tab modello, 9 slip a tier, colonna media quote bookmakers, margine globale (default 2%), status pick void / quota effettiva |
 | `BettingSlipModelStatsPage` | Tabella comparativa stats per modello |
 | `GlobalUpdateReportPage` | Report ultima run globale: errori, warning, fasi, combo |
+| `TelegramBotPage` | Analytics accessi/comandi bot Telegram (admin) |
 
 ### Componenti / hook
 
@@ -543,9 +547,13 @@ Modulo `app/telegram/`.
 | `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 9), `telegram_min_edge_percent` (default 2.0) |
 | `client.BackendApiClient` | Chiama le stesse API FastAPI (`/betting-slips/daily`, `/betting-slips/stats/by-model`, `/predictions/stats/summary`, `/models-versions/results`, `/next-fixtures/predictions`, …) |
 | `bot.build_application` / `main` | Polling + handler comandi |
+| `tracking.tracked` / `track_callback_query` | Persistenza accessi/click in `telegram_bot_event` (non blocca il bot se il DB fallisce) |
+| `services.telegram_analytics` | `record_telegram_event(_safe)`, `list_telegram_events`, `compute_telegram_stats` |
 | `messages` / `dates` / `images` / `slips_compare` / `public_labels` | Formattazione risposte, date Roma, PNG, confronto multi-serie, etichette pubbliche (accuratezza) |
 
 **Comandi attivi:** `/start`, `/help`, `/schedine`, `/partite`, `/statistiche`.
+
+Ogni comando (e i messaggi non gestiti / futuri callback inline) viene registrato in tabella `telegram_bot_event`. Gli aggregati e lo storico sono consultabili solo dalla dashboard admin (`/telegram-bot`), non dagli utenti del bot.
 
 `/schedine` carica le schedine di tutti i modelli della versione configurata. Se i contenuti coincidono (stessi match e stessi vincitori previsti) ne mostra una sola serie; se differiscono anche solo per una partita/pick, mostra entrambe con etichetta pubblica basata sull’accuratezza (es. `Serie A · accuratezza 58.2%`), senza nomi tecnici. Il messaggio introduttivo contiene solo data e legenda stati (Presa / Persa / In corso / Annullata). Pick void escludono la quota dalla combinata effettiva.
 
@@ -562,7 +570,7 @@ python -m src.app.telegram.bot
 
 ## 9. Schema dati
 
-Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip e global update.
+Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip e global update, `telegram_bot_event` (analytics accessi bot).
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
 
@@ -580,6 +588,6 @@ cd backend
 pytest
 ```
 
-Test rilevanti: `tests/test_betting_slips.py`, `test_global_update.py`, `test_predictor.py`, `test_dataset_builder.py`, `test_train_baseline.py`, `test_telegram_bot.py`, ecc.
+Test rilevanti: `tests/test_betting_slips.py`, `test_global_update.py`, `test_predictor.py`, `test_dataset_builder.py`, `test_train_baseline.py`, `test_telegram_bot.py`, `test_telegram_analytics.py`, ecc.
 
 Frontend: test Vitest dove presenti (es. `ModelsControlPage.test.tsx`).

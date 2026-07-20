@@ -41,6 +41,7 @@ Nel menu laterale trovi:
 | **Statistiche schedine** | Confronto risultati delle schedine tra modelli/versioni |
 | **Statistiche previsioni** | Accuratezza e metriche delle previsioni nel tempo |
 | **Report aggiornamento** | Esito dell’ultima run “Aggiorna tutto”: errori, warning, fasi e combo modello |
+| **Bot Telegram** | Solo admin: accessi e comandi usati sul bot (KPI, breakdown, storico) |
 
 In alto nella sidebar c’è anche il controllo **Aggiornamento globale**: importa partite, genera previsioni per tutti i modelli disponibili e aggiorna le schedine. Se compaiono errori (es. “4 errori”), il conteggio è cliccabile e apre **Report aggiornamento**.
 
@@ -68,7 +69,7 @@ Per ogni partita con quote e pronostico il sistema calcola:
 2. **Margine di sicurezza** — percentuale sopra la void richiesta per un PLAY (impostata in alto)
 3. **Stato valore** — `PLAY` (quota abbastanza sopra void), `BORDERLINE` (sopra void ma sotto il margine), `NO BET` (sotto void)
 
-**Non confondere** la colonna Void (quota break-even) con una partita **annullata**: se una partita è cancellata / abbandonata / senza esito scommettibile, il pick in schedina diventa **Annullato** e la sua quota non conta più nella quota combinata.
+Nella schedina, la colonna **Media quote bookmakers** è la media delle quote di mercato sul pick (non la quota di un singolo bookmaker). **Non confondere** la colonna Void (quota break-even) con una partita **annullata**: se una partita è cancellata / abbandonata / senza esito scommettibile, il pick in schedina diventa **Annullato** e la sua quota non conta più nella quota combinata.
 
 ### Stato partita e schedine ridotte
 
@@ -169,6 +170,8 @@ Con `/schedine` ricevi le stesse schedine della pagina **Consiglio schedina** (f
 Con `/partite` ricevi le partite di oggi come in pagina **Partite** (Predetto, Conf., Void, Valore, Stato). Anche qui, se i motori danno pronostici diversi li vedi entrambi con etichetta accuratezza; l’intro è solo data + legenda stati.
 
 Con `/statistiche` vedi un riepilogo immagine dell’andamento (partite singole e schedine, con profitto sulle schedine), sempre senza nomi modello.
+
+Nella dashboard web, la voce **Bot Telegram** mostra a te (admin) chi ha usato il bot e quali comandi: non è visibile agli utenti Telegram.
 
 ---
 

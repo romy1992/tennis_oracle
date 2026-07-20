@@ -6,6 +6,7 @@ from backend.src.entity.match_prediction import MatchPrediction
 from backend.src.entity.next_fixture import NextFixture
 from backend.src.entity.player import Player
 from backend.src.entity.standing import Standing
+from backend.src.entity.telegram_bot_event import TelegramBotEvent
 from backend.src.entity.tournaments import Tournament
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "GlobalUpdateRunItem",
     "Standing",
     "Player",
+    "TelegramBotEvent",
 ]

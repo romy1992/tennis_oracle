@@ -372,7 +372,9 @@ def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None =
         lines.append("Nessun pick disponibile.")
         return "\n".join(lines)
 
-    lines.append("Pick (Ora | Torneo | Match | Pick | Quota | Void | Edge | ROI | Valore | Conf.):")
+    lines.append(
+        "Pick (Ora | Torneo | Match | Pick | Media quote bookmakers | Void | Edge | ROI | Valore | Conf.):"
+    )
     for index, pick in enumerate(picks, start=1):
         winner = slip_pick_winner_name(pick) or "n.d."
         tournament = pick.get("tournament_name") or "-"

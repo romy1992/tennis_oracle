@@ -775,3 +775,63 @@ export type ModelsVersionsResultsResponse = {
     }>;
   }>;
 };
+
+export type TelegramBotEventType = "command" | "message" | "callback";
+
+export type TelegramBotEvent = {
+  id: number;
+  created_at: string;
+  telegram_user_id: number | null;
+  chat_id: number | null;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  event_type: TelegramBotEventType | string;
+  action: string;
+  raw_text: string | null;
+  success: boolean | null;
+  error_message: string | null;
+};
+
+export type TelegramBotEventsResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: TelegramBotEvent[];
+};
+
+export type TelegramBotActionCount = {
+  action: string;
+  count: number;
+};
+
+export type TelegramBotDayCount = {
+  day: string;
+  count: number;
+};
+
+export type TelegramBotStatsResponse = {
+  total_events: number;
+  unique_users: number;
+  events_today: number;
+  top_action: string | null;
+  by_action: TelegramBotActionCount[];
+  by_day: TelegramBotDayCount[];
+};
+
+export type TelegramBotEventsParams = {
+  from?: string;
+  to?: string;
+  action?: string;
+  user_id?: number;
+  username?: string;
+  event_type?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type TelegramBotStatsParams = {
+  from?: string;
+  to?: string;
+  days?: number;
+};

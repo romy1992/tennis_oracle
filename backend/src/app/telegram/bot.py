@@ -7,7 +7,14 @@ from datetime import timedelta
 from pathlib import Path
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from .client import BackendApiClient, BackendApiError
 from .config import TelegramSettings, get_telegram_settings
@@ -36,6 +43,7 @@ from .public_labels import (
     build_stats_series,
 )
 from .slips_compare import select_distinct_fixture_models, select_distinct_model_payloads
+from .tracking import track_callback_query, tracked
 
 
 logger = logging.getLogger(__name__)
@@ -73,14 +81,17 @@ def _agent_log(hypothesis_id: str, location: str, message: str, data: dict) -> N
         pass
 
 
+@tracked(action="/start", event_type="command")
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update, WELCOME_TEXT)
 
 
+@tracked(action="/help", event_type="command")
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update, WELCOME_TEXT)
 
 
+@tracked(event_type="message")
 async def log_unhandled_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     text = message.text if message and message.text else None
@@ -155,6 +166,7 @@ async def ten_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update, format_predictions_summary(items))
 
 
+@tracked(action="/schedine", event_type="command")
 async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     target_date = today_rome()
     settings = _settings(context)
@@ -216,6 +228,7 @@ async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+@tracked(action="/partite", event_type="command")
 async def partite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     target_date = today_rome()
     settings = _settings(context)
@@ -295,6 +308,7 @@ async def partite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+@tracked(action="/statistiche", event_type="command")
 async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = _settings(context)
     api = _api(context)
@@ -575,6 +589,7 @@ def build_application(settings: TelegramSettings | None = None) -> Application:
     application.add_handler(CommandHandler("schedine", schedine))
     application.add_handler(CommandHandler("partite", partite))
     application.add_handler(CommandHandler("statistiche", statistiche))
+    application.add_handler(CallbackQueryHandler(track_callback_query))
     application.add_handler(MessageHandler(filters.ALL, log_unhandled_update))
     # Comandi temporaneamente disabilitati. Lasciare il codice degli handler
     # pronto per riattivazione futura.
