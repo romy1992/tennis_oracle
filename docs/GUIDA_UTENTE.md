@@ -114,8 +114,8 @@ Puoi anche **annullare** un aggiornamento in corso. Se è già in esecuzione un 
 
 ### Requisiti
 
-- Python 3.12+ consigliato
-- Node.js (per il frontend)
+- Python **3.12**, **3.13** o **3.14**
+- Node.js **20.19+** oppure **22.12+** (per il frontend)
 - PostgreSQL con database `tennis_db`
 - Chiave API tennis (`API_TENNIS_KEY`)
 
@@ -123,9 +123,11 @@ Puoi anche **annullare** un aggiornamento in corso. Se è già in esecuzione un 
 
 ```bash
 cd backend
+python -m venv .venv
+# attiva il virtualenv, poi:
 pip install -r requirements.txt
-cp .env .env
-# oppure configura anche properties/config.env
+# per sviluppo/test: pip install -r requirements-dev.txt
+# configura .env e/o properties/config.env (parti da config.env.example)
 alembic upgrade head
 uvicorn src.app.main:app --reload
 ```
@@ -149,8 +151,8 @@ Health check: `GET http://localhost:8000/health`
 
 ```bash
 cd frontend
-npm install
-cp .env .env
+npm ci
+cp .env.example .env
 npm run dev
 ```
 

@@ -59,15 +59,31 @@ Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espon
 
 ## 2. Setup
 
+### Requisiti runtime
+
+| Stack | Versione supportata |
+|-------|---------------------|
+| **Python** | **3.12**, **3.13** o **3.14** (file `.python-version` → `3.12`) |
+| **Node.js** | **^20.19.0** oppure **>=22.12.0** (richiesto da Vite 8; vedi `frontend/package.json` → `engines` e `frontend/.nvmrc`) |
+| **PostgreSQL** | database `tennis_db` |
+
 ### Backend
 
 ```bash
 cd backend
-pip install -r requirements.txt
-cp .env .env
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt          # solo runtime
+# oppure, per sviluppo/test:
+pip install -r requirements-dev.txt      # runtime + pytest
+cp properties/config.env.example properties/config.env   # se usi gli import API
+# configura anche backend/.env (non committare segreti)
 alembic upgrade head
 uvicorn src.app.main:app --reload
 ```
+
+Dipendenze: `backend/requirements.txt` (runtime, versioni pinate) e `backend/requirements-dev.txt` (include runtime + `pytest`).
 
 Variabili minime in `backend/.env`:
 
@@ -133,14 +149,17 @@ Se lo schema esiste già senza Alembic: `alembic stamp head`.
 
 ```bash
 cd frontend
-npm install
-cp .env .env
+npm ci          # installazione riproducibile da package-lock.json
+# oppure: npm install  (se hai modificato package.json)
+cp .env.example .env
 npm run dev
 ```
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000
 ```
+
+Versioning: nessuna dipendenza `latest` in `package.json`; lockfile allineato. Script utili: `npm run build`, `npm test` (Vitest).
 
 ### Global update cron (in-app)
 
@@ -711,9 +730,18 @@ alembic upgrade head
 
 ## Test
 
+Dalla **root del repository** (dopo `pip install -r backend/requirements-dev.txt`):
+
 ```bash
-cd backend
 pytest
+# oppure: python -m unittest discover -s backend/tests -v
 ```
 
-Test rilevanti: `tests/test_betting_slips.py`, `test_global_update.py`, `test_predictor.py`, `test_dataset_builder.py`, `test_train_baseline.py`, `test_match_lifecycle.py`, `test_telegram_bot.py`, `test_telegram_analytics.py`, ecc.
+Frontend (da `frontend/`, dopo `npm ci`):
+
+```bash
+npm test
+npm run build
+```
+
+Test backend rilevanti: `tests/test_betting_slips.py`, `test_global_update.py`, `test_predictor.py`, `test_dataset_builder.py`, `test_train_baseline.py`, `test_match_lifecycle.py`, `test_telegram_bot.py`, `test_telegram_analytics.py`, `test_rate_limit.py`, ecc.
