@@ -8,15 +8,11 @@ from unittest.mock import patch
 
 import jwt
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from backend.src.app.core.security import ALGORITHM, create_access_token
-from backend.src.app.db.session import get_db
 from backend.src.app.main import app
 from backend.src.entity.admin_user import AdminUser
-from backend.src.entity.base import Base
+from backend.tests.db_helpers import create_session_factory, create_test_engine, make_api_client
 from backend.tests.auth_helpers import (
     TEST_JWT_SECRET,
     TEST_SERVICE_API_KEY,
@@ -30,25 +26,15 @@ from backend.tests.auth_helpers import (
 
 class AuthRoutesTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
         self.settings = make_test_settings(
             service_api_key=TEST_SERVICE_API_KEY,
             allow_unauthenticated_service_reads=False,
         )
         override_settings(self.settings)
 
-        def override_get_db():
-            with self.Session() as session:
-                yield session
-
-        app.dependency_overrides[get_db] = override_get_db
-        self.client = TestClient(app)
+        self.client = make_api_client(app, self.Session)
 
         with self.Session() as session:
             self.admin = create_admin(session, username="admin", password="correct-horse")
@@ -131,25 +117,15 @@ class AuthRoutesTest(unittest.TestCase):
 
 class ProtectedRoutesAuthTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
         self.settings = make_test_settings(
             service_api_key=TEST_SERVICE_API_KEY,
             allow_unauthenticated_service_reads=False,
         )
         override_settings(self.settings)
 
-        def override_get_db():
-            with self.Session() as session:
-                yield session
-
-        app.dependency_overrides[get_db] = override_get_db
-        self.client = TestClient(app)
+        self.client = make_api_client(app, self.Session)
         with self.Session() as session:
             self.admin = create_admin(session)
             self.headers = auth_header_for_admin(self.admin, self.settings)
@@ -236,20 +212,10 @@ class ServiceToServiceAuthTest(unittest.TestCase):
     BOT_READ_PATH = "/api/next-fixtures"
 
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
 
-        def override_get_db():
-            with self.Session() as session:
-                yield session
-
-        app.dependency_overrides[get_db] = override_get_db
-        self.client = TestClient(app)
+        self.client = make_api_client(app, self.Session)
 
     def tearDown(self):
         clear_settings_override()

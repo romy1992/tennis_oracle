@@ -83,7 +83,7 @@ alembic upgrade head
 uvicorn src.app.main:app --reload
 ```
 
-Dipendenze: `backend/requirements.txt` (runtime, versioni pinate) e `backend/requirements-dev.txt` (include runtime + `pytest`).
+Dipendenze: `backend/requirements.txt` (runtime, versioni pinate) e `backend/requirements-dev.txt` (include runtime + `pytest` + `pytest-cov`).
 
 Variabili minime in `backend/.env`:
 
@@ -159,7 +159,7 @@ npm run dev
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
-Versioning: nessuna dipendenza `latest` in `package.json`; lockfile allineato. Script utili: `npm run build`, `npm test` (Vitest).
+Versioning: nessuna dipendenza `latest` in `package.json`; lockfile allineato. Script utili: `npm run build`, `npm test` / `npm run test:watch` / `npm run test:coverage` (Vitest + jsdom + React Testing Library).
 
 ### Global update cron (in-app)
 
@@ -583,7 +583,8 @@ Per aggiornare **tutte** le combo modello/versione con artefatto su disco usare 
 | `/global-update-report` | `GlobalUpdateReportPage` |
 | `/telegram-bot` | `TelegramBotPage` |
 
-Wrapper: `AuthProvider` → route protette con `ProtectedRoute` → `GlobalUpdateProvider` + `Layout`.
+Wrapper: `AuthProvider` → route protette con `ProtectedRoute` → `GlobalUpdateProvider` + `Layout`.  
+L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; test: `createMemoryRouter`).
 
 ### Pagine
 
@@ -730,18 +731,49 @@ alembic upgrade head
 
 ## Test
 
-Dalla **root del repository** (dopo `pip install -r backend/requirements-dev.txt`):
+### Backend
+
+Da un ambiente pulito, dalla **root del repository**:
 
 ```bash
-pytest
-# oppure: python -m unittest discover -s backend/tests -v
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -r backend/requirements-dev.txt
+python -m pytest
 ```
 
-Frontend (da `frontend/`, dopo `npm ci`):
+Un solo comando esegue tutta la suite (`backend/tests`), con:
+
+- database SQLite in-memory isolato (nessun PostgreSQL / `.env` reale richiesto);
+- fixture condivise in `backend/tests/conftest.py` (`client`, `db_session`, `auth_headers`, …);
+- override di `get_db` / settings FastAPI;
+- blocco delle chiamate HTTP verso API-Tennis;
+- report di copertura in terminale, `backend/htmlcov/` e `backend/coverage.xml`.
+
+Configurazione: `pytest.ini` (root). Helper: `backend/tests/db_helpers.py`, `backend/tests/auth_helpers.py`.
+
+Opzioni utili:
 
 ```bash
-npm test
+python -m pytest -q                          # output compatto
+python -m pytest --no-cov                    # senza coverage
+python -m pytest backend/tests/test_auth.py  # singolo modulo
+```
+
+Non sono necessari token Telegram, `API_TENNIS_KEY` o un database PostgreSQL per i test.
+
+### Frontend
+
+Da `frontend/` (dopo `npm ci`):
+
+```bash
+npm test                 # suite una tantum (Vitest + jsdom + RTL)
+npm run test:watch       # modalità watch
+npm run test:coverage    # coverage HTML/LCOV in frontend/coverage/
 npm run build
 ```
 
-Test backend rilevanti: `tests/test_betting_slips.py`, `test_global_update.py`, `test_predictor.py`, `test_dataset_builder.py`, `test_train_baseline.py`, `test_match_lifecycle.py`, `test_telegram_bot.py`, `test_telegram_analytics.py`, `test_rate_limit.py`, ecc.
+La suite mocka `apiClient` / `fetch`: non serve un backend reale. Copertura tipica: avvio/navigazione, route admin protette, stati loading/errore/vuoto, aggiornamento globale, selettori versione/modello, pagine Partite / Schedine / Bot Telegram, errori HTTP del client API.
+
+Configurazione: `frontend/vite.config.ts` (`test.environment = jsdom`, `setupFiles`), helper in `frontend/src/test/`.

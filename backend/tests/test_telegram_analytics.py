@@ -3,31 +3,30 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import select
 
-from backend.src.app.db.session import get_db
 from backend.src.app.main import app
+from backend.tests.db_helpers import create_session_factory, create_test_engine, make_api_client
+from backend.tests.auth_helpers import (
+    auth_header_for_admin,
+    clear_settings_override,
+    create_admin,
+    make_test_settings,
+    override_settings,
+)
 from backend.src.app.services.telegram_analytics import (
     compute_telegram_stats,
     list_telegram_events,
     record_telegram_event,
     record_telegram_event_safe,
 )
-from backend.src.entity.base import Base
 from backend.src.entity.telegram_bot_event import TelegramBotEvent
 
 
 class TelegramAnalyticsServiceTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
 
     def tearDown(self):
         self.engine.dispose()
@@ -134,40 +133,17 @@ class TelegramAnalyticsServiceTest(unittest.TestCase):
 
 class TelegramAnalyticsApiTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
-        from backend.tests.auth_helpers import (
-            auth_header_for_admin,
-            clear_settings_override,
-            create_admin,
-            make_test_settings,
-            override_settings,
-        )
-
-        self._clear_settings_override = clear_settings_override
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
         self.settings = make_test_settings()
         override_settings(self.settings)
-
-        def override_get_db():
-            db = self.Session()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        app.dependency_overrides[get_db] = override_get_db
-        self.client = TestClient(app)
+        self.client = make_api_client(app, self.Session, settings=self.settings)
         with self.Session() as session:
             admin = create_admin(session)
             self.auth_headers = auth_header_for_admin(admin, self.settings)
 
     def tearDown(self):
-        self._clear_settings_override()
+        clear_settings_override()
         app.dependency_overrides.clear()
         self.engine.dispose()
 

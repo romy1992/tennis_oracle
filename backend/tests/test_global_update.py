@@ -3,18 +3,14 @@ from datetime import date, datetime
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.src.app.db.session import get_db
 from backend.src.app.main import app
 from backend.src.app.services.global_update import (
     list_enabled_combinations,
     start_global_update,
 )
-from backend.src.entity.base import Base
 from backend.src.entity.global_update_run import GlobalUpdateRun
+from backend.tests.db_helpers import create_session_factory, create_test_engine, make_api_client
 from backend.tests.auth_helpers import (
     auth_header_for_admin,
     clear_settings_override,
@@ -26,22 +22,12 @@ from backend.tests.auth_helpers import (
 
 class GlobalUpdateServiceTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
         self.settings = make_test_settings()
         override_settings(self.settings)
 
-        def override_get_db():
-            with self.Session() as session:
-                yield session
-
-        app.dependency_overrides[get_db] = override_get_db
-        self.client = TestClient(app)
+        self.client = make_api_client(app, self.Session)
         with self.Session() as session:
             admin = create_admin(session)
             self.auth_headers = auth_header_for_admin(admin, self.settings)

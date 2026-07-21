@@ -2,34 +2,20 @@ import unittest
 from datetime import date, datetime
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
-from sqlalchemy.orm import sessionmaker
 
-from backend.src.app.db.session import get_db
 from backend.src.app.main import app
 from backend.src.entity import Fixture, MatchPrediction, NextFixture
-from backend.src.entity.base import Base
+from backend.tests.db_helpers import create_session_factory, create_test_engine, make_api_client
 from backend.tests.auth_helpers import clear_settings_override, make_test_settings, override_settings
 
 
 class PredictionRoutesTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
         override_settings(make_test_settings(rate_limit_enabled=False))
 
-        def override_get_db():
-            with self.Session() as session:
-                yield session
-
-        app.dependency_overrides[get_db] = override_get_db
-        self.client = TestClient(app)
+        self.client = make_api_client(app, self.Session)
 
     def tearDown(self):
         clear_settings_override()

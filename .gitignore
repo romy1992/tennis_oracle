@@ -47,3 +47,11 @@ venv/
 #.env
 #.env.*
 #!.env.example
+
+# Test / coverage
+.coverage
+.coverage.*
+backend/htmlcov/
+backend/coverage.xml
+frontend/coverage/
+.pytest_cache/

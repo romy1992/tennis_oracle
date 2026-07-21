@@ -1,8 +1,10 @@
 # Development / test dependencies.
-# Install: pip install -r requirements-dev.txt
+# Install from repo root or backend/:
+#   pip install -r backend/requirements-dev.txt
 #
 # Includes runtime deps via -r requirements.txt.
 
 -r requirements.txt
 
 pytest==9.1.1
+pytest-cov==7.1.0
