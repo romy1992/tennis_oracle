@@ -1,17 +1,22 @@
-alembic
-bcrypt
-fastapi
-httpx2
-pandas
-psycopg2-binary
-pydantic
-pydantic-settings
-pillow
-PyJWT
-python-dotenv
-python-telegram-bot
-requests
-scikit-learn
-sqlalchemy
-tzdata
-uvicorn
+# Runtime dependencies — pin exact versions for reproducible installs.
+# Supported Python: 3.12, 3.13, or 3.14 (see README).
+#
+# Install: pip install -r requirements.txt
+
+alembic==1.18.4
+bcrypt==5.0.0
+fastapi==0.137.2
+httpx==0.28.1
+pandas==3.0.3
+pillow==12.3.0
+psycopg2-binary==2.9.12
+pydantic==2.13.4
+pydantic-settings==2.14.2
+PyJWT==2.13.0
+python-dotenv==1.2.2
+python-telegram-bot==22.8
+requests==2.34.2
+scikit-learn==1.9.0
+SQLAlchemy==2.0.51
+tzdata==2026.2
+uvicorn==0.49.0
