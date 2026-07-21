@@ -230,6 +230,137 @@ class ProtectedRoutesAuthTest(unittest.TestCase):
             self.assertTrue(admin.password_hash.startswith("$2"))
 
 
+class ServiceToServiceAuthTest(unittest.TestCase):
+    """Service token (bot→API) only — not admin JWT, not Telegram user identity."""
+
+    BOT_READ_PATH = "/api/next-fixtures"
+
+    def setUp(self):
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+
+        def override_get_db():
+            with self.Session() as session:
+                yield session
+
+        app.dependency_overrides[get_db] = override_get_db
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        clear_settings_override()
+        app.dependency_overrides.clear()
+        self.engine.dispose()
+
+    def _configure(self, **settings_kwargs):
+        settings = make_test_settings(**settings_kwargs)
+        override_settings(settings)
+        return settings
+
+    def test_valid_service_token_allows_bot_endpoint(self):
+        self._configure(
+            service_api_key=TEST_SERVICE_API_KEY,
+            allow_unauthenticated_service_reads=False,
+        )
+        response = self.client.get(
+            self.BOT_READ_PATH,
+            headers={"X-Service-Token": TEST_SERVICE_API_KEY},
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_missing_service_token_rejected(self):
+        self._configure(
+            service_api_key=TEST_SERVICE_API_KEY,
+            allow_unauthenticated_service_reads=False,
+        )
+        response = self.client.get(self.BOT_READ_PATH)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json().get("detail"), "Not authenticated")
+
+    def test_invalid_service_token_rejected(self):
+        self._configure(
+            service_api_key=TEST_SERVICE_API_KEY,
+            allow_unauthenticated_service_reads=False,
+        )
+        response = self.client.get(
+            self.BOT_READ_PATH,
+            headers={"X-Service-Token": "definitely-not-the-key"},
+        )
+        self.assertEqual(response.status_code, 401)
+        detail = response.json().get("detail")
+        self.assertEqual(detail, "Not authenticated")
+        self.assertNotIn(TEST_SERVICE_API_KEY, str(response.content))
+        self.assertNotIn("definitely-not-the-key", detail)
+
+    def test_previous_service_key_accepted_during_rotation(self):
+        previous = "previous-service-key-value"
+        self._configure(
+            service_api_key=TEST_SERVICE_API_KEY,
+            service_api_key_previous=previous,
+            allow_unauthenticated_service_reads=False,
+        )
+        response = self.client.get(
+            self.BOT_READ_PATH,
+            headers={"X-Service-Token": previous},
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_require_service_token_rejects_when_key_not_configured(self):
+        from fastapi import HTTPException
+
+        from backend.src.app.api.deps import require_service_token
+
+        settings = self._configure(
+            service_api_key=None,
+            allow_unauthenticated_service_reads=True,
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            require_service_token(service_token="anything", settings=settings)
+        self.assertEqual(ctx.exception.status_code, 401)
+        self.assertEqual(ctx.exception.detail, "Not authenticated")
+
+    def test_require_service_token_accepts_valid_key(self):
+        from backend.src.app.api.deps import require_service_token
+
+        settings = self._configure(
+            service_api_key=TEST_SERVICE_API_KEY,
+            allow_unauthenticated_service_reads=False,
+        )
+        require_service_token(
+            service_token=TEST_SERVICE_API_KEY,
+            settings=settings,
+        )
+
+class BackendApiClientServiceAuthTest(unittest.TestCase):
+    def test_client_sends_x_service_token_header(self):
+        from backend.src.app.telegram.client import BackendApiClient
+
+        with patch("backend.src.app.telegram.client.httpx.AsyncClient") as mock_async:
+            BackendApiClient(
+                "http://localhost:8000/api",
+                service_api_key=TEST_SERVICE_API_KEY,
+            )
+            mock_async.assert_called_once()
+            kwargs = mock_async.call_args.kwargs
+            self.assertEqual(
+                kwargs.get("headers", {}).get("X-Service-Token"),
+                TEST_SERVICE_API_KEY,
+            )
+
+    def test_client_omits_header_when_key_absent(self):
+        from backend.src.app.telegram.client import BackendApiClient
+
+        with patch("backend.src.app.telegram.client.httpx.AsyncClient") as mock_async:
+            BackendApiClient("http://localhost:8000/api", service_api_key=None)
+            mock_async.assert_called_once()
+            kwargs = mock_async.call_args.kwargs
+            self.assertIsNone(kwargs.get("headers"))
+
+
 class AuthHelpersUnitTest(unittest.TestCase):
     def test_create_access_token_roundtrip(self):
         settings = make_test_settings()

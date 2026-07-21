@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.src.app.core.config import Settings, get_settings
+from backend.src.app.core.config import Settings, get_settings, set_settings_override
 from backend.src.app.core.security import hash_password
 from backend.src.app.services.auth import issue_access_token
 from backend.src.entity.admin_user import AdminUser
@@ -22,16 +22,19 @@ def make_test_settings(**overrides) -> Settings:
         "admin_jwt_secret": TEST_JWT_SECRET,
         "admin_jwt_expire_minutes": 60,
         "service_api_key": None,
+        "service_api_key_previous": None,
         "allow_unauthenticated_service_reads": True,
         "admin_username": None,
         "admin_password": None,
+        # Keep existing route tests free of rate-limit side effects by default.
+        "rate_limit_enabled": False,
     }
     base.update(overrides)
     return Settings(**base)
 
 
 def override_settings(settings: Settings) -> None:
-    get_settings.cache_clear()
+    set_settings_override(settings)
 
     def _get() -> Settings:
         return settings
@@ -45,7 +48,9 @@ def clear_settings_override() -> None:
     from backend.src.app.main import app
 
     app.dependency_overrides.pop(get_settings, None)
-    get_settings.cache_clear()
+    # Keep rate limiting off after teardown so later TestClient tests that omit
+    # override_settings do not hit the real DATABASE_URL rate_limit_bucket table.
+    set_settings_override(make_test_settings(rate_limit_enabled=False))
 
 
 def create_admin(

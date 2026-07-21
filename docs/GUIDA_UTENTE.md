@@ -138,7 +138,8 @@ Variabili importanti in `backend/.env` / `backend/properties/config.env`:
 - `CORS_ORIGINS` — origini frontend consentite
 - `ADMIN_JWT_SECRET` — segreto per i token di accesso della dashboard (obbligatorio per il login)
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` — usati solo alla prima creazione dell’admin se il database non ne ha ancora uno
-- `SERVICE_API_KEY` / `TELEGRAM_SERVICE_API_KEY` — opzionali; se impostati, il bot deve usare la stessa chiave verso l’API
+- `SERVICE_API_KEY` / `TELEGRAM_SERVICE_API_KEY` — opzionali in locale; se impostati, il bot deve usare la stessa chiave verso l’API (header dedicato, non confondere con il login admin)
+- `SERVICE_API_KEY_PREVIOUS` — opzionale, solo durante la rotazione della chiave service
 - `TELEGRAM_BOT_TOKEN` — solo se usi il bot (opzionale)
 
 API tipica: `http://localhost:8000`  
@@ -173,6 +174,8 @@ python -m src.app.telegram.bot
 ```
 
 Comandi attivi: `/start`, `/help`, `/schedine`, `/partite`, `/statistiche`.
+
+Se invii troppi comandi in poco tempo, il bot ti chiede di attendere qualche secondo (protezione anti-abuso). Lo stesso tipo di limite vale anche per le API del server.
 
 Con `/schedine` ricevi le stesse schedine della pagina **Consiglio schedina** (fino a 9, con Void/Edge/ROI/Valore e stato pick). Se i due motori del giorno producono schedine diverse, il bot le mostra entrambe etichettate con l’accuratezza storica (senza nomi tecnici); se sono uguali ne manda una sola. Il primo messaggio indica solo la data e la legenda degli esiti: verde = Presa, rosso = Persa, grigio = In corso, grigio scuro = Annullata.
 
@@ -215,6 +218,9 @@ Sì, tipicamente dopo un aggiornamento globale o un refresh esplicito / “Rigen
 
 **Serve capire il machine learning per usarlo?**  
 No. Per l’uso quotidiano basta l’interfaccia web e, se vuoi, il bot Telegram.
+
+**Il bot o il sito dicono di riprovare più tardi?**  
+È una protezione anti-abuso: troppe richieste in poco tempo. Attendi i secondi indicati e riprova.
 
 ---
 

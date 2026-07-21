@@ -10,6 +10,7 @@ from backend.src.app.db.session import get_db
 from backend.src.app.main import app
 from backend.src.entity import Fixture, MatchPrediction, NextFixture
 from backend.src.entity.base import Base
+from backend.tests.auth_helpers import clear_settings_override, make_test_settings, override_settings
 
 
 class PredictionRoutesTest(unittest.TestCase):
@@ -21,6 +22,7 @@ class PredictionRoutesTest(unittest.TestCase):
         )
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+        override_settings(make_test_settings(rate_limit_enabled=False))
 
         def override_get_db():
             with self.Session() as session:
@@ -30,6 +32,7 @@ class PredictionRoutesTest(unittest.TestCase):
         self.client = TestClient(app)
 
     def tearDown(self):
+        clear_settings_override()
         app.dependency_overrides.clear()
         self.engine.dispose()
 
