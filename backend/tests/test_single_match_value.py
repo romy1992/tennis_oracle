@@ -16,6 +16,7 @@ from backend.src.app.services.single_match_value import (
 )
 from backend.src.entity import Fixture, MatchPrediction, NextFixture
 from backend.src.entity.base import Base
+from backend.tests.auth_helpers import clear_settings_override, make_test_settings, override_settings
 
 
 class SingleMatchValueTest(unittest.TestCase):
@@ -27,6 +28,7 @@ class SingleMatchValueTest(unittest.TestCase):
         )
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+        override_settings(make_test_settings(rate_limit_enabled=False))
 
         def override_get_db():
             with self.Session() as session:
@@ -36,6 +38,7 @@ class SingleMatchValueTest(unittest.TestCase):
         self.client = TestClient(app)
 
     def tearDown(self):
+        clear_settings_override()
         app.dependency_overrides.clear()
         self.engine.dispose()
 

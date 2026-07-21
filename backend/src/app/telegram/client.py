@@ -18,6 +18,13 @@ class BackendApiError(Exception):
 
 
 class BackendApiClient:
+    """HTTP client used by the Telegram bot process to call FastAPI.
+
+    When ``service_api_key`` is set (from ``TELEGRAM_SERVICE_API_KEY``), every
+    request includes ``X-Service-Token``. This is service-to-service auth only;
+    it is unrelated to admin JWT or Telegram end-user identity.
+    """
+
     def __init__(
         self,
         base_url: str,

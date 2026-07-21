@@ -72,10 +72,31 @@ def require_admin(
     return admin
 
 
-def _service_token_valid(provided: str | None, expected: str | None) -> bool:
-    if not expected or not provided:
+def _accepted_service_keys(settings: Settings) -> list[str]:
+    """Current and optional previous service keys (for rotation)."""
+    keys: list[str] = []
+    for value in (settings.service_api_key, settings.service_api_key_previous):
+        cleaned = (value or "").strip()
+        if cleaned and cleaned not in keys:
+            keys.append(cleaned)
+    return keys
+
+
+def _service_token_valid(provided: str | None, expected_keys: list[str]) -> bool:
+    """Constant-time compare against one or more accepted keys. Never logs the value."""
+    if not provided or not expected_keys:
         return False
-    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+    provided_bytes = provided.encode("utf-8")
+    matched = False
+    for expected in expected_keys:
+        expected_bytes = expected.encode("utf-8")
+        if len(provided_bytes) != len(expected_bytes):
+            # Length mismatch: still run a dummy compare to reduce timing skew.
+            hmac.compare_digest(provided_bytes, provided_bytes)
+            continue
+        if hmac.compare_digest(provided_bytes, expected_bytes):
+            matched = True
+    return matched
 
 
 def require_service_token(
@@ -84,14 +105,16 @@ def require_service_token(
 ) -> None:
     """Dedicated bot/service protection via ``X-Service-Token``.
 
-    Independent from admin JWT. Requires ``SERVICE_API_KEY`` to be configured.
+    Independent from admin JWT and from Telegram end-user identity.
+    Requires ``SERVICE_API_KEY`` (and optionally ``SERVICE_API_KEY_PREVIOUS``) via env.
     """
-    expected = (settings.service_api_key or "").strip()
-    if not expected:
-        raise _unauthorized("Service API key is not configured")
-    if not _service_token_valid(service_token, expected):
+    expected_keys = _accepted_service_keys(settings)
+    if not expected_keys:
+        logger.info("Rejected service request: service API key is not configured")
+        raise _unauthorized()
+    if not _service_token_valid(service_token, expected_keys):
         logger.info("Rejected request with missing or invalid service token")
-        raise _unauthorized("Invalid or missing service token")
+        raise _unauthorized()
 
 
 def require_admin_or_service(
@@ -106,16 +129,17 @@ def require_admin_or_service(
 
     When ``SERVICE_API_KEY`` is empty and ``ALLOW_UNAUTHENTICATED_SERVICE_READS``
     is true, anonymous access remains allowed (local / backward compatible).
+    Not related to Telegram user identity — only bot→API service auth or admin JWT.
     """
     if credentials is not None and credentials.scheme.lower() == "bearer":
         return get_current_admin(credentials, db, settings)
 
-    expected_service = (settings.service_api_key or "").strip()
-    if expected_service:
-        if _service_token_valid(service_token, expected_service):
+    expected_keys = _accepted_service_keys(settings)
+    if expected_keys:
+        if _service_token_valid(service_token, expected_keys):
             return None
         logger.info("Rejected request with missing or invalid service token")
-        raise _unauthorized("Invalid or missing credentials")
+        raise _unauthorized()
 
     if settings.allow_unauthenticated_service_reads:
         return None

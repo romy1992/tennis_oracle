@@ -40,6 +40,7 @@ from .public_labels import (
     build_stats_series,
 )
 from .slips_compare import select_distinct_fixture_models, select_distinct_model_payloads
+from .rate_limit import rate_limited
 from .tracking import track_callback_query, tracked
 
 
@@ -56,11 +57,13 @@ Comandi attivi:
 Pronostici a scopo informativo/statistico, non garanzie di risultato."""
 
 
+@rate_limited()
 @tracked(action="/start", event_type="command")
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update, WELCOME_TEXT)
 
 
+@rate_limited()
 @tracked(action="/help", event_type="command")
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update, WELCOME_TEXT)
@@ -135,6 +138,7 @@ async def ten_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update, format_predictions_summary(items))
 
 
+@rate_limited(expensive=True)
 @tracked(action="/schedine", event_type="command")
 async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     target_date = today_rome()
@@ -184,6 +188,7 @@ async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+@rate_limited(expensive=True)
 @tracked(action="/partite", event_type="command")
 async def partite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     target_date = today_rome()
@@ -252,6 +257,7 @@ async def partite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+@rate_limited(expensive=True)
 @tracked(action="/statistiche", event_type="command")
 async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = _settings(context)

@@ -1,7 +1,7 @@
 {
   "fixtures": {
-    "last_match_date": "2026-07-20",
-    "imported_at": "2026-07-20T18:19:49.735486",
+    "last_match_date": null,
+    "imported_at": "2026-07-21T09:46:21.904149",
     "days_back_start": 3
   }
 }

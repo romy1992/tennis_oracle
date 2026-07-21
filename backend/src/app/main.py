@@ -8,6 +8,7 @@ from backend.src.app.api.routes.health import router as health_router
 from backend.src.app.core.config import get_settings
 from backend.src.app.core.logging import configure_logging
 from backend.src.app.db.session import SessionLocal
+from backend.src.app.middleware.rate_limit import RateLimitMiddleware
 from backend.src.app.scheduler import (
     start_global_update_scheduler,
     stop_global_update_scheduler,
@@ -51,6 +52,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Rate limiting first in the stack (executed last on the way in) so CORS
+# preflight and normal responses still get CORS headers on 429.
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

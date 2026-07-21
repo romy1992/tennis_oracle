@@ -25,6 +25,8 @@ _SENSITIVE_KEYS = frozenset(
         "x_api_key",
         "x_service_token",
         "service_api_key",
+        "service_api_key_previous",
+        "telegram_service_api_key",
         "admin_jwt_secret",
         "admin_password",
         "telegram_bot_token",

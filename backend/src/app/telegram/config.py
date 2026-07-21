@@ -11,6 +11,8 @@ class TelegramSettings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_api_base_url: str = "http://localhost:8000/api"
     # Same value as SERVICE_API_KEY on the API; sent as X-Service-Token.
+    # Env only (TELEGRAM_SERVICE_API_KEY). After rotating SERVICE_API_KEY, update this
+    # to the new key; the API may still accept SERVICE_API_KEY_PREVIOUS during rollout.
     telegram_service_api_key: str | None = None
     telegram_model_version: str = "v3"
     telegram_model_name: str | None = "logistic_regression"

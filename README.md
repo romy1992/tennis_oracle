@@ -82,8 +82,30 @@ ADMIN_JWT_EXPIRE_MINUTES=480
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=change-me-strong-password
 SERVICE_API_KEY=
+# Optional previous key during rotation; clear after bot uses the new key.
+SERVICE_API_KEY_PREVIOUS=
 ALLOW_UNAUTHENTICATED_SERVICE_READS=true
 ```
+
+Rate limiting (contatori in PostgreSQL, condivisi tra repliche API e bot):
+
+```env
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_WINDOW_SECONDS=60
+RATE_LIMIT_PUBLIC=60
+RATE_LIMIT_ADMIN=300
+RATE_LIMIT_INTERNAL=600
+RATE_LIMIT_EXPENSIVE=20
+RATE_LIMIT_LOGIN=10
+RATE_LIMIT_TELEGRAM=30
+RATE_LIMIT_TELEGRAM_EXPENSIVE=10
+```
+
+- Pubbliche: per IP; admin: fingerprint JWT; interne: fingerprint `X-Service-Token`
+- Endpoint costosi (login, imports, global-update, SMVA, regenerate schedine, …) hanno un quota aggiuntiva
+- `/health` (e docs OpenAPI) sono esclusi
+- Superato il limite: HTTP **429** con header `Retry-After`
+- Bot Telegram: limite per `telegram_user_id` (più stretto su `/schedine`, `/partite`, `/statistiche`)
 
 All’avvio, se la tabella `admin_user` è vuota e sono impostati `ADMIN_USERNAME` / `ADMIN_PASSWORD`, viene creato il primo admin (password con bcrypt). Non inserire segreti reali nel repo: usa `backend/properties/config.env.example` come modello.
 
@@ -103,7 +125,7 @@ TELEGRAM_SLIP_COUNT=9
 TELEGRAM_MIN_EDGE_PERCENT=2.0
 ```
 
-`TELEGRAM_SERVICE_API_KEY` deve coincidere con `SERVICE_API_KEY` quando quest’ultima è valorizzata (header `X-Service-Token`).
+`TELEGRAM_SERVICE_API_KEY` deve coincidere con `SERVICE_API_KEY` quando quest’ultima è valorizzata (header `X-Service-Token`). Per ruotare: imposta la nuova chiave in `SERVICE_API_KEY`, lascia la vecchia in `SERVICE_API_KEY_PREVIOUS`, aggiorna `TELEGRAM_SERVICE_API_KEY` sul bot, poi rimuovi `SERVICE_API_KEY_PREVIOUS`.
 
 Se lo schema esiste già senza Alembic: `alembic stamp head`.
 
@@ -143,14 +165,28 @@ Documentazione interattiva: `http://localhost:8000/docs`.
 | Tipo | Uso | Header |
 |------|-----|--------|
 | Admin JWT | Dashboard React e operazioni privilegiate | `Authorization: Bearer <access_token>` |
-| Service token | Solo endpoint di lettura usati dal bot Telegram | `X-Service-Token: <SERVICE_API_KEY>` |
+| Service token | Autenticazione service-to-service bot→API (non utenti Telegram) | `X-Service-Token: <SERVICE_API_KEY>` |
 
 - `POST /api/auth/login` — username/password → access token con scadenza (`ADMIN_JWT_EXPIRE_MINUTES`)
 - `GET /api/auth/me` — verifica sessione admin (`require_admin`)
 - `POST /api/auth/logout` — logout stateless (il client elimina il token)
 - Dipendenze riutilizzabili: `require_admin`, `require_admin_or_service`, `require_service_token` in `app/api/deps.py`
-- Risposte: **401** non autenticato / token invalido; **403** autenticato ma non autorizzato (es. admin disabilitato, regenerate con solo service token)
-- Con `SERVICE_API_KEY` vuoto e `ALLOW_UNAUTHENTICATED_SERVICE_READS=true` (default locale) i GET del bot restano aperti; in produzione impostare la chiave e allineare `TELEGRAM_SERVICE_API_KEY`
+- Confronto chiave con `hmac.compare_digest`; errori generici (`Not authenticated`); la chiave non viene scritta nei log
+- Rotazione: `SERVICE_API_KEY` (corrente) + opzionale `SERVICE_API_KEY_PREVIOUS`; il bot invia solo `TELEGRAM_SERVICE_API_KEY`
+- Risposte: **401** non autenticato / token invalido; **403** autenticato ma non autorizzato (es. admin disabilitato, regenerate con solo service token); **429** rate limit superato (`Retry-After`)
+- Con `SERVICE_API_KEY` vuoto e `ALLOW_UNAUTHENTICATED_SERVICE_READS=true` (default locale) i GET del bot restano aperti; in staging/produzione impostare la chiave e allineare `TELEGRAM_SERVICE_API_KEY`
+
+### Rate limiting
+
+Contatori fixed-window in tabella `rate_limit_bucket` (Alembic `0012_rate_limit_bucket`), quindi sicuri con più istanze API senza Redis.
+
+| Componente | Ruolo |
+|------------|-------|
+| `app/core/rate_limit.py` | `consume_rate_limit`, fingerprint token, session factory (override nei test) |
+| `app/middleware/rate_limit.py` | `RateLimitMiddleware` — tier public/admin/internal, esclusione health, 429 + `Retry-After` |
+| `app/telegram/rate_limit.py` | Decorator `rate_limited` per comandi bot (messaggio IT) |
+
+Abuso loggato con path / scope / IP o `telegram_user_id` senza token o password.
 
 ### Montate in `api/router.py` (attive)
 
@@ -199,12 +235,12 @@ Route definite in `matches.py`, `players.py`, `tournaments.py`, `ml.py` — **no
 | Simbolo | Ruolo |
 |---------|-------|
 | `lifespan` | All’avvio: `reconcile_orphaned_runs`, `ensure_bootstrap_admin`, `start_global_update_scheduler`; allo shutdown ferma lo scheduler |
-| `app` | Istanza FastAPI, CORS, mount health + `api_router` |
+| `app` | Istanza FastAPI, `RateLimitMiddleware`, CORS, mount health + `api_router` |
 
 #### `app/core/config.py` — `Settings`
 
-Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `allow_unauthenticated_service_reads`).  
-`get_settings()` — settings cacheati (`lru_cache`).
+Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`).  
+`get_settings()` — settings cacheati; `set_settings_override()` per test/middleware.
 
 #### `app/core/security.py`
 
@@ -257,6 +293,7 @@ Modulo `backend/src/entity/`.
 | `GlobalUpdateRun` / `GlobalUpdateRunItem` | Stato aggiornamento globale e step per combo modello |
 | `TelegramBotEvent` | Accessi/comandi bot (`telegram_bot_event`; migrazione `0010`) |
 | `AdminUser` | Account amministratore (`admin_user`; migrazione `0011`; solo hash password) |
+| `RateLimitBucket` | Contatori rate limit multi-istanza (`rate_limit_bucket`; migrazione `0012`) |
 
 Modelli ML canonici in `app/models/ml.py`: `MLPlayer`, `MLTournament`, `MLMatch`, `RankingSnapshot`, `OddsSnapshot`, `FeatureSnapshot`.
 
@@ -630,9 +667,10 @@ Modulo `app/telegram/`.
 
 | Modulo | Ruolo |
 |--------|-------|
-| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 9), `telegram_min_edge_percent` (default 2.0) |
+| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, `telegram_service_api_key` (S2S, allineata a `SERVICE_API_KEY`), model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 9), `telegram_min_edge_percent` (default 2.0) |
 | `client.BackendApiClient` | Chiama le stesse API FastAPI (`/betting-slips/daily`, `/betting-slips/stats/by-model`, `/predictions/stats/summary`, `/models-versions/results`, `/next-fixtures/predictions`, `/single-match-value`, …) |
 | `bot.build_application` / `main` | Polling + handler comandi |
+| `rate_limit.rate_limited` | Limite comandi per `telegram_user_id` (DB condiviso; messaggio IT se superato) |
 | `tracking.tracked` / `track_callback_query` | Persistenza accessi/click in `telegram_bot_event` (non blocca il bot se il DB fallisce) |
 | `fixture_value.enrich_fixture_value` | Void/valore su `/partite` (SMVA o fallback da probabilità modello) |
 | `messages` / `dates` / `images` / `slips_compare` / `public_labels` | Formattazione risposte, date Roma, PNG, confronto multi-serie, etichette pubbliche (accuratezza) |
