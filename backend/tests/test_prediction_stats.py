@@ -1,24 +1,21 @@
 import unittest
+
+from backend.tests.db_helpers import create_session_factory, create_test_engine
 from datetime import date, datetime, timezone
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from backend.src.entity import Fixture, MatchPrediction, NextFixture
-from backend.src.entity.base import Base
 from backend.src.app.services.predictions import (
     compute_daily_prediction_stats,
     compute_prediction_summary,
     get_next_fixtures_with_predictions,
 )
-from backend.src.entity.base import Base
 
 
 class PredictionStatsTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
 
     def tearDown(self):
         self.engine.dispose()

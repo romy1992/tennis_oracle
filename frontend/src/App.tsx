@@ -1,4 +1,9 @@
-import { Navigate, createBrowserRouter, RouterProvider } from "react-router-dom";
+import {
+  Navigate,
+  createBrowserRouter,
+  RouterProvider,
+  type RouteObject
+} from "react-router-dom";
 
 import { AuthProvider } from "./auth/AuthContext";
 import { GlobalUpdateProvider } from "./hooks/useGlobalUpdate";
@@ -20,7 +25,8 @@ function AuthenticatedShell() {
   );
 }
 
-const router = createBrowserRouter([
+/** Shared route tree for browser runtime and memory-router tests. */
+export const appRoutes: RouteObject[] = [
   { path: "/login", element: <LoginPage /> },
   {
     path: "/",
@@ -40,12 +46,12 @@ const router = createBrowserRouter([
       }
     ]
   }
-]);
+];
 
 export function App() {
   return (
     <AuthProvider>
-      <RouterProvider router={router} />
+      <RouterProvider router={createBrowserRouter(appRoutes)} />
     </AuthProvider>
   );
 }

@@ -15,10 +15,15 @@ from backend.src.entity.admin_user import AdminUser
 
 TEST_JWT_SECRET = "test-admin-jwt-secret-not-for-production"
 TEST_SERVICE_API_KEY = "test-service-api-key"
+# Isolated in-memory URL; never point tests at a real PostgreSQL instance.
+TEST_DATABASE_URL = "sqlite://"
 
 
 def make_test_settings(**overrides) -> Settings:
+    """Build Settings with test secrets; ignore real ``.env`` credentials."""
     base = {
+        # Force SQLite so pydantic does not pick DATABASE_URL from env files.
+        "database_url": TEST_DATABASE_URL,
         "admin_jwt_secret": TEST_JWT_SECRET,
         "admin_jwt_expire_minutes": 60,
         "service_api_key": None,
@@ -26,6 +31,7 @@ def make_test_settings(**overrides) -> Settings:
         "allow_unauthenticated_service_reads": True,
         "admin_username": None,
         "admin_password": None,
+        "global_update_cron_enabled": False,
         # Keep existing route tests free of rate-limit side effects by default.
         "rate_limit_enabled": False,
     }
@@ -49,7 +55,7 @@ def clear_settings_override() -> None:
 
     app.dependency_overrides.pop(get_settings, None)
     # Keep rate limiting off after teardown so later TestClient tests that omit
-    # override_settings do not hit the real DATABASE_URL rate_limit_bucket table.
+    # override_settings do not hit a real rate_limit_bucket table.
     set_settings_override(make_test_settings(rate_limit_enabled=False))
 
 

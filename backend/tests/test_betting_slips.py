@@ -3,12 +3,17 @@ from datetime import date, datetime, time, timedelta
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, func, select
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import func, select
 
-from backend.src.app.db.session import get_db
 from backend.src.app.main import app
+from backend.tests.db_helpers import create_session_factory, create_test_engine, make_api_client
+from backend.tests.auth_helpers import (
+    auth_header_for_admin,
+    clear_settings_override,
+    create_admin,
+    make_test_settings,
+    override_settings,
+)
 from backend.src.app.services.betting_slips import (
     _resolve_pick_status,
     _resolve_slip_status,
@@ -19,7 +24,6 @@ from backend.src.app.services.betting_slips import (
     get_daily_betting_slips,
 )
 from backend.src.entity import BettingSlip, BettingSlipDay, BettingSlipPick, Fixture, MatchPrediction, NextFixture
-from backend.src.entity.base import Base
 
 
 def _sample_odds() -> dict:
@@ -35,13 +39,8 @@ def _sample_odds() -> dict:
 
 class BettingSlipsServiceTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
         self.today = date(2026, 6, 28)
 
     def tearDown(self):
@@ -547,38 +546,19 @@ class BettingSlipsServiceTest(unittest.TestCase):
 
 class BettingSlipsRoutesTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
         self.today = date(2026, 6, 28)
 
-        def override_get_db():
-            with self.Session() as session:
-                yield session
-
-        app.dependency_overrides[get_db] = override_get_db
-        self.client = TestClient(app)
-        from backend.tests.auth_helpers import (
-            auth_header_for_admin,
-            clear_settings_override,
-            create_admin,
-            make_test_settings,
-            override_settings,
-        )
-
-        self._clear_settings_override = clear_settings_override
         self.settings = make_test_settings()
         override_settings(self.settings)
+        self.client = make_api_client(app, self.Session, settings=self.settings)
         with self.Session() as session:
             admin = create_admin(session)
             self.auth_headers = auth_header_for_admin(admin, self.settings)
 
     def tearDown(self):
-        self._clear_settings_override()
+        clear_settings_override()
         app.dependency_overrides.clear()
         self.engine.dispose()
 

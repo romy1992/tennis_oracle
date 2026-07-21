@@ -1,9 +1,8 @@
+import tempfile
 import unittest
 from datetime import date, datetime, timedelta
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from pathlib import Path
+from unittest.mock import patch
 
 from backend.src.app.services import import_state as import_state_module
 from backend.src.app.services.import_state import get_import_status, record_fixture_import
@@ -12,31 +11,21 @@ from backend.src.app.services.imports import (
     purge_future_incomplete_fixtures,
 )
 from backend.src.entity import Fixture
-from backend.src.entity.base import Base
+from backend.tests.db_helpers import create_session_factory, create_test_engine
 
 
 class ImportStateDatesTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
-        self._state_path = import_state_module.STATE_PATH
-        self._original_state = (
-            self._state_path.read_text(encoding="utf-8")
-            if self._state_path.exists()
-            else None
-        )
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._state_path = Path(self._temp_dir.name) / "import_state.json"
+        self._state_patch = patch.object(import_state_module, "STATE_PATH", self._state_path)
+        self._state_patch.start()
 
     def tearDown(self):
-        if self._original_state is None:
-            if self._state_path.exists():
-                self._state_path.unlink()
-        else:
-            self._state_path.write_text(self._original_state, encoding="utf-8")
+        self._state_patch.stop()
+        self._temp_dir.cleanup()
         self.engine.dispose()
 
     def test_latest_played_match_date_ignores_future(self):

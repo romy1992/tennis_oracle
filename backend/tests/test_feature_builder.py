@@ -1,19 +1,20 @@
 import unittest
+
+from backend.tests.db_helpers import create_session_factory, create_test_engine
 from datetime import date
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from backend.src.app.ml.features.feature_builder import calculate_h2h, calculate_win_rate_last_n
 from backend.src.app.models import MLMatch, MLPlayer
-from backend.src.entity.base import Base
 
 
 class FeatureBuilderTest(unittest.TestCase):
     def setUp(self):
-        engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(engine)
-        self.Session = sessionmaker(bind=engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
+
+    def tearDown(self):
+        self.engine.dispose()
 
     def test_win_rate_uses_only_previous_matches(self):
         with self.Session() as session:

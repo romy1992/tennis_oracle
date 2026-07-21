@@ -8,20 +8,16 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from backend.src.app.core.rate_limit import (
     consume_rate_limit,
     set_rate_limit_session_factory,
     window_start_utc,
 )
-from backend.src.app.db.session import get_db
 from backend.src.app.main import app
 from backend.src.app.telegram.rate_limit import rate_limited
-from backend.src.entity.base import Base
 from backend.src.entity.rate_limit_bucket import RateLimitBucket
+from backend.tests.db_helpers import create_session_factory, create_test_engine, make_api_client
 from backend.tests.auth_helpers import (
     clear_settings_override,
     make_test_settings,
@@ -31,13 +27,8 @@ from backend.tests.auth_helpers import (
 
 class RateLimitCoreTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
 
     def tearDown(self):
         self.engine.dispose()
@@ -70,13 +61,8 @@ class RateLimitCoreTest(unittest.TestCase):
 
 class RateLimitMiddlewareTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
         set_rate_limit_session_factory(self.Session)
 
         self.settings = make_test_settings(
@@ -91,12 +77,7 @@ class RateLimitMiddlewareTest(unittest.TestCase):
         )
         override_settings(self.settings)
 
-        def override_get_db():
-            with self.Session() as session:
-                yield session
-
-        app.dependency_overrides[get_db] = override_get_db
-        self.client = TestClient(app)
+        self.client = make_api_client(app, self.Session)
 
     def tearDown(self):
         set_rate_limit_session_factory(None)
@@ -173,13 +154,8 @@ class RateLimitMiddlewareTest(unittest.TestCase):
 
 class TelegramRateLimitTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = create_test_engine()
+        self.Session = create_session_factory(self.engine)
         set_rate_limit_session_factory(self.Session)
         override_settings(
             make_test_settings(

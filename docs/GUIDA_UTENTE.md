@@ -127,6 +127,7 @@ python -m venv .venv
 # attiva il virtualenv, poi:
 pip install -r requirements.txt
 # per sviluppo/test: pip install -r requirements-dev.txt
+# poi dalla root del repo: python -m pytest   (suite backend isolata, senza DB/API reali)
 # configura .env e/o properties/config.env (parti da config.env.example)
 alembic upgrade head
 uvicorn src.app.main:app --reload
