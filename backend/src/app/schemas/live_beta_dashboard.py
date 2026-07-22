@@ -17,6 +17,18 @@ from backend.src.app.schemas.published_prediction import (
 from backend.src.app.schemas.telegram_analytics import TelegramBotStatsResponse
 
 
+LivePublicationEmptyReason = Literal[
+    "ok",
+    "table_unavailable",
+    "publication_disabled",
+    "public_model_unconfigured",
+    "public_model_invalid",
+    "pipeline_never_run",
+    "pipeline_run_no_qualified_plays",
+    "publication_errors",
+]
+
+
 class LiveBetaPipelineStatus(BaseModel):
     """Global update + import freshness for the live beta ops panel."""
 
@@ -44,6 +56,26 @@ class LiveBetaDataCompleteness(BaseModel):
     snapshots_observed: int = 0
     snapshots_publication: int = 0
     snapshots_closing: int = 0
+    tips_with_closing_snapshot: int = 0
+    tips_with_closing_snapshot_pct: float | None = None
+    closing_odds_status: Literal["available", "partial", "missing", "unknown"] = "unknown"
+    closing_odds_note: str | None = None
+
+
+class LiveBetaPublicationHealth(BaseModel):
+    """Operational diagnosis when the live tip registry is empty or partial."""
+
+    empty_reason: LivePublicationEmptyReason = "ok"
+    message: str
+    live_publication_enabled: bool = False
+    public_model_version: str | None = None
+    public_model_name: str | None = None
+    validation_started_at: datetime | None = None
+    last_run_publications_created: int | None = None
+    last_run_duplicates_skipped: int | None = None
+    last_run_excluded: int | None = None
+    last_run_candidates: int | None = None
+    last_run_publication_errors: list[str] = Field(default_factory=list)
 
 
 class LiveBetaRecentError(BaseModel):
@@ -84,6 +116,7 @@ class LiveBetaDashboardResponse(BaseModel):
     latest_only: bool = True
 
     pipeline: LiveBetaPipelineStatus
+    publication_health: LiveBetaPublicationHealth
     live_stats: PublishedLiveStatsSummary
     published_today: list[PublishedSettledTipRead]
     open_predictions: list[PublishedSettledTipRead]

@@ -24,6 +24,11 @@ from backend.src.app.models import Fixture
 from backend.src.app.services.betting_slips import get_daily_betting_slips
 from backend.src.app.services.import_state import get_import_status, record_fixture_import
 from backend.src.app.services.imports import purge_future_incomplete_fixtures
+from backend.src.app.services.live_publication_service import (
+    is_public_combination,
+    publish_official_plays_for_day,
+    resolve_public_model_config,
+)
 from backend.src.app.services.predictions import list_next_fixtures
 from backend.src.entity.global_update_run import GlobalUpdateRun, GlobalUpdateRunItem
 from backend.src.service.import_fixtures import run_daily_fixture_import
@@ -447,6 +452,24 @@ def _execute_global_update(run_id: int, days_forward: int, days_back_fixtures: i
             failed = 0
             skipped = 0
             total_slips = 0
+            live_publication_report: dict[str, Any] | None = None
+
+            public_cfg = resolve_public_model_config()
+            if public_cfg.warning:
+                run_warnings.append(public_cfg.warning)
+            if public_cfg.is_ready:
+                public_in_run = any(
+                    combo.model_version == public_cfg.model_version
+                    and combo.model_name == public_cfg.model_name
+                    for combo in combinations
+                )
+                if not public_in_run:
+                    run_warnings.append(
+                        "Live publication enabled but public model "
+                        f"{public_cfg.model_version}/{public_cfg.model_name} "
+                        "is not among enabled combinations for this run "
+                        "(missing artifact?). No tips published."
+                    )
 
             clear_model_cache()
 
@@ -476,6 +499,7 @@ def _execute_global_update(run_id: int, days_forward: int, days_back_fixtures: i
                 item_warnings: list[str] = []
                 predictions_count = 0
                 slips_count = 0
+                live_publication_summary: dict[str, Any] | None = None
 
                 try:
                     fixtures = upcoming_fixtures_by_version.get(combo.model_version, [])
@@ -531,6 +555,60 @@ def _execute_global_update(run_id: int, days_forward: int, days_back_fixtures: i
                         db.rollback()
                         item_warnings.append(f"betting_slips:{slip_exc}")
 
+                    # Live publication: only the configured public model combination.
+                    if is_public_combination(combo.model_version, combo.model_name):
+                        _update_run_phase(
+                            db,
+                            run,
+                            phase=f"{phase_label} · pubblicazione live",
+                            progress_pct=_combo_progress_pct(index, total_combos, 1, 1),
+                        )
+                        try:
+                            pub_report = publish_official_plays_for_day(
+                                db,
+                                slip_date=today,
+                                model_version=combo.model_version,
+                                model_name=combo.model_name,
+                            )
+                            live_publication_summary = pub_report.to_dict()
+                            live_publication_report = live_publication_summary
+                            if pub_report.config_warning:
+                                item_warnings.append(
+                                    f"live_publication:{pub_report.config_warning}"
+                                )
+                            if pub_report.publication_errors:
+                                for err in pub_report.publication_errors:
+                                    item_warnings.append(f"live_publication_error:{err}")
+                                    run_errors.append(
+                                        f"live_publication {combo.model_version}/"
+                                        f"{combo.model_name}: {err}"
+                                    )
+                            item_warnings.append(
+                                "live_publication:"
+                                f"created={pub_report.publications_created},"
+                                f"duplicates={pub_report.duplicates_skipped},"
+                                f"excluded={pub_report.predictions_excluded},"
+                                f"candidates={pub_report.candidates_evaluated}"
+                            )
+                        except Exception as pub_exc:
+                            # Visible failure — do not swallow silently.
+                            db.rollback()
+                            msg = f"live_publication_failed:{pub_exc}"
+                            item_warnings.append(msg)
+                            run_errors.append(
+                                f"{combo.model_version}/{combo.model_name}: {msg}"
+                            )
+                            live_publication_summary = {
+                                "config_status": "error",
+                                "error": str(pub_exc),
+                            }
+                            live_publication_report = live_publication_summary
+                            logger.exception(
+                                "Live publication failed for %s/%s",
+                                combo.model_version,
+                                combo.model_name,
+                            )
+
                     item.status = "completed"
                     completed += 1
                 except GlobalUpdateCancelled:
@@ -559,6 +637,11 @@ def _execute_global_update(run_id: int, days_forward: int, days_back_fixtures: i
                 item.duration_seconds = round(time.perf_counter() - item_start, 2)
                 item.predictions_generated = predictions_count
                 item.slips_generated = slips_count
+                if live_publication_summary is not None:
+                    item_warnings.append(
+                        "live_publication_summary:"
+                        + json.dumps(live_publication_summary, ensure_ascii=True)
+                    )
                 item.warnings_json = _json_dumps(item_warnings)
                 total_slips += slips_count
                 db.commit()
@@ -602,6 +685,13 @@ def _execute_global_update(run_id: int, days_forward: int, days_back_fixtures: i
                     "combinations_skipped": skipped,
                     "fixtures_processed": run.fixtures_processed,
                     "slips_generated": total_slips,
+                    "live_publication": live_publication_report
+                    or {
+                        "config_status": public_cfg.status,
+                        "config_warning": public_cfg.warning,
+                        "public_model_version": public_cfg.model_version,
+                        "public_model_name": public_cfg.model_name,
+                    },
                     "import_status": {
                         "next_fixtures_imported_today": import_status[
                             "next_fixtures_imported_today"

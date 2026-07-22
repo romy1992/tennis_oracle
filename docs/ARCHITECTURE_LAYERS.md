@@ -58,6 +58,7 @@ HTTP / bot / scheduler / jobs
 | `auth.py` | routes auth, deps, main | Admin JWT / bootstrap |
 | `predictions.py` | routes predictions, slips, SMVA, jobs, import_state | Liste fixture + stats pronostici |
 | `published_predictions.py` | routes published_predictions | Registro immutabile pubblicazioni (append-only) |
+| `live_publication_service.py` | global_update | Pubblica PLAY della combo pubblica nel tipbook live |
 | `live_betting_metrics.py` | published_live_stats | Formule pure tipbook live (hit rate, ROI/yield, drawdown, streak) |
 | `published_live_stats.py` | routes published_predictions `/stats`, live_beta_dashboard | KPI live dal ledger (separate da training/backtest e stats operative) |
 | `live_beta_dashboard.py` | routes live_beta_dashboard | Aggregato admin beta live (pipeline, tipbook, bot, completezza, errori) |

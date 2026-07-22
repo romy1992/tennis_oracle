@@ -981,6 +981,16 @@ export type LiveBetaPipelineStatus = {
   import_status: ImportStatusResponse;
 };
 
+export type LivePublicationEmptyReason =
+  | "ok"
+  | "table_unavailable"
+  | "publication_disabled"
+  | "public_model_unconfigured"
+  | "public_model_invalid"
+  | "pipeline_never_run"
+  | "pipeline_run_no_qualified_plays"
+  | "publication_errors";
+
 export type LiveBetaDataCompleteness = {
   tips_total: number;
   tips_with_odds: number;
@@ -996,6 +1006,24 @@ export type LiveBetaDataCompleteness = {
   snapshots_observed: number;
   snapshots_publication: number;
   snapshots_closing: number;
+  tips_with_closing_snapshot: number;
+  tips_with_closing_snapshot_pct: number | null;
+  closing_odds_status: "available" | "partial" | "missing" | "unknown";
+  closing_odds_note: string | null;
+};
+
+export type LiveBetaPublicationHealth = {
+  empty_reason: LivePublicationEmptyReason;
+  message: string;
+  live_publication_enabled: boolean;
+  public_model_version: string | null;
+  public_model_name: string | null;
+  validation_started_at: string | null;
+  last_run_publications_created: number | null;
+  last_run_duplicates_skipped: number | null;
+  last_run_excluded: number | null;
+  last_run_candidates: number | null;
+  last_run_publication_errors: string[];
 };
 
 export type LiveBetaRecentError = {
@@ -1024,6 +1052,7 @@ export type LiveBetaDashboardResponse = {
   odds_band: OddsBand | null;
   latest_only: boolean;
   pipeline: LiveBetaPipelineStatus;
+  publication_health: LiveBetaPublicationHealth;
   live_stats: PublishedLiveStatsSummary;
   published_today: PublishedSettledTip[];
   open_predictions: PublishedSettledTip[];

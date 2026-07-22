@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     rate_limit_telegram: int = 30
     rate_limit_telegram_expensive: int = 10
 
+    # Temporary public-model config for live tip publication (until ML-07).
+    # Default: automatic publication disabled. No silent fallback to another model.
+    live_publication_enabled: bool = False
+    public_model_version: str | None = None
+    public_model_name: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=(
             ROOT_DIR / "properties" / "config.env",

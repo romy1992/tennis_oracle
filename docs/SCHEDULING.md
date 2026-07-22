@@ -121,3 +121,9 @@ python3 -m backend.src.jobs.daily_pipeline --no-sync --prediction-model-version 
 # Solo generazione previsioni per fixture gia importate
 python3 -m backend.src.jobs.generate_upcoming_predictions --days-forward 10 --model-version v2
 ```
+
+## Closing odds (job futuro)
+
+L’import corrente cattura `opening`/`observed` e, a partita live, può etichettare come `closing` l’**ultimo** observed pre-kickoff (`seal_closing_from_last_prematch`). Non è un true closing di mercato affidabile senza polling frequente.
+
+**Job futuro consigliato:** cattura dedicata della quota nell’intervallo immediatamente precedente l’inizio partita (es. ogni 1–5 minuti nelle ultime 30–60 minuti), scrivendo `snapshot_type=closing` solo con `captured_at` pre-kickoff. Fino ad allora la dashboard segnala closing mancante/parziale senza inventare dati.

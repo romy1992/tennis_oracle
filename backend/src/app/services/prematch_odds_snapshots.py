@@ -299,7 +299,19 @@ def record_odds_payload(
     *,
     commit: bool = True,
 ) -> PrematchOddsSnapshotIngestResponse:
-    """Parse a Home/Away odds matrix and append per-bookmaker selections."""
+    """Parse a Home/Away odds matrix and append per-bookmaker selections.
+
+    When ``event_live`` indicates the match has started, do **not** append new
+    observed/opening rows (would be post-kickoff). Instead seal closing from the
+    last pre-match detection when available.
+    """
+    if _is_truthy_live(payload.event_live):
+        return seal_closing_from_last_prematch(
+            db,
+            event_key=payload.event_key,
+            commit=commit,
+        )
+
     when = (
         _truncate_to_second(_as_utc_naive(payload.captured_at))
         if payload.captured_at
@@ -517,6 +529,124 @@ def list_snapshots(
         limit=limit,
         offset=offset,
         items=[_to_read(row) for row in rows],
+    )
+
+
+def _is_truthy_live(event_live: Any) -> bool:
+    if event_live is True:
+        return True
+    if isinstance(event_live, (int, float)) and int(event_live) != 0:
+        return True
+    if isinstance(event_live, str):
+        return event_live.strip().lower() in {"1", "true", "yes", "live", "inprogress"}
+    return False
+
+
+def _kickoff_utc_naive(db: Session, event_key: int) -> datetime | None:
+    """Scheduled kickoff in UTC-naive (Europe/Rome local date/time → UTC)."""
+    from zoneinfo import ZoneInfo
+
+    rome = ZoneInfo("Europe/Rome")
+    next_row = db.scalar(select(NextFixture).where(NextFixture.event_key == event_key))
+    fixture = None if next_row is not None else db.scalar(
+        select(Fixture).where(Fixture.event_key == event_key)
+    )
+    row = next_row or fixture
+    if row is None or row.event_date is None:
+        return None
+    local_time = row.event_time or time(0, 0)
+    local_dt = datetime.combine(row.event_date, local_time, tzinfo=rome)
+    return local_dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def seal_closing_from_last_prematch(
+    db: Session,
+    *,
+    event_key: int,
+    kickoff_utc: datetime | None = None,
+    commit: bool = True,
+) -> PrematchOddsSnapshotIngestResponse:
+    """Promote the last *pre-match* opening/observed quote to ``closing``.
+
+    Does **not** invent odds. Copies the last stored pre-match detection
+    (``captured_at`` kept as the original pre-match timestamp). Skips when no
+    usable pre-match row exists. Never uses a quote captured after kickoff.
+    Idempotent for already-sealed (selection, bookmaker) pairs.
+
+    Note: without a dedicated pre-kickoff polling job, this is a best-effort
+    label on the last observed import — not a guaranteed true closing line.
+    """
+    kickoff = kickoff_utc or _kickoff_utc_naive(db, event_key)
+    prematch_types = ("opening", "observed")
+    rows = list(
+        db.scalars(
+            select(PrematchOddsSnapshot)
+            .where(
+                PrematchOddsSnapshot.event_key == event_key,
+                PrematchOddsSnapshot.snapshot_type.in_(prematch_types),
+            )
+            .order_by(
+                PrematchOddsSnapshot.captured_at.desc(),
+                PrematchOddsSnapshot.id.desc(),
+            )
+        ).all()
+    )
+
+    latest_by_key: dict[tuple[str, str], PrematchOddsSnapshot] = {}
+    for row in rows:
+        if kickoff is not None and _as_utc_naive(row.captured_at) > kickoff:
+            continue
+        key = (row.selection, row.bookmaker)
+        if key not in latest_by_key:
+            latest_by_key[key] = row
+
+    inserted_items: list[PrematchOddsSnapshotRead] = []
+    skipped = 0
+    for (selection, bookmaker), source_row in latest_by_key.items():
+        already = db.scalar(
+            select(PrematchOddsSnapshot.id)
+            .where(
+                PrematchOddsSnapshot.event_key == event_key,
+                PrematchOddsSnapshot.selection == selection,
+                PrematchOddsSnapshot.bookmaker == bookmaker,
+                PrematchOddsSnapshot.snapshot_type == "closing",
+            )
+            .limit(1)
+        )
+        if already is not None:
+            skipped += 1
+            continue
+        created = record_snapshot(
+            db,
+            PrematchOddsSnapshotCreate(
+                event_key=event_key,
+                selection=selection,
+                bookmaker=bookmaker,
+                odds=float(source_row.odds),
+                implied_probability=float(source_row.implied_probability),
+                margin=float(source_row.margin),
+                source="system",
+                snapshot_type="closing",
+                captured_at=_as_utc_naive(source_row.captured_at),
+                market_side=source_row.market_side,
+                player_1_name=source_row.player_1_name,
+                player_2_name=source_row.player_2_name,
+            ),
+            commit=False,
+        )
+        if created is None:
+            skipped += 1
+        else:
+            inserted_items.append(created)
+
+    if commit:
+        db.commit()
+
+    return PrematchOddsSnapshotIngestResponse(
+        event_key=event_key,
+        inserted=len(inserted_items),
+        skipped_duplicates=skipped,
+        items=inserted_items,
     )
 
 

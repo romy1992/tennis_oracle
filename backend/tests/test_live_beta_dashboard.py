@@ -192,6 +192,8 @@ def test_live_beta_dashboard_aggregates_sections(db_session):
     assert any(err.source == "global_update" for err in dashboard.recent_errors)
     assert any(err.source == "telegram" for err in dashboard.recent_errors)
     assert dashboard.bot_usage.total_events >= 1
+    assert dashboard.publication_health is not None
+    assert dashboard.data_completeness.closing_odds_note is not None
 
 
 def test_live_beta_dashboard_filters_surface_and_odds_band(db_session):
@@ -227,6 +229,7 @@ def test_live_beta_dashboard_api(client, auth_headers, db_session):
     assert "live_stats" in body
     assert "pipeline" in body
     assert "data_completeness" in body
+    assert "publication_health" in body
     assert "recent_errors" in body
     assert "bot_usage" in body
 

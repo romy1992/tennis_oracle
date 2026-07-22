@@ -530,7 +530,25 @@ export const liveBetaDashboard: LiveBetaDashboardResponse = {
     snapshots_opening: 2,
     snapshots_observed: 1,
     snapshots_publication: 1,
-    snapshots_closing: 0
+    snapshots_closing: 0,
+    tips_with_closing_snapshot: 0,
+    tips_with_closing_snapshot_pct: 0,
+    closing_odds_status: "missing",
+    closing_odds_note:
+      "Closing odds: senza un job dedicato di cattura pre-kickoff frequente, il closing è best-effort."
+  },
+  publication_health: {
+    empty_reason: "ok",
+    message: "Registro live operativo.",
+    live_publication_enabled: true,
+    public_model_version: "v3",
+    public_model_name: "logistic_regression",
+    validation_started_at: `${TODAY}T08:00:00`,
+    last_run_publications_created: 2,
+    last_run_duplicates_skipped: 0,
+    last_run_excluded: 1,
+    last_run_candidates: 5,
+    last_run_publication_errors: []
   },
   recent_errors: [
     {

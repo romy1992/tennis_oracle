@@ -147,6 +147,16 @@ TELEGRAM_SLIP_COUNT=9
 TELEGRAM_MIN_EDGE_PERCENT=2.0
 ```
 
+Pubblicazione live nel registro `PublishedPrediction` (temporanea fino a ML-07; **default OFF**):
+
+```env
+LIVE_PUBLICATION_ENABLED=false
+PUBLIC_MODEL_VERSION=
+PUBLIC_MODEL_NAME=
+```
+
+Prima di abilitare: applicare migrazioni fino a `0015`, impostare esplicitamente versione/nome pubblici (es. `v3` / `logistic_regression`, allineati a ciò che mostri in produzione/bot), verificare un global-update e il report `summary.live_publication`. Nessun fallback silenzioso ad un’altra combo.
+
 `TELEGRAM_SERVICE_API_KEY` deve coincidere con `SERVICE_API_KEY` quando quest’ultima è valorizzata (header `X-Service-Token`). Per ruotare: imposta la nuova chiave in `SERVICE_API_KEY`, lascia la vecchia in `SERVICE_API_KEY_PREVIOUS`, aggiorna `TELEGRAM_SERVICE_API_KEY` sul bot, poi rimuovi `SERVICE_API_KEY_PREVIOUS`.
 
 Se lo schema esiste già senza Alembic: `alembic stamp head`.
@@ -276,7 +286,7 @@ Route definite in `matches.py`, `players.py`, `tournaments.py`, `ml.py` — **no
 
 #### `app/core/config.py` — `Settings`
 
-Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`).  
+Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`), pubblicazione live temporanea fino a ML-07 (`live_publication_enabled`, `public_model_version`, `public_model_name`; default pubblicazione disabilitata).  
 `get_settings()` — settings cacheati; `set_settings_override()` per test/middleware.
 
 #### `app/core/security.py`
@@ -418,7 +428,26 @@ Aggregato admin per la beta live: riusa pipeline (`global_update` + `import_stat
 
 | Funzione | Ruolo |
 |----------|-------|
-| `compute_live_beta_dashboard` | Risposta unica per `GET /api/live-beta-dashboard` |
+| `compute_live_beta_dashboard` | Risposta unica per `GET /api/live-beta-dashboard` (include `publication_health` diagnostico e copertura closing) |
+
+#### `app/services/live_publication_service.py`
+
+Pubblica nel registro immutabile solo le giocate ufficiali **PLAY** della combo pubblica (env), riusando `build_candidate_pool` e `publish_prediction`. Idempotente su `(event_key, selection, model_version, model_name, publication_source)` per `content_version=1`.
+
+| Funzione | Ruolo |
+|---|---|
+| `resolve_public_model_config` | Valida `LIVE_PUBLICATION_ENABLED` / `PUBLIC_MODEL_*` senza fallback silenzioso |
+| `publish_official_plays_for_day` | Filtra PLAY → `PublishedPrediction` + snapshot `publication` |
+| `find_existing_live_publication` | Dedup pre-insert |
+
+Convenzione bookmaker snapshot di pubblicazione senza book reale: `publication`.
+
+#### `app/services/prematch_odds_snapshots.py` (closing)
+
+| Funzione | Ruolo |
+|---|---|
+| `seal_closing_from_last_prematch` | Etichetta come `closing` l’ultimo opening/observed pre-kickoff (non inventa quote) |
+| `record_odds_payload` | Se `event_live` → non scrive observed post-inizio; tenta seal closing |
 
 **Formule e convenzioni (tipbook live):**
 
@@ -495,7 +524,7 @@ Ledger append-only delle quote pre-match (non sostituisce il JSON su `Fixture`/`
 | `reconcile_orphaned_runs` | Marca run zombie all’avvio app |
 | `start_global_update` | Crea run e thread `_execute_global_update` |
 | `cancel_global_update` | Richiesta cancel cooperativa |
-| `_execute_global_update` | Import fixtures → next → predict tutte le combo → slip |
+| `_execute_global_update` | Import fixtures → next → predict tutte le combo → slip → **pubblicazione live** (solo combo pubblica se abilitata) |
 | `build_run_report` | Report strutturato della run |
 | `get_models_versions_results` | Esito per modello/versione su una data |
 | `get_run_by_id` / `get_latest_run` / `get_active_run` | Lettura stato |
@@ -823,7 +852,7 @@ Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
 
-Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot`.
+Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency`.
 
 ```bash
 cd backend
