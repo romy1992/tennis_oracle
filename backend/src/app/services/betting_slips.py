@@ -43,8 +43,10 @@ from backend.src.app.schemas.betting_slips import (
 from backend.src.app.services.match_lifecycle import (
     MatchLifecycleStatus,
     classify_match_lifecycle,
-    is_void_for_betting,
     match_lifecycle_label,
+    resolve_slip_status_from_picks,
+    settle_simulated_bet,
+    slip_profit_units,
 )
 from backend.src.app.services.predictions import COMPLETED_WINNERS, _predictions_by_event_key, _resolve_model_name
 from backend.src.app.services.single_match_value import (
@@ -932,26 +934,18 @@ def _resolve_pick_status(
     *,
     match_lifecycle_status: MatchLifecycleStatus | None = None,
 ) -> tuple[PickStatus, bool | None]:
-    if actual_winner in COMPLETED_WINNERS:
-        is_correct = pick.predicted_winner == actual_winner
-        return ("won" if is_correct else "lost"), is_correct
-    if match_lifecycle_status is not None and is_void_for_betting(
-        match_lifecycle_status,
-        actual_winner,
-    ):
-        return "void", None
-    return "pending", None
+    lifecycle = match_lifecycle_status or "upcoming"
+    settlement = settle_simulated_bet(
+        lifecycle=lifecycle,
+        predicted_winner=pick.predicted_winner,
+        actual_winner=actual_winner,
+        market_odds=pick.odds,
+    )
+    return settlement.outcome, settlement.is_correct
 
 
 def _resolve_slip_status(pick_statuses: list[PickStatus]) -> SlipStatus:
-    active = [status for status in pick_statuses if status != "void"]
-    if not active:
-        return "void"
-    if any(status == "lost" for status in active):
-        return "lost"
-    if all(status == "won" for status in active):
-        return "won"
-    return "pending"
+    return resolve_slip_status_from_picks(pick_statuses)
 
 
 def _effective_combined_odds(picks: list[BettingSlipPickRead]) -> float | None:
@@ -1393,13 +1387,16 @@ def _pct(numerator: int, denominator: int) -> float | None:
 
 
 def _slip_profit_units(slip: BettingSlipRead, stake: float) -> float:
-    if slip.slip_status == "won":
-        odds = slip.effective_combined_odds if slip.effective_combined_odds is not None else slip.combined_odds
-        return stake * odds - stake
-    if slip.slip_status == "lost":
-        return -stake
-    # pending and void: stake refund / neutral
-    return 0.0
+    odds = (
+        slip.effective_combined_odds
+        if slip.effective_combined_odds is not None
+        else slip.combined_odds
+    )
+    return slip_profit_units(
+        slip_status=slip.slip_status,
+        stake=stake,
+        effective_combined_odds=odds,
+    )
 
 
 def compute_betting_slip_stats(

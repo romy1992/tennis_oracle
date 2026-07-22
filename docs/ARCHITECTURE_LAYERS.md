@@ -57,9 +57,14 @@ HTTP / bot / scheduler / jobs
 |--------|----------|-------|
 | `auth.py` | routes auth, deps, main | Admin JWT / bootstrap |
 | `predictions.py` | routes predictions, slips, SMVA, jobs, import_state | Liste fixture + stats pronostici |
+| `published_predictions.py` | routes published_predictions | Registro immutabile pubblicazioni (append-only) |
+| `live_betting_metrics.py` | published_live_stats | Formule pure tipbook live (hit rate, ROI/yield, drawdown, streak) |
+| `published_live_stats.py` | routes published_predictions `/stats`, live_beta_dashboard | KPI live dal ledger (separate da training/backtest e stats operative) |
+| `live_beta_dashboard.py` | routes live_beta_dashboard | Aggregato admin beta live (pipeline, tipbook, bot, completezza, errori) |
+| `prematch_odds_snapshots.py` | routes prematch_odds_snapshots, import_next_fixtures | Storico append-only quote pre-match |
 | `betting_slips.py` | routes betting_slips, global_update | Schedine |
 | `single_match_value.py` | routes SMVA, betting_slips | Value bet |
-| `match_lifecycle.py` | predictions, betting_slips | Classificazione esito / void |
+| `match_lifecycle.py` | predictions, betting_slips, published_predictions, published_live_stats, telegram | Classificazione stati + settlement idempotente (singole/schedine/void) |
 | `global_update.py` | routes, scheduler, main | Aggiornamento globale |
 | `imports.py` / `import_state.py` | routes imports, global_update, slips | Orchestrazione refresh + stato |
 | `telegram_analytics.py` | routes telegram, bot tracking | Analytics bot |
@@ -75,7 +80,7 @@ HTTP / bot / scheduler / jobs
 
 ### `entity/` (ORM di dominio — attivo)
 
-Tutte le tabelle operative: `Fixture`, `NextFixture`, `MatchPrediction`, slips, `GlobalUpdateRun*`, `AdminUser`, `TelegramBotEvent`, `RateLimitBucket`, ecc. Fonte di verità ORM.
+Tutte le tabelle operative: `Fixture`, `NextFixture`, `MatchPrediction`, slips, `GlobalUpdateRun*`, `AdminUser`, `TelegramBotEvent`, `RateLimitBucket`, `PublishedPrediction`, `PrematchOddsSnapshot`, ecc. Fonte di verità ORM.
 
 ### `repository/` (attivo solo per import)
 

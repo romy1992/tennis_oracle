@@ -12,6 +12,8 @@ from backend.src.entity.global_update_run import GlobalUpdateRun, GlobalUpdateRu
 from backend.src.entity.match_prediction import MatchPrediction
 from backend.src.entity.next_fixture import NextFixture
 from backend.src.entity.player import Player
+from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
+from backend.src.entity.published_prediction import PublishedPrediction
 from backend.src.entity.rate_limit_bucket import RateLimitBucket
 from backend.src.entity.standing import Standing
 from backend.src.entity.telegram_bot_event import TelegramBotEvent
@@ -24,6 +26,8 @@ __all__ = [
     "Fixture",
     "NextFixture",
     "MatchPrediction",
+    "PrematchOddsSnapshot",
+    "PublishedPrediction",
     "BettingSlip",
     "BettingSlipDay",
     "BettingSlipPick",

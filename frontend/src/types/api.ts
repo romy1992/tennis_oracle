@@ -835,3 +835,213 @@ export type TelegramBotStatsParams = {
   to?: string;
   days?: number;
 };
+
+export type PublicationSource =
+  | "admin_api"
+  | "telegram"
+  | "global_update"
+  | "system"
+  | "manual";
+
+export type PublishedPrediction = {
+  id: number;
+  publication_id: string;
+  content_version: number;
+  previous_version_id: number | null;
+  event_key: number;
+  selection: string;
+  model_version: string;
+  model_name: string;
+  probability: number;
+  odds: number | null;
+  void_odds: number | null;
+  edge: number | null;
+  unit_stake: number;
+  published_at: string;
+  publication_source: PublicationSource | string;
+  initial_status: string;
+  content_hash: string;
+  player_1_name: string | null;
+  player_2_name: string | null;
+  tournament_name: string | null;
+  event_date: string | null;
+  event_time: string | null;
+  match_prediction_id: number | null;
+  betting_slip_pick_id: number | null;
+  is_latest: boolean;
+  match_started: boolean;
+};
+
+export type PublishedPredictionListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: PublishedPrediction[];
+};
+
+export type PublishedPredictionVersionChainResponse = {
+  publication_id: string;
+  items: PublishedPrediction[];
+};
+
+export type PublishedPredictionsParams = {
+  from?: string;
+  to?: string;
+  event_key?: number;
+  model_version?: MLModelVersion | string;
+  model_name?: string;
+  publication_source?: string;
+  latest_only?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type PublishedLiveStatsBucket = {
+  key: string;
+  label: string;
+  predictions_total: number;
+  closed: number;
+  open: number;
+  void: number;
+  won: number;
+  lost: number;
+  hit_rate_pct: number | null;
+  stake_total: number;
+  stake_settled: number;
+  profit: number;
+  roi_pct: number | null;
+  yield_pct: number | null;
+  avg_odds: number | null;
+};
+
+export type PublishedLiveStatsSummary = {
+  source: "published_prediction";
+  latest_only: boolean;
+  from_date: string | null;
+  to_date: string | null;
+  event_date_from: string | null;
+  event_date_to: string | null;
+  model_version: string | null;
+  model_name: string | null;
+  publication_source: string | null;
+  tournament_name: string | null;
+  surface: string | null;
+  odds_band: OddsBand | null;
+  predictions_total: number;
+  closed: number;
+  open: number;
+  void: number;
+  won: number;
+  lost: number;
+  hit_rate_pct: number | null;
+  stake_total: number;
+  stake_settled: number;
+  profit: number;
+  roi_pct: number | null;
+  yield_pct: number | null;
+  avg_odds: number | null;
+  max_drawdown: number;
+  max_winning_streak: number;
+  max_losing_streak: number;
+  by_model: PublishedLiveStatsBucket[];
+  by_odds: PublishedLiveStatsBucket[];
+  by_edge: PublishedLiveStatsBucket[];
+  by_surface: PublishedLiveStatsBucket[];
+  by_period: PublishedLiveStatsBucket[];
+};
+
+export type OddsBand = "lt_1_50" | "1_50_2_00" | "2_00_3_00" | "gte_3_00" | "missing";
+
+export type PublishedSettledTip = PublishedPrediction & {
+  outcome: "pending" | "won" | "lost" | "void";
+  profit: number;
+  stake_settled: number;
+  surface: string | null;
+};
+
+export type PublishedLiveStatsParams = {
+  from?: string;
+  to?: string;
+  event_date_from?: string;
+  event_date_to?: string;
+  model_version?: MLModelVersion | string;
+  model_name?: string;
+  publication_source?: string;
+  tournament_name?: string;
+  surface?: string;
+  odds_band?: OddsBand | string;
+  latest_only?: boolean;
+};
+
+export type LiveBetaPipelineStatus = {
+  mode: "live";
+  active_run: GlobalUpdateRunRead | null;
+  latest_run: GlobalUpdateRunRead | null;
+  last_updated_at: string | null;
+  import_status: ImportStatusResponse;
+};
+
+export type LiveBetaDataCompleteness = {
+  tips_total: number;
+  tips_with_odds: number;
+  tips_with_odds_pct: number | null;
+  tips_with_event_date: number;
+  tips_with_event_date_pct: number | null;
+  tips_with_match_context: number;
+  tips_with_match_context_pct: number | null;
+  distinct_event_keys: number;
+  event_keys_with_odds_snapshot: number;
+  odds_snapshot_coverage_pct: number | null;
+  snapshots_opening: number;
+  snapshots_observed: number;
+  snapshots_publication: number;
+  snapshots_closing: number;
+};
+
+export type LiveBetaRecentError = {
+  source: "global_update" | "telegram";
+  created_at: string | null;
+  message: string;
+  detail: string | null;
+};
+
+export type LiveBetaBacktestNote = {
+  mode: "backtest";
+  included_in_live_kpis: boolean;
+  message: string;
+  related_paths: string[];
+};
+
+export type LiveBetaDashboardResponse = {
+  mode: "live";
+  generated_at: string;
+  from_date: string | null;
+  to_date: string | null;
+  model_version: string | null;
+  model_name: string | null;
+  tournament_name: string | null;
+  surface: string | null;
+  odds_band: OddsBand | null;
+  latest_only: boolean;
+  pipeline: LiveBetaPipelineStatus;
+  live_stats: PublishedLiveStatsSummary;
+  published_today: PublishedSettledTip[];
+  open_predictions: PublishedSettledTip[];
+  closed_predictions: PublishedSettledTip[];
+  bot_usage: TelegramBotStatsResponse;
+  data_completeness: LiveBetaDataCompleteness;
+  recent_errors: LiveBetaRecentError[];
+  backtest: LiveBetaBacktestNote;
+};
+
+export type LiveBetaDashboardParams = {
+  from?: string;
+  to?: string;
+  model_version?: MLModelVersion | string;
+  model_name?: string;
+  tournament_name?: string;
+  surface?: string;
+  odds_band?: OddsBand | string;
+  latest_only?: boolean;
+  tip_limit?: number;
+};

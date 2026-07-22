@@ -10,7 +10,6 @@ from backend.src.app.ml.datasets.odds_builder import (
     FixtureOddsRecord,
     MatchWinnerOddsAverage,
     average_match_winner_odds_from_record,
-    profit_for_unit_stake,
 )
 from backend.src.app.ml.model_selection import select_best_model
 from backend.src.app.ml.model_versioning import ModelVersion
@@ -26,13 +25,14 @@ from backend.src.app.schemas.prediction import (
     PredictionSummaryResponse,
 )
 from backend.src.app.services.match_lifecycle import (
+    COMPLETED_WINNERS,
     classify_match_lifecycle,
     match_lifecycle_label,
+    settle_simulated_bet,
 )
 
 FixturePredictionStatus = Literal["upcoming", "played", "all"]
 PredictionOutcome = Literal["all", "won", "lost"]
-COMPLETED_WINNERS = ("First Player", "Second Player")
 UPCOMING_DAYS_FORWARD = 10
 PLAYED_DAYS_BACK = 30
 
@@ -908,9 +908,15 @@ def _odds_stats_payload(
     actual_winners: dict[int, str | None],
     odds_by_key: dict[int, MatchWinnerOddsAverage | None],
 ) -> PredictionOddsStats:
+    """Unit-stake P/L for resolved singles only (void/cancelled never enter here).
+
+    Callers pass predictions that already have a bettable winner; cancelled /
+    non-played matches are excluded so they cannot count as losses.
+    """
     predicted_winner_odds: list[float] = []
     winning_odds: list[float] = []
     profits: list[float] = []
+    stake_total = 0.0
 
     for prediction in resolved_predictions:
         odds = _predicted_winner_odds(
@@ -920,11 +926,21 @@ def _odds_stats_payload(
         if odds is None:
             continue
 
-        is_correct = _is_correct(prediction, actual_winners)
+        actual_winner = _actual_winner(prediction, actual_winners)
+        settlement = settle_simulated_bet(
+            lifecycle="completed",
+            predicted_winner=prediction.predicted_winner,
+            actual_winner=actual_winner,
+            market_odds=odds,
+        )
+        if not settlement.include_in_roi:
+            continue
+
         predicted_winner_odds.append(odds)
-        if is_correct:
+        if settlement.is_correct:
             winning_odds.append(odds)
-        profits.append(profit_for_unit_stake(odds, won=is_correct))
+        profits.append(settlement.profit_units)
+        stake_total += settlement.stake_units
 
     profit = sum(profits)
     stake_count = len(profits)
@@ -933,7 +949,7 @@ def _odds_stats_payload(
         avg_predicted_winner_odds=_average(predicted_winner_odds),
         avg_winning_odds=_average(winning_odds),
         theoretical_profit_units=profit,
-        theoretical_roi_pct=(profit / stake_count * 100.0) if stake_count else None,
+        theoretical_roi_pct=(profit / stake_total * 100.0) if stake_total else None,
     )
 
 

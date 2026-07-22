@@ -34,7 +34,10 @@ const apiMocks = vi.hoisted(() => ({
   getPredictionSummary: vi.fn(),
   getDailyPredictionStats: vi.fn(),
   getTelegramBotStats: vi.fn(),
-  getTelegramBotEvents: vi.fn()
+  getTelegramBotEvents: vi.fn(),
+  getPublishedPredictions: vi.fn(),
+  getPublishedPredictionVersions: vi.fn(),
+  getPublishedLiveStats: vi.fn()
 }));
 
 vi.mock("../services/apiClient", async () => {

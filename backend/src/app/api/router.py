@@ -5,7 +5,10 @@ from backend.src.app.api.routes import (
     betting_slips,
     global_update,
     imports,
+    live_beta_dashboard,
     predictions,
+    prematch_odds_snapshots,
+    published_predictions,
     single_match_value,
     telegram,
 )
@@ -21,3 +24,6 @@ api_router.include_router(single_match_value.router)
 api_router.include_router(global_update.router)
 api_router.include_router(global_update.results_router)
 api_router.include_router(telegram.router)
+api_router.include_router(published_predictions.router)
+api_router.include_router(prematch_odds_snapshots.router)
+api_router.include_router(live_beta_dashboard.router)

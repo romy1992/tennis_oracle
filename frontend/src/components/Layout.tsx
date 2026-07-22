@@ -3,13 +3,33 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { GlobalUpdateControls } from "./GlobalUpdateControls";
 
-const navItems = [
-  { to: "/predictions", label: "Partite" },
-  { to: "/betting-slips", label: "Consiglio schedina" },
-  { to: "/betting-slip-model-stats", label: "Statistiche schedine" },
-  { to: "/prediction-stats", label: "Statistiche previsioni" },
-  { to: "/global-update-report", label: "Report aggiornamento" },
-  { to: "/telegram-bot", label: "Bot Telegram" }
+const navSections: Array<{
+  label?: string;
+  items: Array<{ to: string; label: string }>;
+}> = [
+  {
+    items: [
+      { to: "/live-beta-dashboard", label: "Dashboard beta live" },
+      { to: "/predictions", label: "Partite" },
+      { to: "/betting-slips", label: "Consiglio schedina" }
+    ]
+  },
+  {
+    label: "LIVE",
+    items: [
+      { to: "/published-predictions", label: "Storico pubblicazioni" },
+      { to: "/published-live-stats", label: "Statistiche live" },
+      { to: "/telegram-bot", label: "Bot Telegram" },
+      { to: "/global-update-report", label: "Report aggiornamento" }
+    ]
+  },
+  {
+    label: "BACKTEST / OPS",
+    items: [
+      { to: "/prediction-stats", label: "Statistiche previsioni" },
+      { to: "/betting-slip-model-stats", label: "Statistiche schedine" }
+    ]
+  }
 ];
 
 export function Layout() {
@@ -24,14 +44,21 @@ export function Layout() {
         </div>
         <GlobalUpdateControls />
         <nav>
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) => (isActive ? "active" : undefined)}
-            >
-              {item.label}
-            </NavLink>
+          {navSections.map((section) => (
+            <div key={section.label || "main"} className="nav-section">
+              {section.label ? (
+                <div className="nav-section-label">{section.label}</div>
+              ) : null}
+              {section.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) => (isActive ? "active" : undefined)}
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar-auth">

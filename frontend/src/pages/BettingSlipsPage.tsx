@@ -119,6 +119,8 @@ function buildSlipClipboard(slip: BettingSlip, stake: number) {
       pick.pick_status === "void"
         ? ` [ANNULLATA: ${pick.void_reason ?? pick.match_lifecycle_label ?? "void"}]`
         : pick.match_lifecycle_status &&
+            pick.match_lifecycle_status !== "upcoming" &&
+            pick.match_lifecycle_status !== "completed" &&
             pick.match_lifecycle_status !== "scheduled" &&
             pick.match_lifecycle_status !== "finished"
           ? ` [${pick.match_lifecycle_label}]`
@@ -367,7 +369,9 @@ function SlipCard({
                   {pick.player_1 ?? "?"} vs {pick.player_2 ?? "?"}
                   {pick.match_lifecycle_label &&
                   pick.match_lifecycle_status &&
-                  !["scheduled", "finished"].includes(pick.match_lifecycle_status) ? (
+                  !["upcoming", "completed", "scheduled", "finished"].includes(
+                    pick.match_lifecycle_status,
+                  ) ? (
                     <small className={`match-lifecycle-chip ${pick.match_lifecycle_status}`}>
                       {pick.match_lifecycle_label}
                     </small>

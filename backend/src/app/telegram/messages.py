@@ -329,6 +329,9 @@ def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None =
             lifecycle_note = f" · {pick.get('void_reason') or pick.get('match_lifecycle_label') or 'Annullata'}"
         elif pick.get("match_lifecycle_label") and pick.get("match_lifecycle_status") not in {
             None,
+            "upcoming",
+            "completed",
+            # legacy aliases still accepted if an old payload is cached
             "scheduled",
             "finished",
         }:
