@@ -11,10 +11,12 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Time,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -30,6 +32,18 @@ class PublishedPrediction(Base):
             "publication_id",
             "content_version",
             name="uq_published_prediction_publication_version",
+        ),
+        # Idempotent initial publish for pipeline re-runs (not corrections).
+        Index(
+            "uq_published_prediction_live_identity_v1",
+            "event_key",
+            "selection",
+            "model_version",
+            "model_name",
+            "publication_source",
+            unique=True,
+            sqlite_where=text("content_version = 1"),
+            postgresql_where=text("content_version = 1"),
         ),
     )
 

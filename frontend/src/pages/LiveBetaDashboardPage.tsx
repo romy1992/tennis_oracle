@@ -184,6 +184,8 @@ export function LiveBetaDashboardPage() {
 
   const stats = data.live_stats;
   const pipelineRun = data.pipeline.active_run || data.pipeline.latest_run;
+  const health = data.publication_health;
+  const showRegistryEmptyBanner = health.empty_reason !== "ok";
 
   return (
     <section className="page">
@@ -200,6 +202,79 @@ export function LiveBetaDashboardPage() {
           </p>
         </div>
       </header>
+
+      {showRegistryEmptyBanner ? (
+        <article className="panel mode-panel mode-panel-live" data-testid="live-empty-state">
+          <div className="panel-header">
+            <h3>Stato registro live</h3>
+            <span className="pill">{health.empty_reason}</span>
+          </div>
+          <EmptyState title="Registro senza tip pubblicati" message={health.message} />
+          <div className="metrics-grid">
+            <MetricCard
+              label="Pubblicazione automatica"
+              value={health.live_publication_enabled ? "Abilitata" : "Disabilitata"}
+            />
+            <MetricCard
+              label="Modello pubblico"
+              value={
+                health.public_model_version && health.public_model_name
+                  ? `${health.public_model_version} / ${health.public_model_name}`
+                  : "Non configurato"
+              }
+            />
+            <MetricCard
+              label="Inizio validazione live"
+              value={formatDateTime(health.validation_started_at)}
+            />
+            <MetricCard
+              label="Pubblicazioni ultimo run"
+              value={
+                health.last_run_publications_created == null
+                  ? "-"
+                  : String(health.last_run_publications_created)
+              }
+            />
+          </div>
+        </article>
+      ) : (
+        <article className="panel mode-panel mode-panel-live">
+          <div className="panel-header">
+            <h3>Validazione live</h3>
+            <span className="pill pill-ok">attiva</span>
+          </div>
+          <div className="metrics-grid">
+            <MetricCard
+              label="Inizio validazione live"
+              value={formatDateTime(health.validation_started_at)}
+            />
+            <MetricCard
+              label="Modello pubblico"
+              value={
+                health.public_model_version && health.public_model_name
+                  ? `${health.public_model_version} / ${health.public_model_name}`
+                  : "-"
+              }
+            />
+            <MetricCard
+              label="Pubblicazioni ultimo run"
+              value={
+                health.last_run_publications_created == null
+                  ? "-"
+                  : String(health.last_run_publications_created)
+              }
+            />
+            <MetricCard
+              label="Duplicati ignorati (ultimo run)"
+              value={
+                health.last_run_duplicates_skipped == null
+                  ? "-"
+                  : String(health.last_run_duplicates_skipped)
+              }
+            />
+          </div>
+        </article>
+      )}
 
       <div className="filters-grid">
         <label>
@@ -373,8 +448,16 @@ export function LiveBetaDashboardPage() {
           Snapshot: opening {data.data_completeness.snapshots_opening}, observed{" "}
           {data.data_completeness.snapshots_observed}, publication{" "}
           {data.data_completeness.snapshots_publication}, closing{" "}
-          {data.data_completeness.snapshots_closing}.
+          {data.data_completeness.snapshots_closing}. Closing:{" "}
+          {data.data_completeness.closing_odds_status}
+          {data.data_completeness.tips_with_closing_snapshot_pct != null
+            ? ` (${formatPct(data.data_completeness.tips_with_closing_snapshot_pct)} tip)`
+            : ""}
+          .
         </p>
+        {data.data_completeness.closing_odds_note ? (
+          <p className="note">{data.data_completeness.closing_odds_note}</p>
+        ) : null}
       </article>
 
       <article className="panel">

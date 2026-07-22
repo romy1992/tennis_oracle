@@ -100,7 +100,9 @@ La **quota void** (break-even del modello) non cambia con lo stato partita: è s
 
 La pagina **Statistiche live** misura solo i tip salvati nello storico pubblicazioni (non le previsioni operative, non le schedine, non i report di training).
 
-La **Dashboard beta live** riunisce in un’unica vista lo stato della pipeline, i tip di oggi, aperti/chiusi, gli stessi KPI live (incluso drawdown), l’uso del bot, gli errori recenti e indicatori di completezza dati. Nel menu e in pagina le aree **LIVE** e **BACKTEST** restano distinte.
+La **Dashboard beta live** riunisce in un’unica vista lo stato della pipeline, i tip di oggi, aperti/chiusi, gli stessi KPI live (incluso drawdown), l’uso del bot, gli errori recenti e indicatori di completezza dati. Se il registro è vuoto, mostra una diagnosi operativa (pubblicazione disabilitata, modello pubblico non configurato, pipeline mai eseguita, nessuna giocata qualificata, errori di pubblicazione). Nel menu e in pagina le aree **LIVE** e **BACKTEST** restano distinte.
+
+Le pubblicazioni automatiche nel registro live avvengono solo per la combinazione modello/versione configurata come pubblica e solo per giocate con decisione **PLAY** (stessi criteri value delle schedine). Di default la scrittura automatica è disabilitata.
 
 In sintesi:
 
