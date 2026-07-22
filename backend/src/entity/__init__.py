@@ -1,3 +1,9 @@
+"""SQLAlchemy ORM entities for the operational domain (canonical table models).
+
+``app.models`` re-exports many of these for convenience and adds ML-only models.
+Prefer importing domain tables from this package in new code.
+"""
+
 from backend.src.entity.admin_user import AdminUser
 from backend.src.entity.betting_slip import BettingSlip, BettingSlipDay, BettingSlipPick
 from backend.src.entity.event import Event

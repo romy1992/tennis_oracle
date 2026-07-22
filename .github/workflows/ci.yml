@@ -1,0 +1,111 @@
+# Continuous integration for tennis_oracle.
+# Uses only fictional credentials — never real secrets.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Fictional CI credentials only (not for production).
+  ADMIN_JWT_SECRET: ci-fake-jwt-secret-not-for-production
+  ADMIN_USERNAME: ci_admin
+  ADMIN_PASSWORD: ci-fake-password-not-real
+  API_TENNIS_KEY: ci-fake-api-tennis-key-not-real
+  API_TENNIS_BASE: https://example.test/tennis/
+  SERVICE_API_KEY: ""
+  SERVICE_API_KEY_PREVIOUS: ""
+  ALLOW_UNAUTHENTICATED_SERVICE_READS: "true"
+  TELEGRAM_BOT_TOKEN: ""
+  TELEGRAM_SERVICE_API_KEY: ""
+  SYNC_CLOUD: "false"
+  RATE_LIMIT_ENABLED: "false"
+  GLOBAL_UPDATE_CRON_ENABLED: "false"
+  APP_ENV: ci
+  DEBUG: "false"
+
+jobs:
+  backend:
+    name: Backend (migrations + pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tennis_oracle_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tennis_oracle_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tennis_oracle_ci
+      DATABASE_SOURCE_URL: postgresql://postgres:postgres@localhost:5432/tennis_oracle_ci
+      DATABASE_TARGET_URL: postgresql://postgres:postgres@localhost:5432/tennis_oracle_ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Apply Alembic migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Run backend tests
+        # Suite uses SQLite in-memory via conftest; Postgres above validates migrations.
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend (test + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
