@@ -1,5 +1,7 @@
 # tennis_oracle — documentazione tecnica
 
+[![CI](https://github.com/romy1992/tennis_oracle/actions/workflows/ci.yml/badge.svg)](https://github.com/romy1992/tennis_oracle/actions/workflows/ci.yml)
+
 Monorepo **backend FastAPI** (`backend/`) + **frontend React** (`frontend/`).
 
 Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espone API REST, genera previsioni ML, schedine e sincronizza opzionalmente verso un DB target.
@@ -9,6 +11,7 @@ Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espon
 | **Questo file** | Sviluppatori: architettura, classi, metodi, API, ML |
 | [docs/GUIDA_UTENTE.md](docs/GUIDA_UTENTE.md) | Utente medio: cosa fa il prodotto e come usarlo |
 | [docs/SCHEDULING.md](docs/SCHEDULING.md) | Job giornaliero, cron, sync cloud |
+| [docs/ARCHITECTURE_LAYERS.md](docs/ARCHITECTURE_LAYERS.md) | Layer `app/services` vs `service` vs `repository` vs `entity`; piano migrazione |
 
 > **Manutenzione docs**: ad ogni modifica rilevante di codice, aggiornare questo README e/o la guida utente (regola Cursor `.cursor/rules/keep-docs-updated.mdc`).
 
@@ -25,6 +28,7 @@ Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espon
 7. [Import, job e sync](#7-import-job-e-sync)
 8. [Bot Telegram](#8-bot-telegram)
 9. [Schema dati](#9-schema-dati)
+10. [CI (GitHub Actions)](#10-ci-github-actions)
 
 ---
 
@@ -50,10 +54,12 @@ Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espon
 **Layer backend (ordine tipico della richiesta):**
 
 1. `api/routes/*` — endpoint HTTP
-2. `app/services/*` — logica applicativa
-3. `entity/*` + `app/models/*` — ORM SQLAlchemy
-4. `repository/*` — CRUD legacy usato dagli import
+2. `app/services/*` — logica applicativa (**canonico** per nuovo codice di dominio)
+3. `entity/*` + `app/models/*` — ORM SQLAlchemy (`app/models` re-esporta molte entity + modelli ML)
+4. `service/*` + `repository/*` — import API tennis + CRUD legacy (ancora attivi; orchestrati da `app/services/imports` e `global_update`)
 5. `app/ml/*` — dataset, training, inferenza
+
+**Sessione DB:** un solo `engine` / `SessionLocal` in `app/db/session.py`. Il modulo legacy `repository/base/repository_db.py` li re-esporta (niente secondo pool). Dettaglio, duplicazioni e piano step-by-step: [docs/ARCHITECTURE_LAYERS.md](docs/ARCHITECTURE_LAYERS.md).
 
 ---
 
@@ -295,9 +301,9 @@ Per URL/header/payload esterni usare sempre `utility/sensitive_data` prima di sc
 
 ---
 
-### 4.2 Entity (ORM legacy / dominio)
+### 4.2 Entity (ORM di dominio)
 
-Modulo `backend/src/entity/`.
+Modulo `backend/src/entity/` (home canonica delle tabelle operative). `app/models` ne re-esporta molte per i service moderni.
 
 | Classe | Tabella / ruolo |
 |--------|-----------------|
@@ -318,7 +324,13 @@ Modelli ML canonici in `app/models/ml.py`: `MLPlayer`, `MLTournament`, `MLMatch`
 
 ---
 
-### 4.3 Repository
+### 4.3 Repository (legacy import)
+
+Usati dagli script in `service/import_*`. Le API di lettura passano da `app/services` + `get_db()`, non dai repository.
+
+#### `repository/base/repository_db.py`
+
+Re-export di `engine` e `SessionLocal` da `app.db.session` (compatibilità import path).
 
 #### `repository/base/crud_repository.py` — `CrudRepository`
 
@@ -777,3 +789,21 @@ npm run build
 La suite mocka `apiClient` / `fetch`: non serve un backend reale. Copertura tipica: avvio/navigazione, route admin protette, stati loading/errore/vuoto, aggiornamento globale, selettori versione/modello, pagine Partite / Schedine / Bot Telegram, errori HTTP del client API.
 
 Configurazione: `frontend/vite.config.ts` (`test.environment = jsdom`, `setupFiles`), helper in `frontend/src/test/`.
+
+---
+
+## 10. CI (GitHub Actions)
+
+Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Parte su **push** e **pull request**.
+
+| Job | Cosa fa |
+|-----|---------|
+| **Backend** | Python da `.python-version` (3.12), `pip install -r backend/requirements-dev.txt` (cache pip), PostgreSQL 16 di servizio, `alembic upgrade head`, `python -m pytest` |
+| **Frontend** | Node da `frontend/.nvmrc` (22), `npm ci` (cache npm), `npm test`, `npm run build` |
+
+- Credenziali solo fittizie (`ci-fake-*`, DB `tennis_oracle_ci` / user `postgres` / password `postgres`).
+- I test backend restano su SQLite in-memory (`conftest.py`); Postgres in CI serve a validare le migrazioni Alembic.
+- La pipeline fallisce se migrazioni, test o build falliscono.
+- Cache dipendenze tramite `actions/setup-python` / `actions/setup-node` (hash di `requirements*.txt` e `package-lock.json`).
+
+Stato: badge in cima a questo README, oppure [Actions → CI](https://github.com/romy1992/tennis_oracle/actions/workflows/ci.yml).

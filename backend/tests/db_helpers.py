@@ -81,10 +81,16 @@ def make_api_client(
         override_settings(settings)
     install_get_db_override(app, session_factory)
     # Keep module-level SessionLocal on the isolated test DB (not real Postgres).
+    # repository_db re-exports the same symbols; rebind both so CrudRepository
+    # and ML helpers that import from repository_db stay on SQLite.
+    import backend.src.repository.base.repository_db as repository_db_mod
+
     session_mod.SessionLocal = session_factory
+    repository_db_mod.SessionLocal = session_factory
     bind = session_factory.kw.get("bind")
     if bind is not None:
         session_mod.engine = bind
+        repository_db_mod.engine = bind
     return TestClient(app)
 
 

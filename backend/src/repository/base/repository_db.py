@@ -1,31 +1,10 @@
-import os
+"""Legacy DB entrypoint for the repository layer.
 
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+Canonical engine / session factory live in ``app.db.session``. This module
+re-exports the same objects so import scripts and ``CrudRepository`` share one
+connection pool with the FastAPI app (no second ``create_engine``).
+"""
 
-CONFIG_PATH = os.path.join(
-    os.path.dirname(__file__), "../../../properties/config.env"
-)
-ENV_PATH = os.path.join(os.path.dirname(__file__), "../../../.env")
-load_dotenv(dotenv_path=ENV_PATH)
-load_dotenv(dotenv_path=CONFIG_PATH)
+from backend.src.app.db.session import SessionLocal, engine
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATABASE_PATH = os.path.join(BASE_DIR, "my_database.db")
-DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/tennis_db"
-
-# Prefer the same Settings source as FastAPI (app.db.session) so imports and
-# API reads never diverge when DATABASE_URL is configured.
-try:
-    from backend.src.app.core.config import get_settings
-
-    DATABASE_URL = get_settings().database_url or DEFAULT_DATABASE_URL
-except Exception:
-    DATABASE_URL = os.getenv(
-        "DATABASE_URL",
-        os.getenv("DATABASE_SOURCE_URL", DEFAULT_DATABASE_URL),
-    )
-
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine)
+__all__ = ["SessionLocal", "engine"]
