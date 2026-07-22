@@ -1,13 +1,17 @@
-"""Normalize API-Tennis match status for UI and betting-slip void settlement.
+"""Centralized match + simulated-bet lifecycle.
 
-Naming note: this module is about match/pick *voiding* (annullamento scommessa).
-It is unrelated to ``void_odds`` (fair/break-even odds from model probability).
+Normalizes API-Tennis status fields and defines how each lifecycle state
+affects singles, betting slips, stake, profit, ROI stats, and ``void_odds``.
+
+Naming note: match/pick *void* (annullamento scommessa) is unrelated to
+``void_odds`` (fair/break-even odds from model probability ``1/P``).
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import Literal
 
 logger = logging.getLogger(__name__)
@@ -15,27 +19,37 @@ logger = logging.getLogger(__name__)
 COMPLETED_WINNERS = ("First Player", "Second Player")
 
 MatchLifecycleStatus = Literal[
-    "scheduled",
-    "live",
-    "finished",
+    "upcoming",
+    "started",
+    "completed",
     "postponed",
     "cancelled",
-    "abandoned",
-    "walkover",
     "retired",
-    "unknown_problem",
+    "walkover",
+    "abandoned",
+    "unknown",
 ]
 
+BetOutcome = Literal["pending", "won", "lost", "void"]
+
 MATCH_LIFECYCLE_LABELS_IT: dict[MatchLifecycleStatus, str] = {
-    "scheduled": "Da giocare",
-    "live": "In corso",
-    "finished": "Terminata",
+    "upcoming": "Da giocare",
+    "started": "In corso",
+    "completed": "Terminata",
     "postponed": "Rinviata",
     "cancelled": "Annullata",
-    "abandoned": "Abbandonata",
-    "walkover": "Walkover",
     "retired": "Ritiro",
-    "unknown_problem": "Problema / esito mancante",
+    "walkover": "Walkover",
+    "abandoned": "Abbandonata",
+    "unknown": "Problema / esito mancante",
+}
+
+# Legacy API values still accepted by normalize helpers / callers.
+_LEGACY_LIFECYCLE_ALIASES: dict[str, MatchLifecycleStatus] = {
+    "scheduled": "upcoming",
+    "live": "started",
+    "finished": "completed",
+    "unknown_problem": "unknown",
 }
 
 # Terminal non-bettable when there is no COMPLETED_WINNERS winner.
@@ -43,9 +57,21 @@ _VOID_LIFECYCLE_WITHOUT_WINNER: frozenset[MatchLifecycleStatus] = frozenset(
     {
         "cancelled",
         "abandoned",
-        "unknown_problem",
+        "unknown",
         "walkover",
         "retired",
+        "completed",  # completed without winner (defensive; classify maps this to unknown)
+    }
+)
+
+_TERMINAL_LIFECYCLES: frozenset[MatchLifecycleStatus] = frozenset(
+    {
+        "completed",
+        "cancelled",
+        "abandoned",
+        "walkover",
+        "retired",
+        "unknown",
     }
 )
 
@@ -77,18 +103,219 @@ _LIVE_SET_RE = re.compile(r"\bset\s*[1-5]\b", re.IGNORECASE)
 _UNMAPPED_LOGGED: set[str] = set()
 
 
-def match_lifecycle_label(status: MatchLifecycleStatus) -> str:
-    return MATCH_LIFECYCLE_LABELS_IT[status]
+@dataclass(frozen=True)
+class LifecycleSettlementPolicy:
+    """How a lifecycle state affects simulated bets and reporting.
+
+    ``void_odds_affected`` is always False: fair odds are a model concept,
+    independent of match completion.
+    """
+
+    lifecycle: MatchLifecycleStatus
+    singles_outcome: BetOutcome
+    slip_pick_outcome: BetOutcome
+    stake_at_risk: bool
+    include_in_profit_roi: bool
+    counts_as_loss: bool
+    void_odds_affected: bool
+    notes: str
+
+
+@dataclass(frozen=True)
+class SimulatedBetSettlement:
+    """Idempotent settlement result for one simulated single/pick."""
+
+    outcome: BetOutcome
+    is_correct: bool | None
+    lifecycle: MatchLifecycleStatus
+    stake_units: float
+    profit_units: float
+    include_in_roi: bool
+    void_reason: str | None = None
+
+
+def match_lifecycle_label(status: MatchLifecycleStatus | str) -> str:
+    normalized = normalize_lifecycle_status(status)
+    return MATCH_LIFECYCLE_LABELS_IT[normalized]
+
+
+def normalize_lifecycle_status(status: MatchLifecycleStatus | str) -> MatchLifecycleStatus:
+    """Accept current and legacy lifecycle codes."""
+    key = str(status).strip().lower()
+    if key in _LEGACY_LIFECYCLE_ALIASES:
+        return _LEGACY_LIFECYCLE_ALIASES[key]
+    if key in MATCH_LIFECYCLE_LABELS_IT:
+        return key  # type: ignore[return-value]
+    raise ValueError(f"Unknown match lifecycle status: {status!r}")
+
+
+def is_terminal_lifecycle(lifecycle: MatchLifecycleStatus | str) -> bool:
+    return normalize_lifecycle_status(lifecycle) in _TERMINAL_LIFECYCLES
 
 
 def is_void_for_betting(
-    lifecycle: MatchLifecycleStatus,
+    lifecycle: MatchLifecycleStatus | str,
     actual_winner: str | None,
 ) -> bool:
-    """True when the pick should be voided (excluded from combined odds)."""
+    """True when the simulated bet should be voided (not lost)."""
     if actual_winner in COMPLETED_WINNERS:
         return False
-    return lifecycle in _VOID_LIFECYCLE_WITHOUT_WINNER
+    return normalize_lifecycle_status(lifecycle) in _VOID_LIFECYCLE_WITHOUT_WINNER
+
+
+def settlement_policy(
+    lifecycle: MatchLifecycleStatus | str,
+    *,
+    actual_winner: str | None = None,
+    predicted_winner: str | None = None,
+) -> LifecycleSettlementPolicy:
+    """Explicit impact matrix for a lifecycle (+ optional winner context)."""
+    status = normalize_lifecycle_status(lifecycle)
+    has_winner = actual_winner in COMPLETED_WINNERS
+
+    if has_winner:
+        won = predicted_winner is not None and predicted_winner == actual_winner
+        lost = predicted_winner is not None and predicted_winner != actual_winner
+        if predicted_winner is None:
+            outcome: BetOutcome = "pending"
+        elif won:
+            outcome = "won"
+        else:
+            outcome = "lost"
+        return LifecycleSettlementPolicy(
+            lifecycle=status,
+            singles_outcome=outcome,
+            slip_pick_outcome=outcome,
+            stake_at_risk=outcome == "pending",
+            include_in_profit_roi=outcome in {"won", "lost"},
+            counts_as_loss=outcome == "lost",
+            void_odds_affected=False,
+            notes=(
+                "Winner known: settle won/lost for completed/walkover/retired/etc. "
+                "Quota void (break-even) unchanged."
+            ),
+        )
+
+    if status in {"upcoming", "started", "postponed"}:
+        return LifecycleSettlementPolicy(
+            lifecycle=status,
+            singles_outcome="pending",
+            slip_pick_outcome="pending",
+            stake_at_risk=True,
+            include_in_profit_roi=False,
+            counts_as_loss=False,
+            void_odds_affected=False,
+            notes=(
+                "Match not settled yet. Stake remains open; no profit/ROI contribution. "
+                "Postponed stays pending (not void)."
+            ),
+        )
+
+    if status in _VOID_LIFECYCLE_WITHOUT_WINNER:
+        return LifecycleSettlementPolicy(
+            lifecycle=status,
+            singles_outcome="void",
+            slip_pick_outcome="void",
+            stake_at_risk=False,
+            include_in_profit_roi=False,
+            counts_as_loss=False,
+            void_odds_affected=False,
+            notes=(
+                "Cancelled / not playable without bettable winner: void, never lost. "
+                "Stake refunded (0 in ROI denominator); profit 0."
+            ),
+        )
+
+    # Defensive fallback — should not be reached for known statuses.
+    return LifecycleSettlementPolicy(
+        lifecycle=status,
+        singles_outcome="pending",
+        slip_pick_outcome="pending",
+        stake_at_risk=True,
+        include_in_profit_roi=False,
+        counts_as_loss=False,
+        void_odds_affected=False,
+        notes="Fallback pending; do not treat as loss.",
+    )
+
+
+def settle_simulated_bet(
+    *,
+    lifecycle: MatchLifecycleStatus | str,
+    predicted_winner: str | None,
+    actual_winner: str | None,
+    market_odds: float | None = None,
+    stake_units: float = 1.0,
+) -> SimulatedBetSettlement:
+    """Idempotent settlement for one simulated single or slip pick.
+
+    Repeated calls with the same inputs always yield the same result.
+    Cancelled / non-played matches never count as losses.
+    """
+    status = normalize_lifecycle_status(lifecycle)
+    policy = settlement_policy(
+        status,
+        actual_winner=actual_winner,
+        predicted_winner=predicted_winner,
+    )
+    outcome = policy.slip_pick_outcome
+    is_correct: bool | None
+    if outcome == "won":
+        is_correct = True
+    elif outcome == "lost":
+        is_correct = False
+    else:
+        is_correct = None
+
+    if outcome == "won":
+        odd = float(market_odds) if market_odds is not None else 1.0
+        profit = stake_units * (odd - 1.0)
+        stake = stake_units
+    elif outcome == "lost":
+        profit = -stake_units
+        stake = stake_units
+    else:
+        # pending / void: no realized P/L; void stake excluded from ROI denom
+        profit = 0.0
+        stake = 0.0
+
+    void_reason = match_lifecycle_label(status) if outcome == "void" else None
+    return SimulatedBetSettlement(
+        outcome=outcome,
+        is_correct=is_correct,
+        lifecycle=status,
+        stake_units=stake,
+        profit_units=profit,
+        include_in_roi=policy.include_in_profit_roi,
+        void_reason=void_reason,
+    )
+
+
+def resolve_slip_status_from_picks(pick_outcomes: list[BetOutcome]) -> BetOutcome:
+    """Aggregate slip status from pick outcomes (void legs ignored for win/loss)."""
+    active = [status for status in pick_outcomes if status != "void"]
+    if not active:
+        return "void"
+    if any(status == "lost" for status in active):
+        return "lost"
+    if all(status == "won" for status in active):
+        return "won"
+    return "pending"
+
+
+def slip_profit_units(
+    *,
+    slip_status: BetOutcome,
+    stake: float,
+    effective_combined_odds: float | None,
+) -> float:
+    """Realized slip profit; void/pending → 0 (stake refunded / still open)."""
+    if slip_status == "won":
+        odds = effective_combined_odds if effective_combined_odds is not None else 1.0
+        return stake * odds - stake
+    if slip_status == "lost":
+        return -stake
+    return 0.0
 
 
 def _normalize_status(event_status: str | None) -> str:
@@ -118,10 +345,10 @@ def classify_match_lifecycle(
     """Map raw API fields to a normalized lifecycle status.
 
     Rules:
-    - Winner in COMPLETED_WINNERS → finished / walkover / retired (settleable).
-    - cancelled / abandoned / finished-without-winner → terminal problem statuses.
+    - Winner in COMPLETED_WINNERS → completed / walkover / retired (settleable).
+    - cancelled / abandoned / finished-without-winner → void candidates.
     - postponed / delayed / suspended → postponed (non-terminal; pick stays pending).
-    - Unrecognized status without winner → scheduled (conservative; do not void).
+    - Unrecognized status without winner → upcoming (conservative; do not void).
     """
     status = _normalize_status(event_status)
     has_winner = event_winner in COMPLETED_WINNERS
@@ -133,7 +360,7 @@ def classify_match_lifecycle(
             return "walkover"
         if _contains_any(status, _RETIRED_TOKENS):
             return "retired"
-        return "finished"
+        return "completed"
 
     if _contains_any(status, _CANCELLED_TOKENS):
         return "cancelled"
@@ -148,15 +375,15 @@ def classify_match_lifecycle(
 
     if _contains_any(status, _FINISHED_TOKENS) or is_completed is True or has_result:
         # Finished-like signal but no bettable winner → problem / void candidate.
-        return "unknown_problem"
+        return "unknown"
 
     if _is_live_flag(event_live) or _contains_any(status, _LIVE_TOKENS) or _LIVE_SET_RE.search(status):
-        return "live"
+        return "started"
 
     if status and status not in {"", "-", "null", "none"}:
         if status not in _UNMAPPED_LOGGED:
             _UNMAPPED_LOGGED.add(status)
-            logger.info("Unmapped event_status=%r; treating as scheduled (non-void)", event_status)
-        return "scheduled"
+            logger.info("Unmapped event_status=%r; treating as upcoming (non-void)", event_status)
+        return "upcoming"
 
-    return "scheduled"
+    return "upcoming"

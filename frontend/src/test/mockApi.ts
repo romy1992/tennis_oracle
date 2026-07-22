@@ -10,7 +10,10 @@ import {
   makeSlipStats,
   modelsCatalog,
   telegramEvents,
-  telegramStats
+  telegramStats,
+  publishedPredictions,
+  publishedLiveStats,
+  liveBetaDashboard
 } from "./fixtures";
 
 export type ApiMocks = Record<string, Mock>;
@@ -38,6 +41,10 @@ export function stubDefaultApi(apiMocks: {
   getPredictionSummary: Mock;
   getDailyPredictionStats: Mock;
   getBettingSlipModelStats: Mock;
+  getPublishedPredictions: Mock;
+  getPublishedPredictionVersions: Mock;
+  getPublishedLiveStats: Mock;
+  getLiveBetaDashboard?: Mock;
 }) {
   apiMocks.getSession.mockResolvedValue({
     id: 1,
@@ -91,4 +98,11 @@ export function stubDefaultApi(apiMocks: {
     stake: 10,
     rows: []
   });
+  apiMocks.getPublishedPredictions.mockResolvedValue(publishedPredictions);
+  apiMocks.getPublishedPredictionVersions.mockResolvedValue({
+    publication_id: publishedPredictions.items[0].publication_id,
+    items: publishedPredictions.items
+  });
+  apiMocks.getPublishedLiveStats.mockResolvedValue(publishedLiveStats);
+  apiMocks.getLiveBetaDashboard?.mockResolvedValue(liveBetaDashboard);
 }

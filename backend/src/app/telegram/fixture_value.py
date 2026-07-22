@@ -75,7 +75,7 @@ def enrich_fixture_value(
         enriched["pick_status"] = "won"
     elif is_correct is False:
         enriched["pick_status"] = "lost"
-    elif lifecycle in {"cancelled", "abandoned", "unknown_problem", "walkover", "retired"} and (
+    elif lifecycle in {"cancelled", "abandoned", "unknown", "walkover", "retired"} and (
         prediction.get("actual_winner") not in {"First Player", "Second Player"}
     ):
         enriched["pick_status"] = "void"

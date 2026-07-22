@@ -12,9 +12,12 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { BettingSlipModelStatsPage } from "./pages/BettingSlipModelStatsPage";
 import { BettingSlipsPage } from "./pages/BettingSlipsPage";
 import { GlobalUpdateReportPage } from "./pages/GlobalUpdateReportPage";
+import { LiveBetaDashboardPage } from "./pages/LiveBetaDashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PredictionStatsPage } from "./pages/PredictionStatsPage";
 import { PredictionsPage } from "./pages/PredictionsPage";
+import { PublishedLiveStatsPage } from "./pages/PublishedLiveStatsPage";
+import { PublishedPredictionsPage } from "./pages/PublishedPredictionsPage";
 import { TelegramBotPage } from "./pages/TelegramBotPage";
 
 function AuthenticatedShell() {
@@ -36,11 +39,14 @@ export const appRoutes: RouteObject[] = [
         element: <AuthenticatedShell />,
         children: [
           { index: true, element: <Navigate to="/predictions" replace /> },
+          { path: "live-beta-dashboard", element: <LiveBetaDashboardPage /> },
           { path: "predictions", element: <PredictionsPage /> },
           { path: "prediction-stats", element: <PredictionStatsPage /> },
           { path: "betting-slips", element: <BettingSlipsPage /> },
           { path: "betting-slip-model-stats", element: <BettingSlipModelStatsPage /> },
           { path: "global-update-report", element: <GlobalUpdateReportPage /> },
+          { path: "published-predictions", element: <PublishedPredictionsPage /> },
+          { path: "published-live-stats", element: <PublishedLiveStatsPage /> },
           { path: "telegram-bot", element: <TelegramBotPage /> }
         ]
       }

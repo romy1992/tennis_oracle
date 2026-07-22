@@ -25,7 +25,15 @@ import type {
   TelegramBotEventsParams,
   TelegramBotEventsResponse,
   TelegramBotStatsParams,
-  TelegramBotStatsResponse
+  TelegramBotStatsResponse,
+  PublishedPrediction,
+  PublishedPredictionListResponse,
+  PublishedPredictionVersionChainResponse,
+  PublishedPredictionsParams,
+  PublishedLiveStatsParams,
+  PublishedLiveStatsSummary,
+  LiveBetaDashboardParams,
+  LiveBetaDashboardResponse
 } from "../types/api";
 import { getStoredToken } from "../auth/session";
 
@@ -195,5 +203,21 @@ export const apiClient = {
   getTelegramBotStats: (params: TelegramBotStatsParams = {}) =>
     request<TelegramBotStatsResponse>(withQuery("/api/telegram/stats", params)),
   getTelegramBotEvents: (params: TelegramBotEventsParams = {}) =>
-    request<TelegramBotEventsResponse>(withQuery("/api/telegram/events", params))
+    request<TelegramBotEventsResponse>(withQuery("/api/telegram/events", params)),
+  getPublishedPredictions: (params: PublishedPredictionsParams = {}) =>
+    request<PublishedPredictionListResponse>(
+      withQuery("/api/published-predictions", params)
+    ),
+  getPublishedPrediction: (id: number) =>
+    request<PublishedPrediction>(`/api/published-predictions/${id}`),
+  getPublishedPredictionVersions: (publicationId: string) =>
+    request<PublishedPredictionVersionChainResponse>(
+      `/api/published-predictions/by-publication/${publicationId}`
+    ),
+  getPublishedLiveStats: (params: PublishedLiveStatsParams = {}) =>
+    request<PublishedLiveStatsSummary>(
+      withQuery("/api/published-predictions/stats", params)
+    ),
+  getLiveBetaDashboard: (params: LiveBetaDashboardParams = {}) =>
+    request<LiveBetaDashboardResponse>(withQuery("/api/live-beta-dashboard", params))
 };

@@ -10,7 +10,11 @@ import type {
   NextFixtureWithPrediction,
   SingleMatchValueResponse,
   TelegramBotEventsResponse,
-  TelegramBotStatsResponse
+  TelegramBotStatsResponse,
+  PublishedPredictionListResponse,
+  PublishedLiveStatsSummary,
+  LiveBetaDashboardResponse,
+  PublishedSettledTip
 } from "../types/api";
 
 export const TODAY = "2026-07-21";
@@ -341,6 +345,208 @@ export const telegramEvents: TelegramBotEventsResponse = {
       error_message: null
     }
   ]
+};
+
+export const publishedPredictions: PublishedPredictionListResponse = {
+  total: 1,
+  limit: 50,
+  offset: 0,
+  items: [
+    {
+      id: 1,
+      publication_id: "pub-1111-2222-3333",
+      content_version: 1,
+      previous_version_id: null,
+      event_key: 9001,
+      selection: "Player A",
+      model_version: "v3",
+      model_name: "logistic_regression",
+      probability: 0.62,
+      odds: 1.85,
+      void_odds: 1.6129,
+      edge: 14.7,
+      unit_stake: 1,
+      published_at: `${TODAY}T10:30:00Z`,
+      publication_source: "admin_api",
+      initial_status: "published",
+      content_hash: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      player_1_name: "Player A",
+      player_2_name: "Player B",
+      tournament_name: "Test Open",
+      event_date: TODAY,
+      event_time: "15:00:00",
+      match_prediction_id: null,
+      betting_slip_pick_id: null,
+      is_latest: true,
+      match_started: false
+    }
+  ]
+};
+
+export const publishedLiveStats: PublishedLiveStatsSummary = {
+  source: "published_prediction",
+  latest_only: true,
+  from_date: null,
+  to_date: null,
+  event_date_from: null,
+  event_date_to: null,
+  model_version: null,
+  model_name: null,
+  publication_source: null,
+  tournament_name: null,
+  surface: null,
+  odds_band: null,
+  predictions_total: 4,
+  closed: 2,
+  open: 1,
+  void: 1,
+  won: 1,
+  lost: 1,
+  hit_rate_pct: 50,
+  stake_total: 5,
+  stake_settled: 3,
+  profit: -1,
+  roi_pct: -33.3333,
+  yield_pct: -33.3333,
+  avg_odds: 2.125,
+  max_drawdown: 2,
+  max_winning_streak: 1,
+  max_losing_streak: 1,
+  by_model: [
+    {
+      key: "v3|logistic_regression",
+      label: "v3 / logistic_regression",
+      predictions_total: 3,
+      closed: 2,
+      open: 0,
+      void: 1,
+      won: 1,
+      lost: 1,
+      hit_rate_pct: 50,
+      stake_total: 4,
+      stake_settled: 3,
+      profit: -1,
+      roi_pct: -33.3333,
+      yield_pct: -33.3333,
+      avg_odds: 2.1667
+    }
+  ],
+  by_odds: [],
+  by_edge: [],
+  by_surface: [
+    {
+      key: "Clay",
+      label: "Clay",
+      predictions_total: 3,
+      closed: 2,
+      open: 0,
+      void: 1,
+      won: 1,
+      lost: 1,
+      hit_rate_pct: 50,
+      stake_total: 4,
+      stake_settled: 3,
+      profit: -1,
+      roi_pct: -33.3333,
+      yield_pct: -33.3333,
+      avg_odds: 2.1667
+    }
+  ],
+  by_period: [
+    {
+      key: "2026-06",
+      label: "2026-06",
+      predictions_total: 3,
+      closed: 2,
+      open: 0,
+      void: 1,
+      won: 1,
+      lost: 1,
+      hit_rate_pct: 50,
+      stake_total: 4,
+      stake_settled: 3,
+      profit: -1,
+      roi_pct: -33.3333,
+      yield_pct: -33.3333,
+      avg_odds: 2.1667
+    }
+  ]
+};
+
+const settledTipBase = publishedPredictions.items[0];
+
+export const liveBetaSettledTip: PublishedSettledTip = {
+  ...settledTipBase,
+  outcome: "pending",
+  profit: 0,
+  stake_settled: 0,
+  surface: "Hard"
+};
+
+export const liveBetaDashboard: LiveBetaDashboardResponse = {
+  mode: "live",
+  generated_at: `${TODAY}T12:00:00`,
+  from_date: "2026-04-22",
+  to_date: TODAY,
+  model_version: null,
+  model_name: null,
+  tournament_name: null,
+  surface: null,
+  odds_band: null,
+  latest_only: true,
+  pipeline: {
+    mode: "live",
+    active_run: null,
+    latest_run: idleGlobalUpdate,
+    last_updated_at: idleGlobalUpdate.finished_at,
+    import_status: importStatus
+  },
+  live_stats: publishedLiveStats,
+  published_today: [liveBetaSettledTip],
+  open_predictions: [liveBetaSettledTip],
+  closed_predictions: [
+    {
+      ...settledTipBase,
+      id: settledTipBase.id + 1,
+      outcome: "won",
+      profit: 1,
+      stake_settled: 1,
+      surface: "Clay",
+      match_started: true
+    }
+  ],
+  bot_usage: telegramStats,
+  data_completeness: {
+    tips_total: 4,
+    tips_with_odds: 4,
+    tips_with_odds_pct: 100,
+    tips_with_event_date: 4,
+    tips_with_event_date_pct: 100,
+    tips_with_match_context: 4,
+    tips_with_match_context_pct: 100,
+    distinct_event_keys: 4,
+    event_keys_with_odds_snapshot: 2,
+    odds_snapshot_coverage_pct: 50,
+    snapshots_opening: 2,
+    snapshots_observed: 1,
+    snapshots_publication: 1,
+    snapshots_closing: 0
+  },
+  recent_errors: [
+    {
+      source: "global_update",
+      created_at: `${TODAY}T09:00:00`,
+      message: "pipeline boom",
+      detail: "run_id=7 status=completed_with_errors"
+    }
+  ],
+  backtest: {
+    mode: "backtest",
+    included_in_live_kpis: false,
+    message:
+      "I KPI LIVE della beta usano solo il registro immutabile delle pubblicazioni. Metriche di training/backtest e previsioni operative restano sulle pagine dedicate.",
+    related_paths: ["/prediction-stats", "/betting-slip-model-stats", "/published-live-stats"]
+  }
 };
 
 export const futureExpiresAt = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();

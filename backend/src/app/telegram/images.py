@@ -539,6 +539,8 @@ def _fixture_status_label(item: dict[str, Any]) -> str:
         return str(lifecycle_label or "Annullata")
     if lifecycle_label and item.get("match_lifecycle_status") not in {
         None,
+        "upcoming",
+        "completed",
         "scheduled",
         "finished",
     }:

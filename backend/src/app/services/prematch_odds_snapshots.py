@@ -1,0 +1,557 @@
+"""Append-only pre-match odds snapshot ledger.
+
+Stores per-bookmaker / per-selection detections without overwriting prior rows.
+Duplicate detections (same fixture, selection, bookmaker, odds, type, source,
+captured_at second) are skipped via ``detection_hash``.
+
+Does not replace ``Fixture.odds`` / ``NextFixture.odds`` JSON blobs, nor the
+unused ML ``odds_snapshot`` table.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from datetime import date, datetime, time, timezone
+from typing import Any, Literal
+
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from backend.src.app.ml.datasets.odds_builder import (
+    FixtureOddsRecord,
+    HOME_SELECTION,
+    AWAY_SELECTION,
+    decimal_odd,
+    implied_probability,
+    match_winner_rows_from_record,
+)
+from backend.src.app.schemas.prematch_odds_snapshot import (
+    PrematchOddsSnapshotCreate,
+    PrematchOddsSnapshotFromPayload,
+    PrematchOddsSnapshotIngestResponse,
+    PrematchOddsSnapshotListResponse,
+    PrematchOddsSnapshotRead,
+    SnapshotType,
+    SnapshotTypeOrAuto,
+)
+from backend.src.entity.fixture import Fixture
+from backend.src.entity.next_fixture import NextFixture
+from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
+
+logger = logging.getLogger(__name__)
+
+ODDS_ROUND = 6
+PROB_ROUND = 8
+MARGIN_ROUND = 8
+
+
+class PrematchOddsSnapshotError(Exception):
+    """Domain error for the pre-match odds ledger."""
+
+    def __init__(self, message: str, *, status_code: int = 400) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _as_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _truncate_to_second(value: datetime) -> datetime:
+    return value.replace(microsecond=0)
+
+
+def compute_detection_hash(
+    *,
+    event_key: int,
+    selection: str,
+    bookmaker: str,
+    odds: float,
+    snapshot_type: str,
+    source: str,
+    captured_at: datetime,
+) -> str:
+    """Fingerprint of one detection; identical detections must share this hash."""
+    payload = {
+        "event_key": event_key,
+        "selection": selection.strip(),
+        "bookmaker": bookmaker.strip(),
+        "odds": round(float(odds), ODDS_ROUND),
+        "snapshot_type": snapshot_type,
+        "source": source,
+        "captured_at": _truncate_to_second(_as_utc_naive(captured_at)).isoformat(
+            timespec="seconds"
+        ),
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _to_read(row: PrematchOddsSnapshot) -> PrematchOddsSnapshotRead:
+    return PrematchOddsSnapshotRead.model_validate(row)
+
+
+def _latest_odds_for_selection(
+    db: Session,
+    *,
+    event_key: int,
+    selection: str,
+    bookmaker: str,
+) -> float | None:
+    row = db.scalar(
+        select(PrematchOddsSnapshot)
+        .where(
+            PrematchOddsSnapshot.event_key == event_key,
+            PrematchOddsSnapshot.selection == selection,
+            PrematchOddsSnapshot.bookmaker == bookmaker,
+        )
+        .order_by(
+            PrematchOddsSnapshot.captured_at.desc(),
+            PrematchOddsSnapshot.id.desc(),
+        )
+        .limit(1)
+    )
+    return None if row is None else float(row.odds)
+
+
+def _has_any_snapshot(
+    db: Session,
+    *,
+    event_key: int,
+    selection: str,
+    bookmaker: str,
+) -> bool:
+    return (
+        db.scalar(
+            select(PrematchOddsSnapshot.id)
+            .where(
+                PrematchOddsSnapshot.event_key == event_key,
+                PrematchOddsSnapshot.selection == selection,
+                PrematchOddsSnapshot.bookmaker == bookmaker,
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def resolve_snapshot_type(
+    db: Session,
+    *,
+    event_key: int,
+    selection: str,
+    bookmaker: str,
+    requested: SnapshotTypeOrAuto,
+) -> SnapshotType:
+    if requested != "auto":
+        return requested
+    if _has_any_snapshot(db, event_key=event_key, selection=selection, bookmaker=bookmaker):
+        return "observed"
+    return "opening"
+
+
+def _same_odds(a: float, b: float) -> bool:
+    return round(float(a), ODDS_ROUND) == round(float(b), ODDS_ROUND)
+
+
+def _should_skip_unchanged(
+    db: Session,
+    *,
+    event_key: int,
+    selection: str,
+    bookmaker: str,
+    odds: float,
+    snapshot_type: SnapshotType,
+) -> bool:
+    """Skip observed/opening when the latest stored odds for the selection are unchanged.
+
+    ``publication`` and ``closing`` always attempt insert (still deduped by hash).
+    A second ``opening`` for the same bookmaker/selection is always skipped.
+    """
+    if snapshot_type == "opening" and _has_any_snapshot(
+        db, event_key=event_key, selection=selection, bookmaker=bookmaker
+    ):
+        return True
+
+    if snapshot_type in {"publication", "closing"}:
+        return False
+
+    latest = _latest_odds_for_selection(
+        db, event_key=event_key, selection=selection, bookmaker=bookmaker
+    )
+    if latest is None:
+        return False
+    return _same_odds(latest, odds)
+
+
+def record_snapshot(
+    db: Session,
+    payload: PrematchOddsSnapshotCreate,
+    *,
+    commit: bool = True,
+) -> PrematchOddsSnapshotRead | None:
+    """Append one snapshot. Returns ``None`` when skipped as duplicate/unchanged."""
+    when = (
+        _truncate_to_second(_as_utc_naive(payload.captured_at))
+        if payload.captured_at
+        else _truncate_to_second(_utc_now_naive())
+    )
+    odd = decimal_odd(payload.odds)
+    if odd is None:
+        raise PrematchOddsSnapshotError("Odds must be a decimal greater than 1.0.")
+
+    selection = payload.selection.strip()
+    bookmaker = payload.bookmaker.strip()
+    snapshot_type = payload.snapshot_type
+
+    if _should_skip_unchanged(
+        db,
+        event_key=payload.event_key,
+        selection=selection,
+        bookmaker=bookmaker,
+        odds=odd,
+        snapshot_type=snapshot_type,
+    ):
+        return None
+
+    implied = (
+        round(float(payload.implied_probability), PROB_ROUND)
+        if payload.implied_probability is not None
+        else round(implied_probability(odd), PROB_ROUND)
+    )
+    margin = (
+        round(float(payload.margin), MARGIN_ROUND)
+        if payload.margin is not None
+        else 0.0
+    )
+    detection_hash = compute_detection_hash(
+        event_key=payload.event_key,
+        selection=selection,
+        bookmaker=bookmaker,
+        odds=odd,
+        snapshot_type=snapshot_type,
+        source=payload.source,
+        captured_at=when,
+    )
+    existing = db.scalar(
+        select(PrematchOddsSnapshot).where(
+            PrematchOddsSnapshot.detection_hash == detection_hash
+        )
+    )
+    if existing is not None:
+        return None
+
+    row = PrematchOddsSnapshot(
+        event_key=payload.event_key,
+        selection=selection,
+        bookmaker=bookmaker,
+        odds=round(odd, ODDS_ROUND),
+        implied_probability=implied,
+        margin=margin,
+        captured_at=when,
+        source=payload.source,
+        snapshot_type=snapshot_type,
+        detection_hash=detection_hash,
+        market_side=payload.market_side,
+        player_1_name=payload.player_1_name,
+        player_2_name=payload.player_2_name,
+    )
+    try:
+        with db.begin_nested():
+            db.add(row)
+            db.flush()
+    except IntegrityError:
+        return None
+    if commit:
+        db.commit()
+        db.refresh(row)
+    else:
+        db.refresh(row)
+    return _to_read(row)
+
+
+def _selection_label(
+    market_side: str,
+    *,
+    player_1_name: str | None,
+    player_2_name: str | None,
+) -> str:
+    if market_side == HOME_SELECTION and player_1_name:
+        return player_1_name.strip()
+    if market_side == AWAY_SELECTION and player_2_name:
+        return player_2_name.strip()
+    return market_side
+
+
+def record_odds_payload(
+    db: Session,
+    payload: PrematchOddsSnapshotFromPayload,
+    *,
+    commit: bool = True,
+) -> PrematchOddsSnapshotIngestResponse:
+    """Parse a Home/Away odds matrix and append per-bookmaker selections."""
+    when = (
+        _truncate_to_second(_as_utc_naive(payload.captured_at))
+        if payload.captured_at
+        else _truncate_to_second(_utc_now_naive())
+    )
+    record = FixtureOddsRecord(
+        match_id=payload.event_key,
+        match_date=None,
+        player_1_id=None,
+        player_2_id=None,
+        player_1_name=payload.player_1_name,
+        player_2_name=payload.player_2_name,
+        odds=payload.odds,
+        event_live=payload.event_live,
+    )
+    market_rows = match_winner_rows_from_record(record)
+    inserted_items: list[PrematchOddsSnapshotRead] = []
+    skipped = 0
+
+    for market_row in market_rows:
+        bookmaker = str(market_row["bookmaker"])
+        margin = round(float(market_row["bookmaker_margin"]), MARGIN_ROUND)
+        sides: list[tuple[str, float, float]] = [
+            (
+                HOME_SELECTION,
+                float(market_row["player_1_odds"]),
+                float(market_row["implied_prob_player_1_raw"]),
+            ),
+            (
+                AWAY_SELECTION,
+                float(market_row["player_2_odds"]),
+                float(market_row["implied_prob_player_2_raw"]),
+            ),
+        ]
+        for market_side, odd, implied_raw in sides:
+            selection = _selection_label(
+                market_side,
+                player_1_name=payload.player_1_name,
+                player_2_name=payload.player_2_name,
+            )
+            snapshot_type = resolve_snapshot_type(
+                db,
+                event_key=payload.event_key,
+                selection=selection,
+                bookmaker=bookmaker,
+                requested=payload.snapshot_type,
+            )
+            created = record_snapshot(
+                db,
+                PrematchOddsSnapshotCreate(
+                    event_key=payload.event_key,
+                    selection=selection,
+                    bookmaker=bookmaker,
+                    odds=odd,
+                    implied_probability=implied_raw,
+                    margin=margin,
+                    source=payload.source,
+                    snapshot_type=snapshot_type,
+                    captured_at=when,
+                    market_side=market_side,
+                    player_1_name=payload.player_1_name,
+                    player_2_name=payload.player_2_name,
+                ),
+                commit=False,
+            )
+            if created is None:
+                skipped += 1
+            else:
+                inserted_items.append(created)
+
+    if commit:
+        db.commit()
+        for item in inserted_items:
+            # Re-load ids are already flushed; refresh not required for response.
+            pass
+
+    return PrematchOddsSnapshotIngestResponse(
+        event_key=payload.event_key,
+        inserted=len(inserted_items),
+        skipped_duplicates=skipped,
+        items=inserted_items,
+    )
+
+
+def record_odds_from_stored_fixture(
+    db: Session,
+    event_key: int,
+    *,
+    source: Literal[
+        "api_tennis",
+        "import",
+        "admin_api",
+        "telegram",
+        "global_update",
+        "publication",
+        "system",
+        "manual",
+    ] = "admin_api",
+    snapshot_type: SnapshotTypeOrAuto = "auto",
+    captured_at: datetime | None = None,
+    commit: bool = True,
+) -> PrematchOddsSnapshotIngestResponse:
+    """Capture snapshots from current ``NextFixture`` / ``Fixture`` odds JSON."""
+    next_row = db.scalar(select(NextFixture).where(NextFixture.event_key == event_key))
+    fixture = None if next_row is not None else db.scalar(
+        select(Fixture).where(Fixture.event_key == event_key)
+    )
+    row = next_row or fixture
+    if row is None:
+        raise PrematchOddsSnapshotError(
+            f"Fixture {event_key} not found.",
+            status_code=404,
+        )
+    odds = getattr(row, "odds", None)
+    if not odds:
+        raise PrematchOddsSnapshotError(
+            f"No odds stored for fixture {event_key}.",
+            status_code=404,
+        )
+    return record_odds_payload(
+        db,
+        PrematchOddsSnapshotFromPayload(
+            event_key=event_key,
+            odds=odds if isinstance(odds, dict) else {},
+            source=source,
+            snapshot_type=snapshot_type,
+            captured_at=captured_at,
+            player_1_name=getattr(row, "event_first_player", None),
+            player_2_name=getattr(row, "event_second_player", None),
+            event_live=getattr(row, "event_live", None),
+        ),
+        commit=commit,
+    )
+
+
+def get_snapshot(db: Session, snapshot_id: int) -> PrematchOddsSnapshotRead:
+    row = db.get(PrematchOddsSnapshot, snapshot_id)
+    if row is None:
+        raise PrematchOddsSnapshotError("Odds snapshot not found.", status_code=404)
+    return _to_read(row)
+
+
+def _apply_list_filters(
+    stmt,
+    *,
+    event_key: int | None,
+    bookmaker: str | None,
+    selection: str | None,
+    snapshot_type: str | None,
+    source: str | None,
+    from_date: date | None,
+    to_date: date | None,
+):
+    if event_key is not None:
+        stmt = stmt.where(PrematchOddsSnapshot.event_key == event_key)
+    if bookmaker:
+        stmt = stmt.where(PrematchOddsSnapshot.bookmaker == bookmaker)
+    if selection:
+        stmt = stmt.where(PrematchOddsSnapshot.selection == selection)
+    if snapshot_type:
+        stmt = stmt.where(PrematchOddsSnapshot.snapshot_type == snapshot_type)
+    if source:
+        stmt = stmt.where(PrematchOddsSnapshot.source == source)
+    if from_date is not None:
+        stmt = stmt.where(
+            PrematchOddsSnapshot.captured_at >= datetime.combine(from_date, time.min)
+        )
+    if to_date is not None:
+        stmt = stmt.where(
+            PrematchOddsSnapshot.captured_at <= datetime.combine(to_date, time.max)
+        )
+    return stmt
+
+
+def list_snapshots(
+    db: Session,
+    *,
+    event_key: int | None = None,
+    bookmaker: str | None = None,
+    selection: str | None = None,
+    snapshot_type: str | None = None,
+    source: str | None = None,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> PrematchOddsSnapshotListResponse:
+    filter_kwargs = {
+        "event_key": event_key,
+        "bookmaker": bookmaker,
+        "selection": selection,
+        "snapshot_type": snapshot_type,
+        "source": source,
+        "from_date": from_date,
+        "to_date": to_date,
+    }
+    stmt = _apply_list_filters(select(PrematchOddsSnapshot), **filter_kwargs)
+    count_stmt = _apply_list_filters(
+        select(func.count()).select_from(PrematchOddsSnapshot),
+        **filter_kwargs,
+    )
+    total = int(db.scalar(count_stmt) or 0)
+    rows = list(
+        db.scalars(
+            stmt.order_by(
+                PrematchOddsSnapshot.captured_at.desc(),
+                PrematchOddsSnapshot.id.desc(),
+            )
+            .offset(offset)
+            .limit(limit)
+        ).all()
+    )
+    return PrematchOddsSnapshotListResponse(
+        total=total,
+        limit=limit,
+        offset=offset,
+        items=[_to_read(row) for row in rows],
+    )
+
+
+def capture_imported_odds(
+    *,
+    event_key: int,
+    odds: dict[str, Any] | None,
+    player_1_name: str | None = None,
+    player_2_name: str | None = None,
+    event_live: Any = None,
+    source: str = "import",
+) -> PrematchOddsSnapshotIngestResponse | None:
+    """Best-effort capture from import path (own Session; never raises to caller)."""
+    if not odds or not isinstance(odds, dict):
+        return None
+    try:
+        from backend.src.app.db.session import SessionLocal
+
+        with SessionLocal() as db:
+            return record_odds_payload(
+                db,
+                PrematchOddsSnapshotFromPayload(
+                    event_key=event_key,
+                    odds=odds,
+                    source=source,  # type: ignore[arg-type]
+                    snapshot_type="auto",
+                    player_1_name=player_1_name,
+                    player_2_name=player_2_name,
+                    event_live=event_live,
+                ),
+                commit=True,
+            )
+    except Exception:
+        logger.exception(
+            "Failed to capture prematch odds history for event_key=%s",
+            event_key,
+        )
+        return None

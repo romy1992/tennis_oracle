@@ -28,7 +28,9 @@ a {
   color: #f8fafc;
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 24px;
+  min-height: 100vh;
+  overflow-y: auto;
   padding: 28px;
 }
 
@@ -44,13 +46,22 @@ a {
 }
 
 .sidebar nav {
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sidebar .nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .sidebar nav a {
   border-radius: 10px;
   color: #d7deea;
+  display: block;
+  line-height: 1.35;
   padding: 12px 14px;
 }
 
@@ -58,6 +69,15 @@ a {
 .sidebar nav a:hover {
   background: #24304a;
   color: #ffffff;
+}
+
+.nav-section-label {
+  color: #8d99ad;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 2px;
+  text-transform: uppercase;
 }
 
 .sidebar-auth {
@@ -182,15 +202,6 @@ a {
   color: #fee2e2;
 }
 
-.nav-section-label {
-  color: #8d99ad;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  margin: 16px 0 2px;
-  text-transform: uppercase;
-}
-
 .content {
   padding: 32px;
 }
@@ -258,6 +269,19 @@ input {
   color: #172033;
   font: inherit;
   padding: 10px 12px;
+}
+
+label.checkbox-field {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  grid-template-columns: none;
+}
+
+label.checkbox-field input {
+  margin: 0;
+  padding: 0;
+  width: auto;
 }
 
 .metric-card,
@@ -416,6 +440,50 @@ input {
 .pill-ok {
   background: #dcfce7;
   color: #166534;
+}
+
+.mode-badge-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.mode-badge {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  text-transform: uppercase;
+}
+
+.mode-badge-live {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.mode-badge-backtest {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.mode-badge-muted {
+  background: #eef2f8;
+  color: #64748b;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.mode-panel-live {
+  border-color: #bfdbfe;
+  box-shadow: 0 0 0 1px rgba(49, 87, 166, 0.08);
+}
+
+.mode-panel-backtest {
+  background: #f8fafc;
+  border-color: #dbe3ef;
 }
 
 .tab-list.outcome-tabs {
@@ -582,6 +650,7 @@ input {
 
 .match-lifecycle-chip.cancelled,
 .match-lifecycle-chip.abandoned,
+.match-lifecycle-chip.unknown,
 .match-lifecycle-chip.unknown_problem {
   color: #9f1239;
 }
@@ -590,6 +659,7 @@ input {
   color: #b45309;
 }
 
+.match-lifecycle-chip.started,
 .match-lifecycle-chip.live {
   color: #0369a1;
 }
@@ -1175,7 +1245,9 @@ th {
   }
 
   .sidebar nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
   .metrics-grid,

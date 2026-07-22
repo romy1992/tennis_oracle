@@ -180,16 +180,35 @@ def upsert_next_fixture(payload: dict[str, Any], odds: dict | None = None) -> st
     existing = next_fixtures_repo.search_filter({"event_key": payload["event_key"]})
     if existing:
         row = existing[0]
-        updated = _build_next_fixture(payload, odds=odds or row.odds)
+        stored_odds = odds or row.odds
+        updated = _build_next_fixture(payload, odds=stored_odds)
         for column in NextFixture.__table__.columns:
             if column.name in {"id", "is_completed", "moved_to_fixture_at"}:
                 continue
             setattr(row, column.name, getattr(updated, column.name))
         next_fixtures_repo.save(row)
+        if odds:
+            _capture_prematch_odds_history(payload, odds)
         return "updated"
 
     next_fixtures_repo.save(_build_next_fixture(payload, odds=odds))
+    if odds:
+        _capture_prematch_odds_history(payload, odds)
     return "inserted"
+
+
+def _capture_prematch_odds_history(payload: dict[str, Any], odds: dict) -> None:
+    """Append-only history; failures must not break next_fixture import."""
+    from backend.src.app.services.prematch_odds_snapshots import capture_imported_odds
+
+    capture_imported_odds(
+        event_key=int(payload["event_key"]),
+        odds=odds,
+        player_1_name=payload.get("event_first_player"),
+        player_2_name=payload.get("event_second_player"),
+        event_live=payload.get("event_live"),
+        source="import",
+    )
 
 
 def upsert_fixture_from_api(payload: dict[str, Any]) -> str:

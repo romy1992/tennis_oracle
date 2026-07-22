@@ -244,6 +244,18 @@ Abuso loggato con path / scope / IP o `telegram_user_id` senza token o password.
 | GET | `/api/models-versions/results` | `global_update.read_models_versions_results` | admin o service | Risultati per versione/modello |
 | GET | `/api/telegram/events` | `telegram.read_telegram_events` | admin | Lista accessi/click bot (admin) |
 | GET | `/api/telegram/stats` | `telegram.read_telegram_stats` | admin | Aggregati accessi bot (admin) |
+| POST | `/api/published-predictions` | `published_predictions.create_published_prediction` | admin | Pubblica snapshot immutabile |
+| GET | `/api/published-predictions` | `published_predictions.read_published_predictions` | admin | Storico pubblicazioni (filtri) |
+| GET | `/api/published-predictions/stats` | `published_predictions.read_published_live_stats` | admin | Statistiche live tipbook (ledger immutabile; filtri periodo/modello/torneo/superficie/fascia quota) |
+| GET | `/api/published-predictions/by-publication/{publication_id}` | `published_predictions.read_publication_versions` | admin | Catena versioni |
+| GET | `/api/published-predictions/{id}` | `published_predictions.read_published_prediction` | admin | Dettaglio snapshot |
+| POST | `/api/published-predictions/{id}/corrections` | `published_predictions.create_published_prediction_correction` | admin | Nuova versione (append-only) |
+| GET | `/api/live-beta-dashboard` | `live_beta_dashboard.read_live_beta_dashboard` | admin | Dashboard aggregata beta live (pipeline, tipbook, bot, completezza, errori) |
+| POST | `/api/prematch-odds-snapshots` | `prematch_odds_snapshots.create_prematch_odds_snapshot` | admin | Append singolo rilevamento quote |
+| POST | `/api/prematch-odds-snapshots/from-payload` | `prematch_odds_snapshots.create_prematch_odds_snapshots_from_payload` | admin | Ingest matrice Home/Away |
+| POST | `/api/prematch-odds-snapshots/from-fixture/{event_key}` | `prematch_odds_snapshots.create_prematch_odds_snapshots_from_fixture` | admin | Snapshot da odds JSON corrente |
+| GET | `/api/prematch-odds-snapshots` | `prematch_odds_snapshots.read_prematch_odds_snapshots` | admin | Storico quote (filtri) |
+| GET | `/api/prematch-odds-snapshots/{id}` | `prematch_odds_snapshots.read_prematch_odds_snapshot` | admin | Dettaglio snapshot |
 
 ### Presenti nel codice ma non montate in `api_router` (legacy / opzionali)
 
@@ -317,6 +329,8 @@ Modulo `backend/src/entity/` (home canonica delle tabelle operative). `app/model
 | `BettingSlip` / `BettingSlipDay` / `BettingSlipPick` | Schedine e selezioni; pick con campi value (`void_odds`, `min_edge_percent`, `value_decision`, …) |
 | `GlobalUpdateRun` / `GlobalUpdateRunItem` | Stato aggiornamento globale e step per combo modello |
 | `TelegramBotEvent` | Accessi/comandi bot (`telegram_bot_event`; migrazione `0010`) |
+| `PublishedPrediction` | Registro immutabile pronostici pubblicati (`published_prediction`; migrazione `0013`; versioni via `publication_id` + `content_version`) |
+| `PrematchOddsSnapshot` | Storico append-only quote pre-match per bookmaker/selezione (`prematch_odds_snapshot`; migrazione `0014`; tipi `opening`/`observed`/`publication`/`closing`) |
 | `AdminUser` | Account amministratore (`admin_user`; migrazione `0011`; solo hash password) |
 | `RateLimitBucket` | Contatori rate limit multi-istanza (`rate_limit_bucket`; migrazione `0012`) |
 
@@ -364,6 +378,75 @@ Repository specializzati (eredita `CrudRepository`):
 | `compute_daily_prediction_stats` | Metriche per giorno |
 | `compute_prediction_summary` | Summary + breakdown per modello |
 
+#### `app/services/published_predictions.py`
+
+Registro append-only dei pronostici **pubblicati** (non sostituisce `MatchPrediction` né le schedine).
+
+| Funzione | Ruolo |
+|----------|-------|
+| `publish_prediction` | Inserisce snapshot v1 + `content_hash` (rifiuta se partita già iniziata) |
+| `correct_published_prediction` | Nuova versione collegata a `previous_version_id` (solo su latest; freeze post-kickoff) |
+| `list_published_predictions` / `get_published_prediction` | Storico e dettaglio |
+| `list_publication_versions` | Catena versioni per `publication_id` |
+| `compute_content_hash` / `match_has_started` | Hash canonico SHA-256; freeze su kickoff UTC / stato terminale |
+
+#### `app/services/live_betting_metrics.py`
+
+Formule pure per il tipbook live (separate da `ml.training.value_bet_metrics`):
+
+| Funzione | Ruolo |
+|----------|-------|
+| `hit_rate` / `hit_rate_pct` | won / (won + lost); void/open esclusi |
+| `roi_pct` / `yield_pct` | profit / stake_settled × 100 (identici per convenzione prodotto) |
+| `max_drawdown` | Max calo peak→trough sulla curva equity dei tip chiusi in ordine cronologico |
+| `longest_streaks` | Serie positiva/negativa max (void/open saltati) |
+
+#### `app/services/published_live_stats.py`
+
+KPI live **solo** dal ledger `PublishedPrediction` (non da `MatchPrediction` / schedine / backtest). Settlement a lettura via `match_lifecycle.settle_simulated_bet`.
+
+| Funzione | Ruolo |
+|----------|-------|
+| `compute_published_live_stats` | Totale/chiusi/aperti/void, hit rate, stake, profitto, ROI, yield, quota media, max drawdown, streak, distribuzioni; filtri `tournament_name` / `surface` / `odds_band` |
+| `settle_published_tips` / `list_settled_published_tips` | Settlement a lettura + liste tip con esito |
+| `selection_to_predicted_winner` | Mappa selection (nome/lato) → First/Second Player |
+| `odds_bucket` / `edge_bucket` / `period_key` | Bucket per distribuzioni |
+
+#### `app/services/live_beta_dashboard.py`
+
+Aggregato admin per la beta live: riusa pipeline (`global_update` + `import_state`), tipbook live, telegram stats, completezza quote/snapshot ed errori recenti. Non mescola training/backtest nei KPI LIVE.
+
+| Funzione | Ruolo |
+|----------|-------|
+| `compute_live_beta_dashboard` | Risposta unica per `GET /api/live-beta-dashboard` |
+
+**Formule e convenzioni (tipbook live):**
+
+- **Open** = pending; **Void** = stake restituito (escluso da hit rate / ROI / yield); **Closed** = won ∪ lost.
+- **Hit rate** = won / (won + lost).
+- **Stake totale** = Σ `unit_stake` su tutta la popolazione filtrata.
+- **Stake settled** = Σ stake realizzati su won+lost (denominatore ROI/yield).
+- **Profitto** = Σ P/L (won: stake×(odds−1); lost: −stake; void/open: 0).
+- **ROI %** = **Yield %** = profit / stake_settled × 100 (`null` se stake settled = 0).
+- **Quota media** = media aritmetica delle odds pubblicate presenti.
+- **Max drawdown** = massimo calo peak→trough sulla equity cumulata dei soli tip chiusi (ordine `event_date`, `published_at`).
+- **Serie +/-** = run consecutive di won / lost nella stessa sequenza (void/open saltati, non interrompono).
+- Default: `latest_only=true` (una riga per `publication_id`).
+- Separato da training/backtest (`value_bet_metrics`) e dalle stats operative su `MatchPrediction` / `BettingSlip*`.
+
+#### `app/services/prematch_odds_snapshots.py`
+
+Ledger append-only delle quote pre-match (non sostituisce il JSON su `Fixture`/`NextFixture`, né la tabella ML `odds_snapshot`).
+
+| Funzione | Ruolo |
+|----------|-------|
+| `record_snapshot` | Append singolo rilevamento (dedup per `detection_hash` / quote invariate) |
+| `record_odds_payload` | Parse matrice Home/Away → N snapshot (tipo `auto` → opening/observed) |
+| `record_odds_from_stored_fixture` | Cattura da odds JSON di `NextFixture`/`Fixture` |
+| `list_snapshots` / `get_snapshot` | Storico e dettaglio |
+| `capture_imported_odds` | Hook best-effort usato da `import_next_fixtures` |
+| `compute_detection_hash` / `resolve_snapshot_type` | Fingerprint dedup; apertura vs osservazione |
+
 #### `app/services/betting_slips.py`
 
 | Simbolo | Ruolo |
@@ -384,9 +467,11 @@ Repository specializzati (eredita `CrudRepository`):
 
 | Simbolo | Ruolo |
 |---------|-------|
-| `classify_match_lifecycle` | Normalizza `event_status`/winner → `scheduled`/`live`/`finished`/`postponed`/`cancelled`/`abandoned`/`walkover`/`retired`/`unknown_problem` |
-| `is_void_for_betting` | Pick void se status terminale senza winner bettable (cancelled/abandoned/…); postponed resta pending |
+| `classify_match_lifecycle` | Normalizza `event_status`/winner → `upcoming`/`started`/`completed`/`postponed`/`cancelled`/`abandoned`/`walkover`/`retired`/`unknown` (alias legacy: `scheduled`/`live`/`finished`/`unknown_problem`) |
+| `settlement_policy` / `settle_simulated_bet` | Matrice esplicita effetti su singole/schedine/stake/profitto/ROI; idempotente; cancelled/non disputate → void (mai perse) |
+| `is_void_for_betting` | Pick void se status terminale senza winner bettable; postponed resta pending |
 | `match_lifecycle_label` | Label IT per UI/Telegram |
+| `resolve_slip_status_from_picks` / `slip_profit_units` | Aggregazione slip e P/L (void/pending → 0) |
 
 **Nota naming:** `void_odds` = quota void/break-even del modello (`1/P`). Non confondere con `pick_status="void"` (partita annullata / non scommettibile).
 
@@ -588,8 +673,11 @@ Per aggiornare **tutte** le combo modello/versione con artefatto su disco usare 
 |------|--------|
 | `/login` | `LoginPage` (pubblica) |
 | `/` | Redirect → `/predictions` (protetta) |
+| `/live-beta-dashboard` | `LiveBetaDashboardPage` |
 | `/predictions` | `PredictionsPage` |
 | `/prediction-stats` | `PredictionStatsPage` |
+| `/published-predictions` | `PublishedPredictionsPage` |
+| `/published-live-stats` | `PublishedLiveStatsPage` |
 | `/betting-slips` | `BettingSlipsPage` |
 | `/betting-slip-model-stats` | `BettingSlipModelStatsPage` |
 | `/global-update-report` | `GlobalUpdateReportPage` |
@@ -603,8 +691,11 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 | Componente | Ruolo |
 |------------|-------|
 | `LoginPage` | Login admin; salva access token in `localStorage` |
+| `LiveBetaDashboardPage` | Dashboard admin beta live: pipeline, tip oggi/aperti/chiusi, KPI+drawdown, bot, errori, completezza; separazione LIVE/BACKTEST |
 | `PredictionsPage` | Lista partite+predizioni; margine globale (default 2%); void/decision in riga |
 | `PredictionStatsPage` | Summary e serie giornaliere accuracy/ROI |
+| `PublishedPredictionsPage` | Storico registro immutabile pubblicazioni (filtri, versioni, hash) |
+| `PublishedLiveStatsPage` | KPI live tipbook dal ledger (hit rate, ROI/yield, drawdown, streak, distribuzioni) |
 | `BettingSlipsPage` | Calendario, tab modello, 9 slip a tier, colonna media quote bookmakers, margine globale (default 2%), status pick void / quota effettiva |
 | `BettingSlipModelStatsPage` | Tabella comparativa stats per modello |
 | `GlobalUpdateReportPage` | Report ultima run globale: errori, warning, fasi, combo |
@@ -625,7 +716,7 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 
 ### `services/apiClient.ts`
 
-Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, betting-slips, imports, global-update, single-match-value, Telegram analytics.  
+Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, published-predictions (+ live stats), live-beta-dashboard, betting-slips, imports, global-update, single-match-value, Telegram analytics.
 Invia `Authorization: Bearer` quando presente; su **401** notifica il handler di sessione scaduta.  
 `ApiError` — errore HTTP con `status`.
 
@@ -728,11 +819,11 @@ python -m src.app.telegram.bot
 
 ## 9. Schema dati
 
-Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `telegram_bot_event` (analytics accessi bot).
+Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `telegram_bot_event` (analytics accessi bot), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`).
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
 
-Catena migrazioni recente (Alembic): `0008_global_update_runs` → `0009_pick_min_edge_fields` → `0010_telegram_bot_events`.
+Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot`.
 
 ```bash
 cd backend

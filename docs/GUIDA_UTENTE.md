@@ -38,10 +38,13 @@ Nel menu laterale trovi:
 
 | Voce | A cosa serve |
 |------|----------------|
+| **Dashboard beta live** | Panoramica operativa LIVE: stato pipeline, tip pubblicati oggi, aperti/chiusi, KPI e drawdown, utilizzo bot, errori recenti e completezza dati. Filtri per periodo, modello, torneo, superficie e fascia di quota. Le metriche di training/backtest restano in sezioni separate |
 | **Partite** | Elenco partite con pronostico, quota void e stato valore (PLAY / BORDERLINE / NO BET) e stato partita (da giocare, rinviata, annullata, …) |
 | **Consiglio schedina** | Fino a 9 schedine per giorno a difficoltà crescente: 3 solo Play, 3 Play+Borderline, 3 miste |
 | **Statistiche schedine** | Confronto risultati delle schedine tra modelli/versioni |
-| **Statistiche previsioni** | Accuratezza e metriche delle previsioni nel tempo |
+| **Statistiche previsioni** | Accuratezza e metriche delle previsioni operative nel tempo (non il registro pubblicazioni) |
+| **Storico pubblicazioni** | Registro immutabile dei pronostici pubblicati (versione, hash, fonte); dopo l’inizio partita non si modifica, le correzioni creano una nuova versione |
+| **Statistiche live** | Performance dei tip pubblicati: hit rate, stake, profitto, ROI/yield, drawdown, serie e distribuzioni. Solo registro immutabile; non confondere con training o backtest |
 | **Report aggiornamento** | Esito dell’ultima run “Aggiorna tutto”: errori, warning, fasi e combo modello |
 | **Bot Telegram** | Solo admin: accessi e comandi usati sul bot (KPI, filtri per data/utente/comando, breakdown giornaliero, storico) |
 
@@ -73,9 +76,39 @@ Per ogni partita con quote e pronostico il sistema calcola:
 
 Nella schedina, la colonna **Media quote bookmakers** è la media delle quote di mercato sul pick (non la quota di un singolo bookmaker). **Non confondere** la colonna Void (quota break-even) con una partita **annullata**: se una partita è cancellata / abbandonata / senza esito scommettibile, il pick in schedina diventa **Annullato** e la sua quota non conta più nella quota combinata.
 
+Il sistema conserva anche uno **storico delle quote pre-match** (apertura, osservazioni successive, momento di pubblicazione del tip, chiusura): ogni rilevamento resta in archivio e non sovrascrive il precedente. Le quote “correnti” usate in Predizioni / Value / Schedine restano quelle aggiornate sull’incontro; lo storico serve per analisi nel tempo (es. CLV).
+
 ### Stato partita e schedine ridotte
 
 Nella colonna **Stato** (Partite) e nei dettagli pick (Schedine) vedi anche se la partita è rinviata, annullata, abbandonata, walkover, ecc.
+
+Stati normalizzati della partita:
+
+| Stato | Significato | Singola / pick | Stake e ROI |
+|-------|-------------|----------------|-------------|
+| Da giocare | Non iniziata | In corso | Stake aperto; non entra nel ROI |
+| In corso | Live | In corso | Stake aperto; non entra nel ROI |
+| Terminata | Esito con vincitore | Presa / Persa | Conteggiata in profitto e ROI |
+| Rinviata | Rimandata | In corso (non annullata) | Stake aperto; non entra nel ROI |
+| Annullata / Abbandonata / Esito mancante | Non disputata in modo definitivo | **Annullato** (mai Persa) | Stake restituito; esclusa dal ROI |
+| Walkover / Ritiro **con** vincitore | Esito ufficiale | Presa / Persa | Come una partita terminata |
+| Walkover / Ritiro **senza** vincitore | Non scommettibile | Annullato | Come annullata |
+
+La **quota void** (break-even del modello) non cambia con lo stato partita: è solo un calcolo di probabilità.
+
+### Statistiche live (registro pubblicazioni)
+
+La pagina **Statistiche live** misura solo i tip salvati nello storico pubblicazioni (non le previsioni operative, non le schedine, non i report di training).
+
+La **Dashboard beta live** riunisce in un’unica vista lo stato della pipeline, i tip di oggi, aperti/chiusi, gli stessi KPI live (incluso drawdown), l’uso del bot, gli errori recenti e indicatori di completezza dati. Nel menu e in pagina le aree **LIVE** e **BACKTEST** restano distinte.
+
+In sintesi:
+
+- **Chiusi / aperti / void** seguono le stesse regole di settlement delle altre pagine (annullata = void, non persa)
+- **Hit rate** = prese / (prese + perse); i void non entrano
+- **Stake totale** = somma degli stake pubblicati; il ROI usa solo lo stake delle scommesse chiuse
+- **ROI e yield** (in %) sono uguali: profitto / stake chiuso
+- **Max drawdown** e **serie +/-** seguono l’ordine cronologico dei tip chiusi
 
 Regole sulle schedine:
 
@@ -84,6 +117,7 @@ Regole sulle schedine:
 - rinvio (ancora da giocare) → pick **In corso**, schedina resta in corso
 - se **tutti** i pick sono annullati → schedina **Annullata** (puntata restituita / profitto 0)
 - walkover / ritiro **con vincitore** → conteggiati come presa/persa normalmente
+- le partite annullate o non disputate **non** contano come perse nelle singole né nelle schedine
 
 ### Consiglio schedine (difficoltà)
 
