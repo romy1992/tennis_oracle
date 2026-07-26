@@ -692,7 +692,8 @@ export type GlobalUpdateStatus =
   | "completed"
   | "completed_with_errors"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "interrupted";
 
 export type GlobalUpdateRunItemRead = {
   model_version: string;
@@ -710,7 +711,7 @@ export type GlobalUpdateRunItemRead = {
 export type GlobalUpdateRunRead = {
   id: number;
   run_date: string;
-  origin: "manual" | "cron";
+  origin: "manual" | "cron" | "job";
   status: GlobalUpdateStatus;
   current_phase: string | null;
   progress_pct: number | null;
@@ -747,7 +748,7 @@ export type GlobalUpdateReportPhase = {
 export type GlobalUpdateReportRead = {
   run_id: number;
   run_date: string;
-  origin: "manual" | "cron";
+  origin: "manual" | "cron" | "job";
   status: GlobalUpdateStatus;
   started_at: string | null;
   finished_at: string | null;
@@ -763,7 +764,7 @@ export type ModelsVersionsResultsResponse = {
   date: string;
   last_updated_at: string | null;
   last_run_id: number | null;
-  last_run_origin: "manual" | "cron" | null;
+  last_run_origin: "manual" | "cron" | "job" | null;
   versions: Array<{
     version: string;
     models: Array<{

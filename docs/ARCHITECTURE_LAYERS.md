@@ -43,7 +43,7 @@ HTTP / bot / scheduler / jobs
 | `app/services/imports.py`, `global_update.py` | `service/import_*` | Facade verso import legacy |
 | `service/import_*` | `repository/*` → `entity/*` | Scritture/letture import |
 | `app/services/*` (predictions, slips, …) | `app/models` / `entity` + `Session` | Bypass repository |
-| `jobs/daily_pipeline.py` | `service/*` (+ opz. migrator) | Pipeline batch |
+| `jobs/run_global_update.py` / `daily_pipeline.py` | `global_update` (+ opz. migrator) | Job batch = stesso orchestratore UI |
 | `jobs/generate_upcoming_predictions.py` | `app/services/predictions` + ML | Mix nuovo |
 | ML (`app/ml/*`) | `entity` / `app/models` / a volte `repository_db.SessionLocal` | Storico vs path moderni |
 
@@ -77,7 +77,7 @@ HTTP / bot / scheduler / jobs
 | `import_fixtures.py` | `app/services/imports`, global_update, daily_pipeline | Import fixture giocate |
 | `import_next_fixtures.py` | idem + test dedicati | Next fixture + promozione |
 | `import_stading_player.py` | `import_fixtures` | Standing + player |
-| `database_migrator.py` | `jobs/daily_pipeline` (sync cloud) | Copia SOURCE→TARGET |
+| `database_migrator.py` | step sync di `global_update` / job CLI | Copia SOURCE→TARGET |
 
 ### `entity/` (ORM di dominio — attivo)
 

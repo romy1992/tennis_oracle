@@ -1,53 +1,62 @@
-# Scheduling giornaliero (09:00)
+# Scheduling giornaliero (produzione)
 
-## Cosa fa il job
+## Orchestratore unico
 
-`DailyPipeline` (`backend/src/jobs/daily_pipeline.py`):
+Il job di produzione e il pulsante UI **Aggiorna tutto** usano lo **stesso orchestratore**:
+`backend.src.app.services.global_update` (`start_global_update` / `_execute_global_update`).
 
-1. **Import fixtures** nel DB locale (ieri → oggi, come `import_fixtures`)
-2. **Import prossime partite** in `next_fixture` per i prossimi 10 giorni
-3. **Genera previsioni salvate** in `match_prediction` per le prossime partite, scegliendo automaticamente il modello migliore dalle metriche della versione attiva
-4. **Sync cloud** verso `DATABASE_TARGET_URL` con upsert
-
-Default CLI: `--prediction-model-version v2` (una sola versione/modello). Per aggiornare **tutte** le combo con artefatto `.pkl` su disco usa invece l’aggiornamento globale dall’API/UI (`POST /api/global-update`). Frontend e bot Telegram defaultano a **v3**.
-
-Policy previsioni: il job mantiene una riga per `event_key + model_version + model_name`.
-Le righe future/non risolte vengono aggiornate se il job gira di nuovo; le righe gia
-valutabili con `actual_winner` non vengono sovrascritte, cosi lo storico resta
-confrontabile con i risultati importati.
-
-Policy modello: se `--prediction-model-name` non viene passato, il job legge
-le metriche della versione richiesta e sceglie il modello con
-`roc_auc` piu alto; se non disponibile usa `accuracy`, poi `log_loss` piu basso.
-`roc_auc` e il criterio primario perche le previsioni esposte sono probabilita,
-quindi serve premiare la capacita discriminante del modello.
-
-Comando unico (dalla root del repository):
+Entrypoint CLI consigliato:
 
 ```bash
-python3 -m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v2
+python3 -m backend.src.jobs.run_global_update --days-forward 10
 ```
 
-Esempio con v3:
+Compatibilità: `python -m backend.src.jobs.daily_pipeline` delega allo stesso job
+(con `force=True` per preservare il comportamento “esegui sempre” degli script legacy).
 
-```bash
-python3 -m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v3
-```
+### Cosa fa la pipeline
 
-## Configurazione (`backend/properties/config.env`)
+1. **Lock distribuito** su tabella `pipeline_lock` (niente esecuzioni concorrenti)
+2. **Import fixtures** disputate
+3. **Import prossime partite** (`next_fixture`)
+4. **Previsioni + schedine + pubblicazione live** per **tutte** le combo con artefatto `.pkl`
+5. **Sync cloud** opzionale (`--sync-cloud` / `SYNC_CLOUD=true`)
+6. **Report finale** in `global_update_run.report_json` (stesso report della UI)
+
+### Affidabilità
+
+| Funzione | Comportamento |
+|----------|----------------|
+| Lock DB | `pipeline_lock` con lease + heartbeat |
+| Idempotenza | Skip se già `completed` oggi (salvo `--force`) |
+| Retry | `GLOBAL_UPDATE_STEP_RETRIES` + backoff |
+| Timeout step | `GLOBAL_UPDATE_STEP_TIMEOUT_SECONDS` |
+| Stato / durata | `global_update_run` + `phases_json` + item per combo |
+| Crash | run → `interrupted`; job riprende con auto-resume / `--resume` |
+| Cancel | flag DB `cancel_requested` (UI o API); cooperativa |
+| Exit code | `0` ok, `1` with errors, `2` failed/interrupted, `3` cancelled, `4` busy, `5` config |
+
+Scheduler in-app (`GLOBAL_UPDATE_CRON_ENABLED`) resta **opzionale** e va tenuto `false` in produzione multi-replica: usa cron host o `docker compose --profile jobs`.
+
+## Configurazione
+
+`backend/properties/config.env` (vedi anche `config.env.example`):
 
 ```env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tennis_db
 DATABASE_SOURCE_URL=postgresql://postgres:postgres@localhost:5432/tennis_db
 DATABASE_TARGET_URL=postgresql://postgres:postgres@<host-cloud>:5432/tennis_db
 SYNC_CLOUD=true
+
+GLOBAL_UPDATE_CRON_ENABLED=false
+GLOBAL_UPDATE_ALLOW_CONCURRENT_RUNS=false
+GLOBAL_UPDATE_STEP_RETRIES=2
+GLOBAL_UPDATE_RETRY_BACKOFF_SECONDS=5
+GLOBAL_UPDATE_STEP_TIMEOUT_SECONDS=3600
+GLOBAL_UPDATE_LOCK_TTL_SECONDS=21600
 ```
 
-- `DATABASE_URL` / `DATABASE_SOURCE_URL`: DB sul **tuo PC**
-- `DATABASE_TARGET_URL`: DB sul **server cloud agent**
-- Il cloud agent **non** raggiunge il tuo `localhost` senza tunnel SSH o host esposto
-
-Prima di schedulare il job, installa le dipendenze e applica lo schema:
+Applica le migrazioni (inclusa `0016_pipeline_reliability`):
 
 ```bash
 cd backend
@@ -55,7 +64,15 @@ pip install -r requirements.txt
 alembic upgrade head
 ```
 
-## Cron sul tuo PC (consigliato per DB locale)
+## Docker one-shot
+
+```bash
+docker compose --profile jobs run --rm job
+```
+
+Il servizio `job` esegue `backend.src.jobs.run_global_update`.
+
+## Cron sul PC
 
 ### Linux / macOS
 
@@ -65,65 +82,79 @@ chmod +x /percorso/tennis_oracle/backend/scripts/run_daily_job.sh
 crontab -e
 ```
 
-Aggiungi (adatta il percorso):
-
 ```cron
 0 9 * * * /percorso/tennis_oracle/backend/scripts/run_daily_job.sh
 ```
 
 ### Windows (Task Scheduler)
 
-1. **Utilità di pianificazione** → Crea attività di base
-2. Trigger: ogni giorno alle **09:00**
-3. Azione: avvia programma  
-   - Programma: `C:\percorso\tennis_oracle\backend\scripts\run_daily_job.bat`  
-   - Oppure: `python` con argomenti `-m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v2`  
-   - Cartella iniziale: root del repository `tennis_oracle/`
+1. Trigger giornaliero (es. 09:00)
+2. Programma: `...\backend\scripts\run_daily_job.bat`
+3. Cartella iniziale: root del repository
 
-## Cursor Automations (agent cloud): quando usarle?
-
-| Obiettivo | Soluzione |
-|-----------|-----------|
-| Scrivere nel **DB locale sul PC** | **Cron / Task Scheduler sul PC** (questa guida) |
-| Job solo sul **DB cloud** | Cursor **Automations** (agent in cloud) |
-| Entrambi (locale + cloud) | **Cron sul PC** che esegue `daily_pipeline` (import locale + sync verso cloud) |
-
-**Non serve** creare un'Automation dell'agente se il PC deve restare la sorgente dati: l'Automation gira in cloud e non vede il tuo PostgreSQL locale senza tunnel.
-
-### Se vuoi comunque un'Automation (solo cloud)
-
-Utile solo se:
-
-- importi direttamente sul DB cloud, oppure
-- il tuo PC espone Postgres via tunnel e l'agent ha `DATABASE_SOURCE_URL` raggiungibile
-
-Prompt esempio per Automation:
-
-> Ogni giorno alle 09:00 esegui `python3 -m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v2` dalla root del repo tennis_oracle. Verifica che `backend/properties/config.env` abbia le URL DB corrette e logga l'esito.
-
-## Test manuale
+## Comandi utili
 
 ```bash
-cd /percorso/tennis_oracle
+# Run standard (skip se già completata oggi; auto-resume se interrupted)
+python3 -m backend.src.jobs.run_global_update --days-forward 10
 
-# Solo import locale
-python3 -m backend.src.service.import_fixtures
+# Forza nuova run
+python3 -m backend.src.jobs.run_global_update --force
 
-# Import + sync cloud
-python3 -m backend.src.jobs.daily_pipeline --days-forward 10 --prediction-model-version v2
+# Con sync cloud
+python3 -m backend.src.jobs.run_global_update --sync-cloud
 
-# Solo import, senza cloud
-python3 -m backend.src.jobs.daily_pipeline --no-sync --days-forward 10 --prediction-model-version v2
+# Riprendi dal primo step/item fallito
+python3 -m backend.src.jobs.run_global_update --resume
+python3 -m backend.src.jobs.run_global_update --resume-run-id 42
 
-# Override manuale del modello, se vuoi rigenerare una variante specifica
-python3 -m backend.src.jobs.daily_pipeline --no-sync --prediction-model-version v2 --prediction-model-name random_forest
+# Senza auto-resume
+python3 -m backend.src.jobs.run_global_update --no-auto-resume --force
+```
 
-# Solo generazione previsioni per fixture gia importate
-python3 -m backend.src.jobs.generate_upcoming_predictions --days-forward 10 --model-version v2
+Il pulsante UI continua a chiamare `POST /api/global-update` (stesso orchestratore, thread in-process, senza sync cloud di default).
+
+## Policy previsioni
+
+Una riga per `event_key + model_version + model_name`. Le righe future/non risolte
+vengono aggiornate; le righe già valutabili con `actual_winner` non vengono sovrascritte.
+
+## Controlli operativi post-job
+
+Dopo il job giornaliero puoi eseguire i check di monitoraggio (import fresco,
+presenza pronostici, durata anomala, esito ultima run) e inviare alert admin:
+
+```bash
+python3 -m backend.src.jobs.run_ops_checks --alert
+```
+
+Exit code: `0` ok, `1` warning, `2` critical. Configurazione e canali alert:
+[MONITORING.md](MONITORING.md).
+
+## Backup PostgreSQL
+
+Dump logico pianificato (timestamp, compressione custom, retention, GPG opzionale,
+alert su errore). Dettaglio e disaster recovery: [BACKUP_DR.md](BACKUP_DR.md).
+
+```bash
+# Manuale
+python3 -m backend.src.jobs.run_db_backup --alert
+
+# Cron (es. 03:30)
+30 3 * * * /percorso/tennis_oracle/backend/scripts/backup_postgres.sh
+```
+
+Windows Task Scheduler: `backend\scripts\backup_postgres.bat`.
+
+Restore di prova **senza** toccare il DB reale:
+
+```bash
+python3 -m backend.src.jobs.run_db_restore --archive backups/<file>.dump --mode dry-run
+python3 -m backend.src.jobs.run_db_restore --archive backups/<file>.dump --mode test
 ```
 
 ## Closing odds (job futuro)
 
 L’import corrente cattura `opening`/`observed` e, a partita live, può etichettare come `closing` l’**ultimo** observed pre-kickoff (`seal_closing_from_last_prematch`). Non è un true closing di mercato affidabile senza polling frequente.
 
-**Job futuro consigliato:** cattura dedicata della quota nell’intervallo immediatamente precedente l’inizio partita (es. ogni 1–5 minuti nelle ultime 30–60 minuti), scrivendo `snapshot_type=closing` solo con `captured_at` pre-kickoff. Fino ad allora la dashboard segnala closing mancante/parziale senza inventare dati.
+**Job futuro consigliato:** cattura dedicata della quota nell’intervallo immediatamente precedente l’inizio partita (es. ogni 1–5 minuti nelle ultime 30–60 minuti), scrivendo `snapshot_type=closing` solo con `captured_at` pre-kickoff.

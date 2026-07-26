@@ -1,0 +1,66 @@
+# Production overlay for tennis_oracle.
+# Usage:
+#   cp .env.example .env   # set strong secrets; APP_ENV=production
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+#
+# Differences vs local compose:
+# - no published Postgres port (DB only on the Docker network)
+# - stricter defaults (no unauthenticated service reads, cron off unless set)
+# - API/frontend restart policy and resource-friendly logging
+# - models mount remains optional via MODELS_HOST_PATH
+
+name: tennis_oracle
+
+services:
+  db:
+    ports: !reset []
+    restart: always
+
+  migrate:
+    restart: "no"
+
+  api:
+    restart: always
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: "false"
+      ALLOW_UNAUTHENTICATED_SERVICE_READS: ${ALLOW_UNAUTHENTICATED_SERVICE_READS:-false}
+      GLOBAL_UPDATE_CRON_ENABLED: ${GLOBAL_UPDATE_CRON_ENABLED:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+    # Prefer an explicit public URL for the SPA build in prod (.env).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    restart: always
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  bot:
+    restart: always
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-http://api:8000/api}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  job:
+    restart: "no"
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      SYNC_CLOUD: ${SYNC_CLOUD:-false}

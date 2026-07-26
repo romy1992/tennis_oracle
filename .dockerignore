@@ -1,0 +1,63 @@
+# Exclude everything not needed in backend/frontend images.
+# Build contexts: backend → repository root; frontend → frontend/ (own ignore file).
+
+# VCS / IDE
+.git
+.github
+.cursor
+.idea
+.vscode
+**/.DS_Store
+
+# Python envs and caches
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/.coverage.*
+**/htmlcov
+**/coverage.xml
+backend/htmlcov
+backend/coverage.xml
+.coverage
+htmlcov
+pytest.ini
+
+# Frontend is built from its own context — skip when building backend from root
+frontend
+
+# Node (if present at root)
+**/node_modules
+
+# Secrets — never bake into images
+**/.env
+**/.env.local
+**/.env.*.local
+backend/.env
+backend/properties/config.env
+!.env.example
+!backend/properties/config.env.example
+
+# Datasets, trained models, reports, DB dumps (mount at runtime if needed)
+backend/data/processed
+backend/data/models
+backend/data/reports
+backend/src/back_up_db
+backups
+**/*.sql
+**/*.pkl
+**/*.joblib
+
+# Logs
+**/logs
+**/*.log
+debug-*.log
+
+# Docs and tests (not required at runtime)
+docs
+backend/tests
+*.md

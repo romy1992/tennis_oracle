@@ -1,0 +1,172 @@
+# Local development stack: API + frontend (+ optional bot/jobs).
+# Default DB: PostgreSQL on the host (host.docker.internal), same as backend/.env.
+# Embedded Postgres (db-1) is optional via profile `embedded-db` — not started by default.
+# Volume `postgres_data` is kept; never use `down -v` unless you intend to wipe it.
+#
+# Setup:
+#   cp .env.example .env
+#   # credentials: backend/.env + backend/properties/config.env
+#   docker compose up --build -d
+#
+# See docs/DOCKER.md for start/stop, migrate, bot, jobs, hot-reload (docker-compose.dev.yml), and re-enabling db-1.
+
+name: tennis_oracle
+
+x-backend-env: &backend-db-env
+  APP_ENV: ${APP_ENV:-local}
+  # Host Postgres (Docker Desktop / Compose host-gateway). Overrides localhost in backend/.env.
+  DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:5432/tennis_db}
+  DATABASE_SOURCE_URL: ${DATABASE_SOURCE_URL:-postgresql://postgres:postgres@host.docker.internal:5432/tennis_db}
+
+x-backend-env-files: &backend-env-files
+  - path: .env
+    required: false
+  - path: backend/.env
+    required: false
+  - path: backend/properties/config.env
+    required: false
+
+x-backend-credential-mounts: &backend-credential-mounts
+  - ./backend/.env:/app/backend/.env:ro
+  - ./backend/properties/config.env:/app/backend/properties/config.env:ro
+
+x-host-gateway: &host-gateway
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  # Optional embedded Postgres (db-1). Disabled by default — keep volume intact.
+  # Enable: docker compose --profile embedded-db up -d db
+  # Then set DATABASE_URL=...@db:5432/... and restart api/migrate/bot/job.
+  db:
+    profiles: ["embedded-db"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-tennis_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-tennis_db}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: tennis_oracle-backend:${IMAGE_TAG:-local}
+    restart: "no"
+    env_file: *backend-env-files
+    environment:
+      <<: *backend-db-env
+    <<: *host-gateway
+    volumes: *backend-credential-mounts
+    working_dir: /app/backend
+    command: ["alembic", "upgrade", "head"]
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: tennis_oracle-backend:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    env_file: *backend-env-files
+    environment:
+      <<: *backend-db-env
+      DEBUG: ${DEBUG:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://localhost:5174","http://127.0.0.1:5173","http://127.0.0.1:5174"]}
+      CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-^https?://(localhost|127\\.0\\.0\\.1):\\d+$}
+      GLOBAL_UPDATE_CRON_ENABLED: ${GLOBAL_UPDATE_CRON_ENABLED:-false}
+      ALLOW_UNAUTHENTICATED_SERVICE_READS: ${ALLOW_UNAUTHENTICATED_SERVICE_READS:-true}
+    <<: *host-gateway
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./backend/.env:/app/backend/.env:ro
+      - ./backend/properties/config.env:/app/backend/properties/config.env:ro
+      - ${MODELS_HOST_PATH:-./backend/data/models}:/app/backend/data/models:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    image: tennis_oracle-frontend:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Optional: Telegram bot
+  #   docker compose --profile bot up -d bot
+  bot:
+    profiles: ["bot"]
+    image: tennis_oracle-backend:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    env_file: *backend-env-files
+    environment:
+      <<: *backend-db-env
+      TELEGRAM_API_BASE_URL: http://api:8000/api
+    <<: *host-gateway
+    volumes: *backend-credential-mounts
+    working_dir: /app
+    command: ["python", "-m", "backend.src.app.telegram.bot"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Optional one-shot daily pipeline
+  #   docker compose --profile jobs run --rm job
+  job:
+    profiles: ["jobs"]
+    image: tennis_oracle-backend:${IMAGE_TAG:-local}
+    restart: "no"
+    env_file: *backend-env-files
+    environment:
+      <<: *backend-db-env
+      DATABASE_TARGET_URL: ${DATABASE_TARGET_URL:-}
+      SYNC_CLOUD: ${SYNC_CLOUD:-false}
+    <<: *host-gateway
+    volumes:
+      - ./backend/.env:/app/backend/.env:ro
+      - ./backend/properties/config.env:/app/backend/properties/config.env:ro
+      - ${MODELS_HOST_PATH:-./backend/data/models}:/app/backend/data/models:ro
+    working_dir: /app
+    command:
+      [
+        "python",
+        "-m",
+        "backend.src.jobs.run_global_update",
+        "--days-forward",
+        "10",
+      ]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+    name: tennis_oracle_postgres_data

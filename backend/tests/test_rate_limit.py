@@ -90,6 +90,11 @@ class RateLimitMiddlewareTest(unittest.TestCase):
             response = self.client.get("/health")
             self.assertEqual(response.status_code, 200)
 
+    def test_ready_is_excluded(self):
+        for _ in range(10):
+            response = self.client.get("/ready")
+            self.assertIn(response.status_code, {200, 503})
+
     def test_public_ip_limit_returns_429_with_retry_after(self):
         for _ in range(3):
             response = self.client.get("/api/auth/me")

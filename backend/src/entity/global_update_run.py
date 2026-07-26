@@ -17,13 +17,13 @@ from backend.src.entity.base import Base
 
 
 class GlobalUpdateRun(Base):
-    """One global update execution (manual or cron)."""
+    """One global update execution (manual, cron, or CLI job)."""
 
     __tablename__ = "global_update_run"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     run_date = Column(Date, nullable=False, index=True)
-    origin = Column(String, nullable=False)  # manual | cron
+    origin = Column(String, nullable=False)  # manual | cron | job
     status = Column(String, nullable=False, default="pending", index=True)
     current_phase = Column(String, nullable=True)
     progress_pct = Column(Float, nullable=True)
@@ -31,6 +31,11 @@ class GlobalUpdateRun(Base):
     finished_at = Column(DateTime, nullable=True)
     duration_seconds = Column(Float, nullable=True)
     force = Column(String, nullable=False, default="false")
+    cancel_requested = Column(String, nullable=False, default="false")
+    phases_json = Column(Text, nullable=True)
+    worker_id = Column(String(64), nullable=True)
+    resume_count = Column(Integer, nullable=False, default=0)
+    sync_cloud = Column(String, nullable=False, default="false")
     versions_processed = Column(Integer, nullable=False, default=0)
     models_processed = Column(Integer, nullable=False, default=0)
     combinations_completed = Column(Integer, nullable=False, default=0)

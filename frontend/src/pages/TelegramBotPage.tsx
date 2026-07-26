@@ -118,7 +118,7 @@ export function TelegramBotPage() {
         <div>
           <h2>Bot Telegram</h2>
           <p>
-            Accessi e comandi degli utenti del bot (solo admin). Periodo {formatDate(fromDate)} –{" "}
+            Accessi e comandi degli utenti del bot (solo admin). Periodooo {formatDate(fromDate)} –{" "}
             {formatDate(toDate)}.
           </p>
         </div>

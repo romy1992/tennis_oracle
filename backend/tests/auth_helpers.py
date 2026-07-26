@@ -34,6 +34,10 @@ def make_test_settings(**overrides) -> Settings:
         "global_update_cron_enabled": False,
         # Keep existing route tests free of rate-limit side effects by default.
         "rate_limit_enabled": False,
+        # Pin live-publication off so local config.env cannot flip suite defaults.
+        "live_publication_enabled": False,
+        "public_model_version": None,
+        "public_model_name": None,
     }
     base.update(overrides)
     return Settings(**base)

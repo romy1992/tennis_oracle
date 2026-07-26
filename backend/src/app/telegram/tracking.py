@@ -15,9 +15,21 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from backend.src.app.observability.metrics import record_counter
 from backend.src.app.services.telegram_analytics import record_telegram_event_safe
 
 Handler = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[Any]]
+
+
+def _record_bot_metric(*, event_type: str, action: str, success: bool) -> None:
+    record_counter(
+        "telegram_bot_events_total",
+        labels={
+            "event_type": (event_type or "unknown")[:32],
+            "action": (action or "unknown")[:64],
+            "success": "true" if success else "false",
+        },
+    )
 
 
 def _command_action(update: Update, fallback: str) -> str:
@@ -70,6 +82,11 @@ def tracked(
                     raw_text = update.callback_query.data
                 elif text:
                     raw_text = text
+                _record_bot_metric(
+                    event_type=event_type,
+                    action=resolved_action,
+                    success=success,
+                )
                 record_telegram_event_safe(
                     event_type=event_type,
                     action=resolved_action,
@@ -100,6 +117,7 @@ async def track_callback_query(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.effective_user
     chat = update.effective_chat
     data = query.data or "callback"
+    _record_bot_metric(event_type="callback", action=data[:255], success=True)
     record_telegram_event_safe(
         event_type="callback",
         action=data[:255],

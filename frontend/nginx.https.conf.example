@@ -1,0 +1,46 @@
+# Example HTTPS server block for the frontend nginx image (staging / prod).
+# Copy beside certs on the host and mount into the container, e.g.:
+#
+#   volumes:
+#     - ./frontend/nginx.https.conf.example:/etc/nginx/conf.d/default.conf:ro
+#     - ${STAGING_SSL_CERT}:/etc/nginx/certs/fullchain.pem:ro
+#     - ${STAGING_SSL_KEY}:/etc/nginx/certs/privkey.pem:ro
+#   ports:
+#     - "443:443"
+#     - "80:80"
+#
+# Prefer terminating TLS at a reverse proxy (Caddy / Traefik / cloud LB) and
+# keeping the container on HTTP unless you need end-to-end TLS into nginx.
+#
+# Never commit real certificates or private keys.
+
+server {
+    listen 80;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /assets/ {
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+}

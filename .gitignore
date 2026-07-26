@@ -31,6 +31,9 @@ backend/data/models/
 # Backup database
 backups/
 *.sql
+*.dump
+*.dump.gpg
+*.sha256
 
 # Log (tutti i file di log, inclusi debug-*.log e log applicativi)
 *.log
@@ -43,10 +46,15 @@ __pycache__/
 .venv/
 venv/
 
-# Variabili locali
-#.env
-#.env.*
-#!.env.example
+# Variabili locali (non committare segreti; tenere i soli *.example)
+.env
+.env.*
+!.env.example
+!.env.staging.example
+!**/.env.example
+backend/.env
+frontend/.env
+backend/properties/config.env
 
 # Test / coverage
 .coverage

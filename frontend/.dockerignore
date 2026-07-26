@@ -1,0 +1,25 @@
+# Frontend build context (.dockerignore for context=./frontend)
+
+# Dependencies and build output
+node_modules
+dist
+.vite
+coverage
+.expo
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Tests (not needed for production image)
+src/**/*.test.ts
+src/**/*.test.tsx
+src/**/*.spec.ts
+src/**/*.spec.tsx
+src/test
+
+# Tooling
+.DS_Store
+*.log
+npm-debug.log*

@@ -18,7 +18,14 @@ class Settings(BaseSettings):
     global_update_cron_enabled: bool = False
     global_update_cron_time: str = "02:00"
     global_update_cron_timezone: str = "Europe/Rome"
+    # Production: keep false. Concurrent runs are blocked by DB pipeline_lock.
     global_update_allow_concurrent_runs: bool = False
+    # Step reliability (shared by API thread and CLI job worker).
+    global_update_step_retries: int = 2
+    global_update_retry_backoff_seconds: float = 5.0
+    global_update_step_timeout_seconds: int = 3600
+    global_update_lock_ttl_seconds: int = 21600
+    # Prefer external cron/job in production; in-app scheduler stays optional.
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://localhost:5174",
@@ -63,6 +70,28 @@ class Settings(BaseSettings):
     live_publication_enabled: bool = False
     public_model_version: str | None = None
     public_model_name: str | None = None
+
+    # --- Observability (provider-agnostic; see docs/MONITORING.md) ---
+    # text | json
+    log_format: str = "text"
+    # none | memory | prometheus
+    metrics_provider: str = "memory"
+    # none | logging | sentry | webhook
+    error_tracking_provider: str = "none"
+    error_tracking_dsn: str | None = None
+    error_tracking_webhook_url: str | None = None
+    # Admin alerts (Telegram Bot API + optional webhook). Fail-open.
+    ops_alerts_enabled: bool = False
+    telegram_bot_token: str | None = None
+    telegram_admin_chat_id: str | None = None
+    ops_alert_webhook_url: str | None = None
+    ops_alert_cooldown_seconds: int = 300
+    # Operational check thresholds (import / predictions / duration).
+    ops_import_max_age_hours: int = 36
+    ops_predictions_lookback_hours: int = 36
+    ops_pipeline_max_duration_seconds: int = 7200
+    # Expose GET /metrics when metrics_provider is memory|prometheus.
+    metrics_endpoint_enabled: bool = True
 
     model_config = SettingsConfigDict(
         env_file=(

@@ -1,12 +1,8 @@
-import logging
+"""Backward-compatible entrypoint; delegates to observability.setup."""
 
 from backend.src.app.core.config import get_settings
+from backend.src.app.observability.setup import setup_observability
 
 
 def configure_logging() -> None:
-    settings = get_settings()
-    level = logging.DEBUG if settings.debug else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
+    setup_observability(get_settings())

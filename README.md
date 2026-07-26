@@ -10,7 +10,11 @@ Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espon
 |-----------|----------|
 | **Questo file** | Sviluppatori: architettura, classi, metodi, API, ML |
 | [docs/GUIDA_UTENTE.md](docs/GUIDA_UTENTE.md) | Utente medio: cosa fa il prodotto e come usarlo |
+| [docs/DOCKER.md](docs/DOCKER.md) | Docker: compose locale/prod/dev hot-reload, migrate, bot, job, rebuild BE/FE |
+| [docs/STAGING.md](docs/STAGING.md) | Staging: DB separato, CORS/HTTPS-ready, migrazioni controllate, smoke, deploy/rollback |
 | [docs/SCHEDULING.md](docs/SCHEDULING.md) | Job giornaliero, cron, sync cloud |
+| [docs/MONITORING.md](docs/MONITORING.md) | Monitoring: log JSON, correlation ID, metriche, error tracking, alert, ops checks |
+| [docs/BACKUP_DR.md](docs/BACKUP_DR.md) | Backup/restore PostgreSQL, retention, cifratura GPG, disaster recovery |
 | [docs/ARCHITECTURE_LAYERS.md](docs/ARCHITECTURE_LAYERS.md) | Layer `app/services` vs `service` vs `repository` vs `entity`; piano migrazione |
 
 > **Manutenzione docs**: ad ogni modifica rilevante di codice, aggiornare questo README e/o la guida utente (regola Cursor `.cursor/rules/keep-docs-updated.mdc`).
@@ -29,6 +33,7 @@ Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espon
 8. [Bot Telegram](#8-bot-telegram)
 9. [Schema dati](#9-schema-dati)
 10. [CI (GitHub Actions)](#10-ci-github-actions)
+11. [Docker](#11-docker)
 
 ---
 
@@ -48,7 +53,7 @@ Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espon
                                        │
                               global_update / scheduler
                                        │
-                              jobs/daily_pipeline ──sync──► DB cloud (opz.)
+                              jobs/run_global_update ──sync──► DB cloud (opz.)
 ```
 
 **Layer backend (ordine tipico della richiesta):**
@@ -125,7 +130,7 @@ RATE_LIMIT_TELEGRAM_EXPENSIVE=10
 
 - Pubbliche: per IP; admin: fingerprint JWT; interne: fingerprint `X-Service-Token`
 - Endpoint costosi (login, imports, global-update, SMVA, regenerate schedine, …) hanno un quota aggiuntiva
-- `/health` (e docs OpenAPI) sono esclusi
+- `/health` e `/ready` (e docs OpenAPI) sono esclusi
 - Superato il limite: HTTP **429** con header `Retry-After`
 - Bot Telegram: limite per `telegram_user_id` (più stretto su `/schedine`, `/partite`, `/statistiche`)
 
@@ -177,7 +182,13 @@ VITE_API_BASE_URL=http://localhost:8000
 
 Versioning: nessuna dipendenza `latest` in `package.json`; lockfile allineato. Script utili: `npm run build`, `npm test` / `npm run test:watch` / `npm run test:coverage` (Vitest + jsdom + React Testing Library).
 
-### Global update cron (in-app)
+### Global update (job + optional in-app cron)
+
+Produzione: job esterno (stesso orchestratore del pulsante UI):
+
+```bash
+python -m backend.src.jobs.run_global_update --days-forward 10
+```
 
 In `config.env` / `.env`:
 
@@ -186,6 +197,36 @@ GLOBAL_UPDATE_CRON_ENABLED=false
 GLOBAL_UPDATE_CRON_TIME=02:00
 GLOBAL_UPDATE_CRON_TIMEZONE=Europe/Rome
 GLOBAL_UPDATE_ALLOW_CONCURRENT_RUNS=false
+GLOBAL_UPDATE_STEP_RETRIES=2
+GLOBAL_UPDATE_RETRY_BACKOFF_SECONDS=5
+GLOBAL_UPDATE_STEP_TIMEOUT_SECONDS=3600
+GLOBAL_UPDATE_LOCK_TTL_SECONDS=21600
+```
+
+### Docker (locale / produzione)
+
+Guida completa: [docs/DOCKER.md](docs/DOCKER.md).
+
+```bash
+cp .env.example .env          # DB host via host.docker.internal; secret in backend/.env
+docker compose up --build -d  # migrate + api + frontend (db-1 spento)
+# UI http://localhost:5173  —  API http://localhost:8000/health
+# Postgres del PC deve essere acceso su 5432
+docker compose down           # arresto (volume embedded conservato; non usare -v)
+```
+
+Comandi separati: `docker compose run --rm migrate`, `docker compose --profile bot up -d bot`, `docker compose --profile jobs run --rm job`. Postgres embedded (opzionale): `docker compose --profile embedded-db up -d db`. Overlay prod: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d`.
+
+Dopo modifiche al codice (stack **prod-like**): `docker compose build api` / `build frontend` poi `up -d`. Per coding con hot-reload: [docs/DOCKER.md — modalità sviluppo](docs/DOCKER.md#modalità-sviluppo-hot-reload) (`docker-compose.dev.yml`). Dataset/modelli/log/segreti **non** finiscono nelle immagini; volume `postgres_data` solo se usi il profilo `embedded-db`. Modelli host opzionali via `MODELS_HOST_PATH`.
+
+Artefatti: `backend/Dockerfile`, `frontend/Dockerfile`, `.dockerignore`, `docker-compose.yml`, `docker-compose.dev.yml`, `docker-compose.prod.yml`, `docker-compose.staging.yml`.
+
+Staging (porte 8001/5174, DB `tennis_db_staging`, `AUTO_MIGRATE`, bot dedicato): [docs/STAGING.md](docs/STAGING.md).
+
+```bash
+cp .env.staging.example .env.staging
+docker compose -f docker-compose.yml -f docker-compose.staging.yml --env-file .env.staging up --build -d
+python backend/scripts/smoke_check.py --base-url http://localhost:8001 --frontend-url http://localhost:5174 --expect-env staging
 ```
 
 ---
@@ -218,16 +259,26 @@ Contatori fixed-window in tabella `rate_limit_bucket` (Alembic `0012_rate_limit_
 | Componente | Ruolo |
 |------------|-------|
 | `app/core/rate_limit.py` | `consume_rate_limit`, fingerprint token, session factory (override nei test) |
-| `app/middleware/rate_limit.py` | `RateLimitMiddleware` — tier public/admin/internal, esclusione health, 429 + `Retry-After` |
+| `app/middleware/rate_limit.py` | `RateLimitMiddleware` — tier public/admin/internal, esclusione health/deps/metrics, 429 + `Retry-After` |
+| `app/middleware/correlation.py` | `CorrelationIdMiddleware` — `X-Correlation-ID` / `X-Request-ID` |
+| `app/middleware/metrics.py` | `MetricsMiddleware` — contatori/latenze HTTP |
 | `app/telegram/rate_limit.py` | Decorator `rate_limited` per comandi bot (messaggio IT) |
 
 Abuso loggato con path / scope / IP o `telegram_user_id` senza token o password.
+
+### Monitoring operativo
+
+Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, metriche in-process (scrape Prometheus), error tracking (`none`/`logging`/`sentry`/`webhook`), alert Telegram/webhook, check import/pronostici/durata. Guida produzione: [docs/MONITORING.md](docs/MONITORING.md).
 
 ### Montate in `api/router.py` (attive)
 
 | Metodo | Path | Handler | Auth | Ruolo |
 |--------|------|---------|------|-------|
-| GET | `/health` | `health.health` | pubblica | Stato app |
+| GET | `/health` | `health.health` | pubblica | Liveness (processo up) |
+| GET | `/ready` | `health.ready` | pubblica | Readiness (DB raggiungibile; 503 se no) |
+| GET | `/deps` | `health.dependencies` | pubblica | Stato dipendenze / canali monitoring (no secret) |
+| GET | `/metrics` | `metrics.metrics` | pubblica* | Prometheus text se `METRICS_*` abilitato |
+| GET | `/metrics.json` | `metrics.metrics_json` | pubblica* | Snapshot JSON metriche |
 | POST | `/api/auth/login` | `auth.login` | pubblica | Login admin |
 | GET | `/api/auth/me` | `auth.read_session` | admin | Verifica sessione |
 | POST | `/api/auth/logout` | `auth.logout` | admin | Logout |
@@ -261,11 +312,14 @@ Abuso loggato con path / scope / IP o `telegram_user_id` senza token o password.
 | GET | `/api/published-predictions/{id}` | `published_predictions.read_published_prediction` | admin | Dettaglio snapshot |
 | POST | `/api/published-predictions/{id}/corrections` | `published_predictions.create_published_prediction_correction` | admin | Nuova versione (append-only) |
 | GET | `/api/live-beta-dashboard` | `live_beta_dashboard.read_live_beta_dashboard` | admin | Dashboard aggregata beta live (pipeline, tipbook, bot, completezza, errori) |
+| GET | `/api/ops/checks` | `ops.get_ops_checks` | admin | Controlli operativi (import, pronostici, durata); `?alert=true` notifica admin |
 | POST | `/api/prematch-odds-snapshots` | `prematch_odds_snapshots.create_prematch_odds_snapshot` | admin | Append singolo rilevamento quote |
 | POST | `/api/prematch-odds-snapshots/from-payload` | `prematch_odds_snapshots.create_prematch_odds_snapshots_from_payload` | admin | Ingest matrice Home/Away |
 | POST | `/api/prematch-odds-snapshots/from-fixture/{event_key}` | `prematch_odds_snapshots.create_prematch_odds_snapshots_from_fixture` | admin | Snapshot da odds JSON corrente |
 | GET | `/api/prematch-odds-snapshots` | `prematch_odds_snapshots.read_prematch_odds_snapshots` | admin | Storico quote (filtri) |
 | GET | `/api/prematch-odds-snapshots/{id}` | `prematch_odds_snapshots.read_prematch_odds_snapshot` | admin | Dettaglio snapshot |
+
+\* `/metrics` e `/metrics.json` rispondono 404 se `METRICS_ENDPOINT_ENABLED=false` o `METRICS_PROVIDER=none`.
 
 ### Presenti nel codice ma non montate in `api_router` (legacy / opzionali)
 
@@ -282,11 +336,11 @@ Route definite in `matches.py`, `players.py`, `tournaments.py`, `ml.py` — **no
 | Simbolo | Ruolo |
 |---------|-------|
 | `lifespan` | All’avvio: `reconcile_orphaned_runs`, `ensure_bootstrap_admin`, `start_global_update_scheduler`; allo shutdown ferma lo scheduler |
-| `app` | Istanza FastAPI, `RateLimitMiddleware`, CORS, mount health + `api_router` |
+| `app` | Istanza FastAPI, middleware correlation/metrics/rate-limit, CORS, mount health/metrics + `api_router` |
 
 #### `app/core/config.py` — `Settings`
 
-Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`), pubblicazione live temporanea fino a ML-07 (`live_publication_enabled`, `public_model_version`, `public_model_name`; default pubblicazione disabilitata).  
+Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`), pubblicazione live temporanea fino a ML-07 (`live_publication_enabled`, `public_model_version`, `public_model_name`; default pubblicazione disabilitata), observability (`log_format`, `metrics_provider`, `metrics_endpoint_enabled`, `error_tracking_*`, `ops_alerts_*`, `telegram_bot_token`, `telegram_admin_chat_id`, soglie `ops_*`).  
 `get_settings()` — settings cacheati; `set_settings_override()` per test/middleware.
 
 #### `app/core/security.py`
@@ -301,11 +355,12 @@ Dipendenze FastAPI: `require_admin`, `require_admin_or_service`, `require_servic
 
 `authenticate_admin`, `issue_access_token`, `ensure_bootstrap_admin` (primo admin da env se tabella vuota).
 
-#### `app/core/logging.py`
+#### `app/core/logging.py` / `app/observability/`
 
-`configure_logging()` — setup logging applicativo standard/strutturato.  
-Non esistono endpoint o file temporanei di ingest per sessioni agent (`/api/debug/agent-log` rimosso).  
-Per URL/header/payload esterni usare sempre `utility/sensitive_data` prima di scrivere nei log (vedi `request_api`, migrator DB, client Telegram).
+`configure_logging()` → `observability.setup.setup_observability`: log `text`/`json`, filter secret, correlation ID, metriche, error tracking.  
+Moduli: `context`, `logging`, `metrics`, `errors`, `alerts`, `ops_checks`, `dependencies`, `notify`.  
+Job CLI: `python -m backend.src.jobs.run_ops_checks [--alert]`. Dettagli: [docs/MONITORING.md](docs/MONITORING.md).  
+Per URL/header/payload esterni usare sempre `utility/sensitive_data` (anche i filtri di log applicano `sanitize_text`).
 
 #### `app/db/session.py`
 
@@ -521,13 +576,18 @@ Ledger append-only delle quote pre-match (non sostituisce il JSON su `Fixture`/`
 |---------|-------|
 | `ModelCombination` | Coppia `(model_version, model_name)` |
 | `list_enabled_combinations` | Combo con artefatto `.pkl` su disco |
-| `reconcile_orphaned_runs` | Marca run zombie all’avvio app |
-| `start_global_update` | Crea run e thread `_execute_global_update` |
-| `cancel_global_update` | Richiesta cancel cooperativa |
-| `_execute_global_update` | Import fixtures → next → predict tutte le combo → slip → **pubblicazione live** (solo combo pubblica se abilitata) |
+| `reconcile_orphaned_runs` | Marca run zombie come `interrupted` (riprendibili) |
+| `start_global_update` | Crea/riprende run; thread API o `blocking=True` per CLI |
+| `cancel_global_update` | Cancel cooperativa (flag DB + lock-aware) |
+| `_execute_global_update` | Lock → import → next → predict/slip/live → sync opz. → report |
+| `exit_code_for_run` | Exit code per cron/worker |
 | `build_run_report` | Report strutturato della run |
 | `get_models_versions_results` | Esito per modello/versione su una data |
-| `get_run_by_id` / `get_latest_run` / `get_active_run` | Lettura stato |
+| `get_run_by_id` / `get_latest_run` / `get_active_run` / `get_resumable_run` | Lettura stato |
+
+#### `app/services/pipeline_lock.py`
+
+Lock distribuito su tabella `pipeline_lock` (`acquire` / `heartbeat` / `release`).
 
 #### `app/services/imports.py` / `import_state.py`
 
@@ -675,22 +735,26 @@ Sanitizzazione centralizzata per log: `sanitize_url`, `sanitize_headers`, `sanit
 
 ### 4.7 Jobs
 
+#### `jobs/run_ops_checks.py`
+
+Controlli operativi post-job (`import_freshness`, `predictions_present`, `pipeline_duration`, `latest_run_outcome`); `--alert` invia Telegram/webhook. Exit `0/1/2`. Vedi [MONITORING.md](docs/MONITORING.md).
+
+#### `jobs/run_db_backup.py` / `jobs/run_db_restore.py`
+
+Backup logico PostgreSQL (`pg_dump` custom + SHA-256, retention, GPG opzionale) e restore a tre modalità: `dry-run`, `test` (DB alternativo), `overwrite` (guardato). Helper: `service/postgres_backup.py`. Wrapper cron: `scripts/backup_postgres.sh|.bat`, `scripts/restore_postgres.sh|.bat`. Guida DR: [BACKUP_DR.md](docs/BACKUP_DR.md).
+
+#### `jobs/run_global_update.py` (produzione)
+
+CLI blocking sullo stesso orchestratore UI/API: lock DB, retry/timeout, resume, report, exit code.
+Opzioni: `--force`, `--resume`, `--sync-cloud`, `--no-auto-resume`.
+
 #### `jobs/daily_pipeline.py` — `DailyPipeline`
 
-`run()` esegue in ordine:
-
-1. `run_daily_fixture_import`
-2. `run_daily_next_fixture_import`
-3. `run_upcoming_prediction_generation`
-4. opz. `run_migration` sync cloud
-
-`run_daily_pipeline(...)` — wrapper CLI/env (`SYNC_CLOUD`).
+Wrapper di compatibilità: delega a `run_global_update` (tutte le combo abilitate + sync opzionale).
 
 #### `jobs/generate_upcoming_predictions.py`
 
-`run_upcoming_prediction_generation` — seleziona modello (best metrics o nome esplicito) e chiama `predict_upcoming_fixtures`. Default CLI/job: `model_version=v2`.
-
-Per aggiornare **tutte** le combo modello/versione con artefatto su disco usare l’**aggiornamento globale** (`POST /api/global-update` / UI), non un job separato.
+`run_upcoming_prediction_generation` — seleziona modello (best metrics o nome esplicito) e chiama `predict_upcoming_fixtures`. Utile per run mirate; il job giornaliero di produzione usa l’orchestratore globale.
 
 ---
 
@@ -775,7 +839,8 @@ Default:
 | UI frontend (`DEFAULT_MODEL_VERSION`) | **v3** |
 | Bot Telegram (`TELEGRAM_MODEL_VERSION`) | **v3** |
 | Query param API REST (se omesso) | **v2** |
-| Job `daily_pipeline` / `generate_upcoming_predictions` | **v2** |
+| Job `run_global_update` (tutte le combo abilitate) | artefatti su disco |
+| `generate_upcoming_predictions` (run mirata) | **v2** |
 
 Modelli tipici: `logistic_regression`, `random_forest`.
 
@@ -802,14 +867,14 @@ Artefatti:
 ## 7. Import, job e sync
 
 ```bash
-# dalla cartella backend/ (o root come da SCHEDULING.md)
-python -c "from src.service.basic_import import basic; basic()"
-python -m src.service.import_fixtures
-python -m src.jobs.daily_pipeline
-python -m src.jobs.daily_pipeline --no-sync
+# dalla root del repository (vedi SCHEDULING.md)
+python -m backend.src.service.import_fixtures
+python -m backend.src.jobs.run_global_update --days-forward 10
+python -m backend.src.jobs.run_global_update --force --sync-cloud
+python -m backend.src.jobs.run_global_update --resume
 ```
 
-Dettagli cron Windows/Linux e sync cloud: [docs/SCHEDULING.md](docs/SCHEDULING.md).
+Dettagli cron Windows/Linux, lock/resume/exit code e sync cloud: [docs/SCHEDULING.md](docs/SCHEDULING.md).
 
 ---
 
@@ -848,7 +913,7 @@ python -m src.app.telegram.bot
 
 ## 9. Schema dati
 
-Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `telegram_bot_event` (analytics accessi bot), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`).
+Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`).
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
 
@@ -927,3 +992,26 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Parte su **pus
 - Cache dipendenze tramite `actions/setup-python` / `actions/setup-node` (hash di `requirements*.txt` e `package-lock.json`).
 
 Stato: badge in cima a questo README, oppure [Actions → CI](https://github.com/romy1992/tennis_oracle/actions/workflows/ci.yml).
+
+---
+
+## 11. Docker
+
+Vedi [docs/DOCKER.md](docs/DOCKER.md) per avvio/arresto, **hot-reload** (`docker-compose.dev.yml`), profili bot/job, rebuild prod-like e produzione.
+
+| Artefatto | Contenuto |
+|-----------|-----------|
+| `backend/Dockerfile` | Multi-stage Python 3.12; default `uvicorn backend.src.app.main:app`; `HEALTHCHECK` su `/health` |
+| `frontend/Dockerfile` | Multi-stage Node 22 build + `nginx:1.27-alpine`; build-arg `VITE_API_BASE_URL` |
+| `docker-compose.yml` | Default: DB host (`host.docker.internal`); `migrate` + `api` + `frontend`; profili `bot` / `jobs` / `embedded-db` |
+| `docker-compose.dev.yml` | Overlay hot-reload: mount `backend/src` + `frontend`, `uvicorn --reload`, Vite HMR |
+| `docker-compose.prod.yml` | Overlay: no porta Postgres esposta (se usi embedded-db), `DEBUG=false`, log rotati |
+| `docker-compose.staging.yml` | Overlay staging: progetto/volume/porte separati, `AUTO_MIGRATE`, CORS, `/ready` |
+| `.env.example` | Modello env per Compose (copiare in `.env`) |
+| `.env.staging.example` | Modello staging (copiare in `.env.staging`; vedi [STAGING.md](docs/STAGING.md)) |
+| `backend/scripts/smoke_check.py` | Smoke HTTP su `/health`, `/ready`, frontend |
+| `backend/scripts/run_alembic_upgrade.py` | Migrazioni Compose controllate da `AUTO_MIGRATE` |
+| `backend/scripts/backup_postgres.sh|.bat` | Backup PostgreSQL pianificato (`run_db_backup --alert`) |
+| `backend/scripts/restore_postgres.sh|.bat` | Restore (`dry-run` / `test` / `overwrite`) |
+
+Test di regressione asset (senza demone Docker): `backend/tests/test_docker_assets.py`, `backend/tests/test_staging_assets.py`, `backend/tests/test_postgres_backup.py`. Backup/DR: [docs/BACKUP_DR.md](docs/BACKUP_DR.md).
