@@ -22,10 +22,15 @@ from backend.tests.auth_helpers import (
 
 class GlobalUpdateServiceTest(unittest.TestCase):
     def setUp(self):
+        import backend.src.app.services.global_update as gu
+
         self.engine = create_test_engine()
         self.Session = create_session_factory(self.engine)
         self.settings = make_test_settings()
         override_settings(self.settings)
+        gu._active_run_id = None
+        gu._cancel_requested.clear()
+        gu._cancel_cache.clear()
 
         self.client = make_api_client(app, self.Session)
         with self.Session() as session:
@@ -33,6 +38,14 @@ class GlobalUpdateServiceTest(unittest.TestCase):
             self.auth_headers = auth_header_for_admin(admin, self.settings)
 
     def tearDown(self):
+        import backend.src.app.services.global_update as gu
+        import time
+
+        # Let mocked background threads finish and clear active run id.
+        time.sleep(0.05)
+        gu._active_run_id = None
+        gu._cancel_requested.clear()
+        gu._cancel_cache.clear()
         clear_settings_override()
         app.dependency_overrides.clear()
         self.engine.dispose()
@@ -70,6 +83,29 @@ class GlobalUpdateServiceTest(unittest.TestCase):
             second, message = start_global_update(session, origin="manual", force=True)
             self.assertIsNone(second)
             self.assertIn("already running", message.lower())
+
+    @patch("backend.src.app.services.global_update.list_enabled_combinations")
+    @patch("backend.src.app.services.global_update._execute_global_update")
+    def test_idempotent_same_day_skip(self, mock_execute, mock_combinations):
+        mock_combinations.return_value = [
+            type("C", (), {"model_version": "v2", "model_name": "logistic_regression"})(),
+        ]
+        with self.Session() as session:
+            done = GlobalUpdateRun(
+                run_date=date.today(),
+                origin="job",
+                status="completed",
+                force="false",
+                created_at=datetime.now(),
+                finished_at=datetime.now(),
+            )
+            session.add(done)
+            session.commit()
+
+            run, message = start_global_update(session, origin="job", force=False)
+            self.assertIsNone(run)
+            self.assertIn("already completed today", message.lower())
+            mock_execute.assert_not_called()
 
     @patch("backend.src.app.services.global_update.list_enabled_combinations")
     def test_post_global_update_endpoint(self, mock_combinations):

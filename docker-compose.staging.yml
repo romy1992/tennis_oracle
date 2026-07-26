@@ -1,0 +1,149 @@
+# Staging overlay for tennis_oracle.
+# Isolated project name, DB volume, and host ports (no clash with local/prod-like).
+#
+# Setup:
+#   cp .env.staging.example .env.staging   # edit placeholders; never commit secrets
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+#     --env-file .env.staging up --build -d
+#
+# Bot (dedicated staging BotFather token):
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+#     --env-file .env.staging --profile bot up -d bot
+#
+# Smoke:
+#   python backend/scripts/smoke_check.py --base-url http://localhost:8001 \
+#     --frontend-url http://localhost:5174 --expect-env staging
+#
+# See docs/STAGING.md for deploy / rollback checklist.
+
+name: tennis_oracle_staging
+
+services:
+  # Always-on staging Postgres (separate volume from local embedded-db).
+  db:
+    profiles: !reset []
+    ports: !override
+      - "${STAGING_POSTGRES_PORT:-5433}:5432"
+    volumes: !override
+      - postgres_data_staging:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-tennis_db_staging}
+
+  migrate:
+    env_file: !override
+      - path: .env.staging
+        required: false
+      - path: backend/.env
+        required: false
+      - path: backend/properties/config.env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/tennis_db_staging}
+      DATABASE_SOURCE_URL: ${DATABASE_SOURCE_URL:-postgresql://postgres:postgres@db:5432/tennis_db_staging}
+    working_dir: /app/backend
+    command: ["python", "scripts/run_alembic_upgrade.py"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    env_file: !override
+      - path: .env.staging
+        required: false
+      - path: backend/.env
+        required: false
+      - path: backend/properties/config.env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DEBUG: ${DEBUG:-false}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/tennis_db_staging}
+      DATABASE_SOURCE_URL: ${DATABASE_SOURCE_URL:-postgresql://postgres:postgres@db:5432/tennis_db_staging}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["https://staging.example.com","http://localhost:5174"]}
+      CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
+      ALLOW_UNAUTHENTICATED_SERVICE_READS: ${ALLOW_UNAUTHENTICATED_SERVICE_READS:-false}
+      GLOBAL_UPDATE_CRON_ENABLED: ${GLOBAL_UPDATE_CRON_ENABLED:-false}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+    ports: !override
+      - "${STAGING_API_PORT:-8001}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8001}
+    ports: !override
+      - "${STAGING_FRONTEND_PORT:-5174}:80"
+    # Optional TLS: set STAGING_SSL_CERT / STAGING_SSL_KEY in .env.staging and
+    # mount nginx.https.conf + certs (see docs/STAGING.md). Default is HTTP on
+    # the published port; terminate TLS at a reverse proxy for HTTPS-ready.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  bot:
+    env_file: !override
+      - path: .env.staging
+        required: false
+      - path: backend/.env
+        required: false
+      - path: backend/properties/config.env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/tennis_db_staging}
+      DATABASE_SOURCE_URL: ${DATABASE_SOURCE_URL:-postgresql://postgres:postgres@db:5432/tennis_db_staging}
+      TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-http://api:8000/api}
+      TELEGRAM_SERVICE_API_KEY: ${TELEGRAM_SERVICE_API_KEY:-}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  job:
+    env_file: !override
+      - path: .env.staging
+        required: false
+      - path: backend/.env
+        required: false
+      - path: backend/properties/config.env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/tennis_db_staging}
+      DATABASE_SOURCE_URL: ${DATABASE_SOURCE_URL:-postgresql://postgres:postgres@db:5432/tennis_db_staging}
+      DATABASE_TARGET_URL: ${DATABASE_TARGET_URL:-}
+      SYNC_CLOUD: ${SYNC_CLOUD:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data_staging:
+    name: tennis_oracle_staging_postgres_data

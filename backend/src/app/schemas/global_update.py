@@ -10,8 +10,9 @@ GlobalUpdateStatus = Literal[
     "completed_with_errors",
     "failed",
     "cancelled",
+    "interrupted",
 ]
-GlobalUpdateOrigin = Literal["manual", "cron"]
+GlobalUpdateOrigin = Literal["manual", "cron", "job"]
 GlobalUpdateItemStatus = Literal["pending", "running", "completed", "failed", "skipped", "cancelled"]
 
 
@@ -19,6 +20,9 @@ class GlobalUpdateStartRequest(BaseModel):
     force: bool = False
     days_forward: int = Field(default=10, ge=1, le=30)
     days_back_fixtures: int = Field(default=3, ge=0, le=30)
+    resume: bool = False
+    resume_run_id: int | None = None
+    sync_cloud: bool = False
 
 
 class GlobalUpdateStartResponse(BaseModel):

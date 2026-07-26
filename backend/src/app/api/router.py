@@ -6,6 +6,7 @@ from backend.src.app.api.routes import (
     global_update,
     imports,
     live_beta_dashboard,
+    ops,
     predictions,
     prematch_odds_snapshots,
     published_predictions,
@@ -27,3 +28,4 @@ api_router.include_router(telegram.router)
 api_router.include_router(published_predictions.router)
 api_router.include_router(prematch_odds_snapshots.router)
 api_router.include_router(live_beta_dashboard.router)
+api_router.include_router(ops.router)

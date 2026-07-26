@@ -11,6 +11,7 @@ from backend.src.entity.fixture import Fixture
 from backend.src.entity.global_update_run import GlobalUpdateRun, GlobalUpdateRunItem
 from backend.src.entity.match_prediction import MatchPrediction
 from backend.src.entity.next_fixture import NextFixture
+from backend.src.entity.pipeline_lock import PipelineLock
 from backend.src.entity.player import Player
 from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
 from backend.src.entity.published_prediction import PublishedPrediction
@@ -33,6 +34,7 @@ __all__ = [
     "BettingSlipPick",
     "GlobalUpdateRun",
     "GlobalUpdateRunItem",
+    "PipelineLock",
     "Standing",
     "Player",
     "TelegramBotEvent",

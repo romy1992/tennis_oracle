@@ -2,10 +2,15 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const usePolling = process.env.CHOKIDAR_USEPOLLING === "true";
+
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173
+    port: 5173,
+    // Required when Vite runs inside Docker (reachable from the host browser).
+    host: true,
+    ...(usePolling ? { watch: { usePolling: true } } : {})
   },
   test: {
     environment: "jsdom",

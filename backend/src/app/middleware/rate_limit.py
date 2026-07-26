@@ -20,8 +20,19 @@ from backend.src.app.core.rate_limit import (
 
 logger = logging.getLogger(__name__)
 
-# Paths that skip rate limiting entirely (probes / readiness).
-_EXCLUDED_PATHS = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
+# Paths that skip rate limiting entirely (probes / readiness / scrape).
+_EXCLUDED_PATHS = frozenset(
+    {
+        "/health",
+        "/ready",
+        "/deps",
+        "/metrics",
+        "/metrics.json",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+    }
+)
 
 
 def client_ip(request: Request) -> str:
@@ -68,8 +79,17 @@ def is_excluded_path(path: str) -> bool:
     normalized = path.rstrip("/") or "/"
     if normalized in _EXCLUDED_PATHS or path in _EXCLUDED_PATHS:
         return True
-    # Trailing variants: /health/
-    return normalized.lstrip("/") in {"health", "docs", "openapi.json", "redoc"}
+    # Trailing variants: /health/, /ready/, /deps/, /metrics/
+    return normalized.lstrip("/") in {
+        "health",
+        "ready",
+        "deps",
+        "metrics",
+        "metrics.json",
+        "docs",
+        "openapi.json",
+        "redoc",
+    }
 
 
 def is_expensive_request(request: Request, api_prefix: str) -> bool:

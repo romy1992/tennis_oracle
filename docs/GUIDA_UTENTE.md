@@ -155,6 +155,20 @@ Puoi anche **annullare** un aggiornamento in corso. Se è già in esecuzione un 
 - PostgreSQL con database `tennis_db`
 - Chiave API tennis (`API_TENNIS_KEY`)
 
+### Con Docker (alternativa)
+
+Se hai Docker e PostgreSQL già sul PC:
+
+1. Copia `.env.example` in `.env` (porte: UI **5173**, API **8000**; DB = Postgres del PC via `host.docker.internal`)
+2. Lascia le credenziali nei file di sempre: `backend/.env` e `backend/properties/config.env`
+3. Accendi Postgres locale, poi: `docker compose up --build -d` (il container `db-1` non parte)
+4. Apri il sito su `http://localhost:5173` (API su `http://localhost:8000`)
+
+Per fermare: `docker compose down` (non usare `-v` se non vuoi toccare un eventuale volume Docker).  
+Dopo modifiche al codice in Docker:
+- **hot-reload:** `docker compose -f docker-compose.yml -f docker-compose.dev.yml up` — vedi [DOCKER.md](DOCKER.md#modalità-sviluppo-hot-reload)
+- **prod-like:** rebuild (`build api` / `build frontend`) — vedi [DOCKER.md](DOCKER.md#dopo-modifiche-al-codice-stack-prod-like-senza-hot-reload)
+
 ### Backend
 
 ```bash
@@ -182,7 +196,11 @@ Variabili importanti in `backend/.env` / `backend/properties/config.env`:
 - `TELEGRAM_BOT_TOKEN` — solo se usi il bot (opzionale)
 
 API tipica: `http://localhost:8000`  
-Health check: `GET http://localhost:8000/health`
+Health check: `GET http://localhost:8000/health`  
+Readiness (DB): `GET http://localhost:8000/ready`  
+Dipendenze / monitoring: `GET http://localhost:8000/deps` (senza dati sensibili)  
+
+In produzione il monitoraggio (log, metriche, alert Telegram admin) si configura come descritto in `docs/MONITORING.md`; non è necessario dalla UI quotidiana.
 
 ### Frontend
 
@@ -234,7 +252,7 @@ Nella dashboard web, la voce **Bot Telegram** mostra a te (admin) chi ha usato i
 4. Apri **Consiglio schedina** se vuoi una proposta multipla
 5. Controlla le **statistiche** per capire come stanno performando i modelli
 
-Se usi un database cloud separato, il job giornaliero può anche **sincronizzare** i dati dal PC locale al cloud (configurazione in `properties/config.env`).
+Il **job giornaliero** (cron / Docker) e il pulsante **Aggiorna tutto** usano la stessa pipeline. Se usi un database cloud separato, il job può anche **sincronizzare** i dati dal PC locale al cloud (`SYNC_CLOUD` in `properties/config.env`). In caso di interruzione, il job può riprendere dal primo passo fallito.
 
 ---
 
@@ -269,4 +287,5 @@ No. Per l’uso quotidiano basta l’interfaccia web e, se vuoi, il bot Telegram
 |-----------|-----------|
 | [README.md](../README.md) | Architettura, classi, metodi, API, pipeline ML |
 | [SCHEDULING.md](SCHEDULING.md) | Cron / Task Scheduler / sync cloud |
+| [BACKUP_DR.md](BACKUP_DR.md) | Backup e ripristino database (operazioni di emergenza, non dalla UI) |
 | Swagger UI | Con backend acceso: `http://localhost:8000/docs` |

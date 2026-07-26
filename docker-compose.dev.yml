@@ -1,0 +1,94 @@
+# Development overlay: hot-reload for api / frontend / bot (bind-mounted source).
+# Does NOT replace docker-compose.yml — use both files together:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile bot up
+#
+# Prod-like stack (baked images, rebuild after code changes):
+#   docker compose up --build -d
+#
+# Same host Postgres (host.docker.internal). See docs/DOCKER.md.
+
+name: tennis_oracle
+
+services:
+  api:
+    environment:
+      DEBUG: ${DEBUG:-true}
+      # Reliable file watching under Docker Desktop (Windows/macOS)
+      WATCHFILES_FORCE_POLLING: "true"
+    volumes:
+      - ./backend/src:/app/backend/src
+      - ./backend/.env:/app/backend/.env:ro
+      - ./backend/properties/config.env:/app/backend/properties/config.env:ro
+      - ${MODELS_HOST_PATH:-./backend/data/models}:/app/backend/data/models:ro
+    command:
+      [
+        "uvicorn",
+        "backend.src.app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+        "--reload-dir",
+        "/app/backend/src",
+      ]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Vite HMR instead of nginx static image (no rebuild on FE edits).
+  frontend:
+    image: node:${FRONTEND_NODE_VERSION:-22}-bookworm-slim
+    build: !reset null
+    working_dir: /app
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    ports: !override
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      # Keep container node_modules separate from host (esp. Windows)
+      - frontend_dev_node_modules:/app/node_modules
+    command:
+      [
+        "sh",
+        "-c",
+        "npm ci && npm run dev -- --host 0.0.0.0 --port 5173",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5173').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Same source mount as API. Telegram polling has no built-in HMR:
+  # after edits under app/telegram, `restart bot` (no image rebuild).
+  bot:
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"
+    volumes:
+      - ./backend/src:/app/backend/src
+      - ./backend/.env:/app/backend/.env:ro
+      - ./backend/properties/config.env:/app/backend/properties/config.env:ro
+    command: ["python", "-m", "backend.src.app.telegram.bot"]
+
+volumes:
+  frontend_dev_node_modules:
+    name: tennis_oracle_frontend_dev_node_modules
