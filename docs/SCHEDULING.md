@@ -131,6 +131,63 @@ python3 -m backend.src.jobs.run_ops_checks --alert
 Exit code: `0` ok, `1` warning, `2` critical. Configurazione e canali alert:
 [MONITORING.md](MONITORING.md).
 
+## Notifiche Telegram utente (push)
+
+Dopo un aggiornamento globale riuscito puoi inviare push configurabili agli utenti
+beta `active` (con `chat_id` da `/start`, preferenze `/notifiche`, non sospesi):
+
+```bash
+# Dry-run (nessuna chiamata Bot API)
+python3 -m backend.src.jobs.run_telegram_notifications --dry-run
+
+# Pronostici oggi + giorno vuoto + riepilogo risultati di ieri
+python3 -m backend.src.jobs.run_telegram_notifications
+
+# Solo risultati di una data
+python3 -m backend.src.jobs.run_telegram_notifications --kinds results --results-date 2026-07-26
+```
+
+Flag utili: `--force` (ignora dedupe già inviato), `--json`, `--model-version` /
+`--model-name`. Richiede `TELEGRAM_NOTIFICATIONS_ENABLED=true` e `TELEGRAM_BOT_TOKEN`.
+Dedupe e log consegna/errore in tabella `telegram_notification_delivery` (migrazione `0018`).
+Rate limit outbound: `TELEGRAM_NOTIFY_MIN_INTERVAL_SECONDS` + retry su 429/5xx.
+
+Cron esempio (dopo il job delle 09:00):
+
+```cron
+15 9 * * * cd /percorso/tennis_oracle && .venv/bin/python -m backend.src.jobs.run_telegram_notifications
+```
+
+Gli alert admin per pipeline fallita restano su `OPS_ALERTS_ENABLED` +
+`TELEGRAM_ADMIN_CHAT_ID` (vedi [MONITORING.md](MONITORING.md)); non usano il ledger utente.
+
+## Report settimanale beta
+
+Ogni lunedì (o on-demand) genera uno snapshot KPI della settimana ISO precedente
+(lun–dom): utenti totali/attivi/nuovi, retention W1, comandi bot, tip pubblicati,
+ROI/yield/drawdown live, errori pipeline, notifiche fallite, feedback, confronto
+WoW. Persistenza in `weekly_beta_report` (migrazione `0020`); riepilogo su
+`TELEGRAM_ADMIN_CHAT_ID` se `WEEKLY_BETA_REPORT_TELEGRAM_ENABLED=true`.
+
+```bash
+# Dry-run (calcola, non salva / non invia)
+python3 -m backend.src.jobs.run_weekly_beta_report --dry-run
+
+# Genera settimana precedente + Telegram admin
+python3 -m backend.src.jobs.run_weekly_beta_report
+
+# Forza ricalcolo di una settimana (lunedì ISO)
+python3 -m backend.src.jobs.run_weekly_beta_report --week-start 2026-07-13 --force
+```
+
+Flag utili: `--no-telegram`, `--json`. Visibile in dashboard: **Report settimanale beta**.
+
+Cron esempio (lunedì 08:30 Rome):
+
+```cron
+30 8 * * 1 cd /percorso/tennis_oracle && .venv/bin/python -m backend.src.jobs.run_weekly_beta_report
+```
+
 ## Backup PostgreSQL
 
 Dump logico pianificato (timestamp, compressione custom, retention, GPG opzionale,

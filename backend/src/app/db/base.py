@@ -15,7 +15,11 @@ from backend.src.entity import (
     RateLimitBucket,
     Standing,
     TelegramBotEvent,
+    TelegramFeedback,
+    TelegramNotificationDelivery,
+    TelegramUser,
     Tournament,
+    WeeklyBetaReport,
 )
 from backend.src.entity.base import Base
 from backend.src.app.models.ml import (
@@ -46,6 +50,10 @@ __all__ = [
     "Standing",
     "Tournament",
     "TelegramBotEvent",
+    "TelegramFeedback",
+    "TelegramNotificationDelivery",
+    "TelegramUser",
+    "WeeklyBetaReport",
     "RateLimitBucket",
     "FeatureSnapshot",
     "MLMatch",

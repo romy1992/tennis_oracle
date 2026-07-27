@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from backend.src.app.db.base import (  # noqa: E402
+    AdminUser,
     Base,
     BettingSlip,
     BettingSlipDay,
@@ -23,6 +24,8 @@ from backend.src.app.db.base import (  # noqa: E402
     Event,
     FeatureSnapshot,
     Fixture,
+    GlobalUpdateRun,
+    GlobalUpdateRunItem,
     MLMatch,
     MLPlayer,
     MLTournament,
@@ -31,25 +34,40 @@ from backend.src.app.db.base import (  # noqa: E402
     OddsSnapshot,
     Player,
     PrematchOddsSnapshot,
+    PublishedPrediction,
     RankingSnapshot,
+    RateLimitBucket,
     Standing,
     TelegramBotEvent,
+    TelegramFeedback,
+    TelegramNotificationDelivery,
+    TelegramUser,
     Tournament,
+    WeeklyBetaReport,
 )
 
 _ = (
+    AdminUser,
     Event,
     Tournament,
     Fixture,
     NextFixture,
     MatchPrediction,
     PrematchOddsSnapshot,
+    PublishedPrediction,
     BettingSlip,
     BettingSlipDay,
     BettingSlipPick,
+    GlobalUpdateRun,
+    GlobalUpdateRunItem,
     Standing,
     Player,
     TelegramBotEvent,
+    TelegramFeedback,
+    TelegramNotificationDelivery,
+    TelegramUser,
+    WeeklyBetaReport,
+    RateLimitBucket,
     FeatureSnapshot,
     MLMatch,
     MLPlayer,
@@ -68,12 +86,15 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 ROOT_DIR = BACKEND_DIR
-load_dotenv(dotenv_path=ROOT_DIR / ".env")
-load_dotenv(dotenv_path=ROOT_DIR / "properties" / "config.env")
+# Do not override Compose/container DATABASE_URL (host.docker.internal / db).
+# Files may still say localhost for host-side tooling.
+load_dotenv(dotenv_path=ROOT_DIR / ".env", override=False)
+load_dotenv(dotenv_path=ROOT_DIR / "properties" / "config.env", override=False)
 
 database_url = os.getenv("DATABASE_URL") or os.getenv("DATABASE_SOURCE_URL")
 if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+    # Escape % for ConfigParser interpolation used by Alembic.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # add your model's MetaData object here
 # for 'autogenerate' support

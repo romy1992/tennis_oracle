@@ -19,6 +19,9 @@ import { PredictionsPage } from "./pages/PredictionsPage";
 import { PublishedLiveStatsPage } from "./pages/PublishedLiveStatsPage";
 import { PublishedPredictionsPage } from "./pages/PublishedPredictionsPage";
 import { TelegramBotPage } from "./pages/TelegramBotPage";
+import { TelegramFeedbackPage } from "./pages/TelegramFeedbackPage";
+import { TelegramUsersPage } from "./pages/TelegramUsersPage";
+import { WeeklyBetaReportPage } from "./pages/WeeklyBetaReportPage";
 
 function AuthenticatedShell() {
   return (
@@ -47,7 +50,10 @@ export const appRoutes: RouteObject[] = [
           { path: "global-update-report", element: <GlobalUpdateReportPage /> },
           { path: "published-predictions", element: <PublishedPredictionsPage /> },
           { path: "published-live-stats", element: <PublishedLiveStatsPage /> },
-          { path: "telegram-bot", element: <TelegramBotPage /> }
+          { path: "telegram-bot", element: <TelegramBotPage /> },
+          { path: "telegram-users", element: <TelegramUsersPage /> },
+          { path: "telegram-feedback", element: <TelegramFeedbackPage /> },
+          { path: "weekly-beta-report", element: <WeeklyBetaReportPage /> }
         ]
       }
     ]

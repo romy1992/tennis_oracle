@@ -47,6 +47,9 @@ Nel menu laterale trovi:
 | **Statistiche live** | Performance dei tip pubblicati: hit rate, stake, profitto, ROI/yield, drawdown, serie e distribuzioni. Solo registro immutabile; non confondere con training o backtest |
 | **Report aggiornamento** | Esito dell’ultima run “Aggiorna tutto”: errori, warning, fasi e combo modello |
 | **Bot Telegram** | Solo admin: accessi e comandi usati sul bot (KPI, filtri per data/utente/comando, breakdown giornaliero, storico) |
+| **Utenti beta Telegram** | Solo admin: whitelist utenti del bot (ricerca, invito, attivazione, sospensione, blocco; stato termini, origine invito e preferenze notifiche) |
+| **Feedback Telegram** | Solo admin: inbox dei feedback inviati dal bot (categoria, voto, messaggio; stati new / reviewing / resolved / rejected) |
+| **Report settimanale beta** | Solo admin: snapshot KPI della settimana (utenti, retention, comandi, tip live, ROI/drawdown, errori pipeline, notifiche fallite, feedback) con confronto rispetto alla settimana precedente; generazione manuale o job del lunedì |
 
 In alto nella sidebar c’è anche il controllo **Aggiornamento globale**: importa partite, genera previsioni per tutti i modelli disponibili e aggiorna le schedine. Se compaiono errori (es. “4 errori”), il conteggio è cliccabile e apre **Report aggiornamento**.
 
@@ -221,8 +224,8 @@ Apri il sito e accedi con l’account admin. Se non riesci a entrare, verifica s
 
 ### Bot Telegram (opzionale)
 
-1. Avvia il backend (`alembic upgrade head` serve anche per le tabelle analytics e admin)
-2. Imposta in `backend/.env` almeno `TELEGRAM_BOT_TOKEN` (e opzionalmente `TELEGRAM_API_BASE_URL`, `TELEGRAM_SERVICE_API_KEY` allineata a `SERVICE_API_KEY`, versione/modello, margine, ecc.)
+1. Avvia il backend (`alembic upgrade head` serve anche per le tabelle analytics, admin e utenti beta)
+2. Imposta in `backend/.env` almeno `TELEGRAM_BOT_TOKEN` (e opzionalmente `TELEGRAM_API_BASE_URL`, `TELEGRAM_SERVICE_API_KEY` allineata a `SERVICE_API_KEY`, versione/modello, margine, whitelist/termini, ecc.)
 3. Esegui:
 
 ```bash
@@ -230,17 +233,25 @@ cd backend
 python -m src.app.telegram.bot
 ```
 
-Comandi attivi: `/start`, `/help`, `/schedine`, `/partite`, `/statistiche`.
+Comandi attivi: `/start`, `/help`, `/accetta_condizioni`, `/notifiche`, `/feedback`, `/schedine`, `/partite`, `/statistiche`.
+
+Al primo `/start` l’utente viene registrato (con `chat_id` per eventuali notifiche push) e riceve un **menu a pulsanti** (Partite, Schedine, Statistiche, Aiuto). Con whitelist attiva (default) resta in attesa finché un admin non lo **attiva** dalla pagina **Utenti beta Telegram**. Se sono richieste le condizioni d’uso, l’utente deve inviare `/accetta_condizioni` prima di usare `/schedine`, `/partite` e `/statistiche`.
+
+Con `/notifiche` puoi vedere e cambiare le preferenze push (master on/off, pronostici del giorno, riepilogo risultati, giorno senza partite). Le notifiche automatiche partono solo se l’admin ha abilitato il job e l’account è attivo (non sospeso/bloccato).
+
+Con `/feedback` puoi segnalare un problema o un suggerimento: scegli una categoria, dai un voto da 1 a 5, scrivi un messaggio. Per interrompere senza salvare usa `/annulla` (o il pulsante Annulla). Il feedback arriva all’admin nella pagina **Feedback Telegram**.
+
+`/help` mostra una guida rapida. Durante il caricamento di partite/schedine/statistiche compare un messaggio temporaneo; nelle risposte vedi anche l’**ultimo aggiornamento** disponibile, un’avvertenza informativa e (se configurato) un link esterno per feedback. Se non ci sono partite o schedine per oggi, il bot lo dice chiaramente invece di restare in silenzio.
 
 Se invii troppi comandi in poco tempo, il bot ti chiede di attendere qualche secondo (protezione anti-abuso). Lo stesso tipo di limite vale anche per le API del server.
 
-Con `/schedine` ricevi le stesse schedine della pagina **Consiglio schedina** (fino a 9, con Void/Edge/ROI/Valore e stato pick). Se i due motori del giorno producono schedine diverse, il bot le mostra entrambe etichettate con l’accuratezza storica (senza nomi tecnici); se sono uguali ne manda una sola. Il primo messaggio indica solo la data e la legenda degli esiti: verde = Presa, rosso = Persa, grigio = In corso, grigio scuro = Annullata.
+Con `/schedine` ricevi le stesse schedine della pagina **Consiglio schedina** (fino a 9, con Void/Edge/ROI/Valore e stato pick). Se i due motori del giorno producono schedine diverse, il bot le mostra entrambe etichettate con l’accuratezza storica (senza nomi tecnici); se sono uguali ne manda una sola. Il primo messaggio indica data, legenda esiti (verde = Presa, rosso = Persa, grigio = In corso, grigio scuro = Annullata) e legenda valore.
 
-Con `/partite` ricevi le partite di oggi come in pagina **Partite** (Predetto, Conf., Void, Valore, Stato). Anche qui, se i motori danno pronostici diversi li vedi entrambi con etichetta accuratezza; l’intro è solo data + legenda stati.
+Con `/partite` ricevi le partite di oggi come in pagina **Partite** (Predetto, Conf., Void, Valore, Stato). Anche qui, se i motori danno pronostici diversi li vedi entrambi con etichetta accuratezza; l’intro include data, legende e ultimo aggiornamento.
 
 Con `/statistiche` vedi un riepilogo immagine dell’andamento (partite singole e schedine, con profitto sulle schedine), sempre senza nomi modello.
 
-Nella dashboard web, la voce **Bot Telegram** mostra a te (admin) chi ha usato il bot e quali comandi (filtri per periodo, utente, azione): non è visibile agli utenti Telegram.
+Nella dashboard web, la voce **Bot Telegram** mostra a te (admin) chi ha usato il bot e quali comandi (filtri per periodo, utente, azione). La voce **Utenti beta Telegram** gestisce whitelist e stati di accesso (invito, attiva, sospendi, blocca). La voce **Feedback Telegram** raccoglie i messaggi inviati con `/feedback` e permette di marcarli come in revisione, risolti o rifiutati. La voce **Report settimanale beta** mostra gli snapshot salvati (e permette di generarne uno per l’ultima settimana completa); un riepilogo viene anche inviato in Telegram all’admin se configurato. Queste pagine non sono visibili agli utenti Telegram.
 
 ---
 

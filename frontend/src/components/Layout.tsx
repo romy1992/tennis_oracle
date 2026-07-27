@@ -20,6 +20,9 @@ const navSections: Array<{
       { to: "/published-predictions", label: "Storico pubblicazioni" },
       { to: "/published-live-stats", label: "Statistiche live" },
       { to: "/telegram-bot", label: "Bot Telegram" },
+      { to: "/telegram-users", label: "Utenti beta Telegram" },
+      { to: "/telegram-feedback", label: "Feedback Telegram" },
+      { to: "/weekly-beta-report", label: "Report settimanale beta" },
       { to: "/global-update-report", label: "Report aggiornamento" }
     ]
   },

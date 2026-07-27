@@ -8,7 +8,11 @@ from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
 from backend.src.entity.published_prediction import PublishedPrediction
 from backend.src.entity.standing import Standing
 from backend.src.entity.telegram_bot_event import TelegramBotEvent
+from backend.src.entity.telegram_feedback import TelegramFeedback
+from backend.src.entity.telegram_notification_delivery import TelegramNotificationDelivery
+from backend.src.entity.telegram_user import TelegramUser
 from backend.src.entity.tournaments import Tournament
+from backend.src.entity.weekly_beta_report import WeeklyBetaReport
 from backend.src.app.models.ml import (
     FeatureSnapshot,
     MLMatch,
@@ -33,6 +37,10 @@ __all__ = [
     "Standing",
     "Tournament",
     "TelegramBotEvent",
+    "TelegramFeedback",
+    "TelegramNotificationDelivery",
+    "TelegramUser",
+    "WeeklyBetaReport",
     "FeatureSnapshot",
     "MLMatch",
     "MLPlayer",

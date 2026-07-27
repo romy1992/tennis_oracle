@@ -11,10 +11,13 @@ import type {
   SingleMatchValueResponse,
   TelegramBotEventsResponse,
   TelegramBotStatsResponse,
+  TelegramFeedbackListResponse,
+  TelegramUserListResponse,
   PublishedPredictionListResponse,
   PublishedLiveStatsSummary,
   LiveBetaDashboardResponse,
-  PublishedSettledTip
+  PublishedSettledTip,
+  WeeklyBetaReport
 } from "../types/api";
 
 export const TODAY = "2026-07-21";
@@ -347,6 +350,56 @@ export const telegramEvents: TelegramBotEventsResponse = {
   ]
 };
 
+export const telegramUsers: TelegramUserListResponse = {
+  total: 1,
+  limit: 50,
+  offset: 0,
+  items: [
+    {
+      id: 1,
+      telegram_user_id: 42,
+      chat_id: 42,
+      username: "tester",
+      first_name: "Test",
+      last_name: "User",
+      status: "invited",
+      invite_origin: "beta_wave1",
+      first_access_at: `${TODAY}T10:00:00Z`,
+      last_access_at: `${TODAY}T11:00:00Z`,
+      terms_accepted: false,
+      terms_accepted_at: null,
+      terms_version: null,
+      notifications_enabled: true,
+      notify_predictions: true,
+      notify_results: true,
+      notify_empty_day: false,
+      created_at: `${TODAY}T10:00:00Z`,
+      updated_at: `${TODAY}T11:00:00Z`
+    }
+  ]
+};
+
+export const telegramFeedback: TelegramFeedbackListResponse = {
+  total: 1,
+  limit: 50,
+  offset: 0,
+  items: [
+    {
+      id: 7,
+      telegram_user_id: 42,
+      username: "tester",
+      first_name: "Test",
+      last_name: "User",
+      category: "bug",
+      rating: 4,
+      message: "La schedina di oggi non si apre.",
+      status: "new",
+      created_at: `${TODAY}T12:00:00Z`,
+      updated_at: `${TODAY}T12:00:00Z`
+    }
+  ]
+};
+
 export const publishedPredictions: PublishedPredictionListResponse = {
   total: 1,
   limit: 50,
@@ -565,6 +618,138 @@ export const liveBetaDashboard: LiveBetaDashboardResponse = {
       "I KPI LIVE della beta usano solo il registro immutabile delle pubblicazioni. Metriche di training/backtest e previsioni operative restano sulle pagine dedicate.",
     related_paths: ["/prediction-stats", "/betting-slip-model-stats", "/published-live-stats"]
   }
+};
+
+function makePeriod(weekStart: string, weekEnd: string, weekLabel: string) {
+  return {
+    week_start: weekStart,
+    week_end: weekEnd,
+    week_label: weekLabel,
+    users: {
+      total_users: 12,
+      active_users: 8,
+      new_users: 3,
+      by_status: { active: 9, invited: 2, suspended: 1 },
+      retention_cohort: 4,
+      retention_retained: 2,
+      retention_pct: 50
+    },
+    command_usage: {
+      total_events: 40,
+      unique_users: 7,
+      by_action: [
+        { action: "/start", count: 10 },
+        { action: "/oggi", count: 15 }
+      ]
+    },
+    live_tips: {
+      predictions_published: 6,
+      closed: 4,
+      open: 2,
+      won: 2,
+      lost: 2,
+      void: 0,
+      hit_rate_pct: 50,
+      stake_settled: 4,
+      profit: 0.5,
+      roi_pct: 12.5,
+      yield_pct: 12.5,
+      max_drawdown: 1.2
+    },
+    pipeline: {
+      runs_total: 7,
+      runs_failed: 0,
+      runs_completed_with_errors: 1,
+      runs_interrupted: 0,
+      combinations_failed: 1,
+      error_messages: ["run#7: combo failed"]
+    },
+    notifications: {
+      total: 20,
+      sent: 18,
+      failed: 2,
+      skipped: 0,
+      pending: 0,
+      by_kind_failed: { predictions: 2 }
+    },
+    feedback: {
+      total: 3,
+      avg_rating: 4.0,
+      by_status: { new: 2, resolved: 1 },
+      by_category: { bug: 1, ux: 2 }
+    }
+  };
+}
+
+export const weeklyBetaReport: WeeklyBetaReport = {
+  id: 1,
+  week_start: "2026-07-13",
+  week_end: "2026-07-19",
+  week_label: "2026-W29",
+  payload: {
+    current: makePeriod("2026-07-13", "2026-07-19", "2026-W29"),
+    previous: {
+      ...makePeriod("2026-07-06", "2026-07-12", "2026-W28"),
+      users: {
+        ...makePeriod("2026-07-06", "2026-07-12", "2026-W28").users,
+        total_users: 10,
+        active_users: 6,
+        new_users: 2,
+        retention_pct: 40
+      },
+      live_tips: {
+        ...makePeriod("2026-07-06", "2026-07-12", "2026-W28").live_tips,
+        predictions_published: 4,
+        roi_pct: 5
+      }
+    },
+    wow: {
+      total_users: { current: 12, previous: 10, delta: 2, delta_pct: 20 },
+      active_users: { current: 8, previous: 6, delta: 2, delta_pct: 33.3333 },
+      new_users: { current: 3, previous: 2, delta: 1, delta_pct: 50 },
+      retention_pct: { current: 50, previous: 40, delta: 10, delta_pct: 25 },
+      total_events: { current: 40, previous: 30, delta: 10, delta_pct: 33.3333 },
+      predictions_published: { current: 6, previous: 4, delta: 2, delta_pct: 50 },
+      roi_pct: { current: 12.5, previous: 5, delta: 7.5, delta_pct: 150 },
+      yield_pct: { current: 12.5, previous: 5, delta: 7.5, delta_pct: 150 },
+      max_drawdown: { current: 1.2, previous: 1.2, delta: 0, delta_pct: 0 },
+      pipeline_errors: { current: 1, previous: 0, delta: 1, delta_pct: null },
+      notifications_failed: { current: 2, previous: 1, delta: 1, delta_pct: 100 },
+      feedback_total: { current: 3, previous: 1, delta: 2, delta_pct: 200 }
+    },
+    notes: ["Settimana ISO (lunedì–domenica) in calendario Europe/Rome."]
+  },
+  telegram_status: "sent",
+  telegram_error: null,
+  telegram_sent_at: `${TODAY}T10:00:00`,
+  generated_at: `${TODAY}T09:30:00`,
+  generated_by: "job"
+};
+
+export const weeklyBetaReports = {
+  total: 1,
+  limit: 20,
+  offset: 0,
+  items: [
+    {
+      id: weeklyBetaReport.id,
+      week_start: weeklyBetaReport.week_start,
+      week_end: weeklyBetaReport.week_end,
+      week_label: weeklyBetaReport.week_label,
+      telegram_status: weeklyBetaReport.telegram_status,
+      telegram_sent_at: weeklyBetaReport.telegram_sent_at,
+      generated_at: weeklyBetaReport.generated_at,
+      generated_by: weeklyBetaReport.generated_by,
+      total_users: 12,
+      active_users: 8,
+      new_users: 3,
+      retention_pct: 50,
+      predictions_published: 6,
+      roi_pct: 12.5,
+      notifications_failed: 2,
+      feedback_total: 3
+    }
+  ]
 };
 
 export const futureExpiresAt = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();

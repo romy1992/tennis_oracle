@@ -837,6 +837,99 @@ export type TelegramBotStatsParams = {
   days?: number;
 };
 
+export type TelegramUserStatus = "invited" | "active" | "suspended" | "blocked";
+
+export type TelegramUser = {
+  id: number;
+  telegram_user_id: number;
+  chat_id?: number | null;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  status: TelegramUserStatus | string;
+  invite_origin: string | null;
+  first_access_at: string;
+  last_access_at: string;
+  terms_accepted: boolean;
+  terms_accepted_at: string | null;
+  terms_version: string | null;
+  notifications_enabled?: boolean;
+  notify_predictions?: boolean;
+  notify_results?: boolean;
+  notify_empty_day?: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TelegramUserListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: TelegramUser[];
+};
+
+export type TelegramUsersParams = {
+  q?: string;
+  status?: TelegramUserStatus | string;
+  telegram_user_id?: number;
+  username?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type TelegramUserInviteCreate = {
+  telegram_user_id: number;
+  username?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  invite_origin?: string | null;
+  status?: TelegramUserStatus;
+};
+
+export type TelegramFeedbackCategory =
+  | "bug"
+  | "content"
+  | "ux"
+  | "feature"
+  | "access"
+  | "other";
+
+export type TelegramFeedbackStatus = "new" | "reviewing" | "resolved" | "rejected";
+
+export type TelegramFeedback = {
+  id: number;
+  telegram_user_id: number;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  category: TelegramFeedbackCategory | string;
+  rating: number;
+  message: string;
+  status: TelegramFeedbackStatus | string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TelegramFeedbackListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: TelegramFeedback[];
+};
+
+export type TelegramFeedbackParams = {
+  q?: string;
+  status?: TelegramFeedbackStatus | string;
+  category?: TelegramFeedbackCategory | string;
+  telegram_user_id?: number;
+  limit?: number;
+  offset?: number;
+};
+
+export type TelegramFeedbackStatusUpdate = {
+  status: TelegramFeedbackStatus;
+};
+
 export type PublicationSource =
   | "admin_api"
   | "telegram"
@@ -1074,4 +1167,154 @@ export type LiveBetaDashboardParams = {
   odds_band?: OddsBand | string;
   latest_only?: boolean;
   tip_limit?: number;
+};
+
+export type WeeklyBetaTelegramStatus = "pending" | "sent" | "skipped" | "failed";
+
+export type WeeklyBetaMetricDelta = {
+  current: number | null;
+  previous: number | null;
+  delta: number | null;
+  delta_pct: number | null;
+};
+
+export type WeeklyBetaUsersMetrics = {
+  total_users: number;
+  active_users: number;
+  new_users: number;
+  by_status: Record<string, number>;
+  retention_cohort: number;
+  retention_retained: number;
+  retention_pct: number | null;
+};
+
+export type WeeklyBetaCommandUsage = {
+  total_events: number;
+  unique_users: number;
+  by_action: Array<{ action: string; count: number }>;
+};
+
+export type WeeklyBetaLiveTipsMetrics = {
+  predictions_published: number;
+  closed: number;
+  open: number;
+  won: number;
+  lost: number;
+  void: number;
+  hit_rate_pct: number | null;
+  stake_settled: number;
+  profit: number;
+  roi_pct: number | null;
+  yield_pct: number | null;
+  max_drawdown: number;
+};
+
+export type WeeklyBetaPipelineMetrics = {
+  runs_total: number;
+  runs_failed: number;
+  runs_completed_with_errors: number;
+  runs_interrupted: number;
+  combinations_failed: number;
+  error_messages: string[];
+};
+
+export type WeeklyBetaNotificationsMetrics = {
+  total: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  pending: number;
+  by_kind_failed: Record<string, number>;
+};
+
+export type WeeklyBetaFeedbackMetrics = {
+  total: number;
+  avg_rating: number | null;
+  by_status: Record<string, number>;
+  by_category: Record<string, number>;
+};
+
+export type WeeklyBetaPeriodMetrics = {
+  week_start: string;
+  week_end: string;
+  week_label: string;
+  users: WeeklyBetaUsersMetrics;
+  command_usage: WeeklyBetaCommandUsage;
+  live_tips: WeeklyBetaLiveTipsMetrics;
+  pipeline: WeeklyBetaPipelineMetrics;
+  notifications: WeeklyBetaNotificationsMetrics;
+  feedback: WeeklyBetaFeedbackMetrics;
+};
+
+export type WeeklyBetaWowDeltas = {
+  total_users: WeeklyBetaMetricDelta;
+  active_users: WeeklyBetaMetricDelta;
+  new_users: WeeklyBetaMetricDelta;
+  retention_pct: WeeklyBetaMetricDelta;
+  total_events: WeeklyBetaMetricDelta;
+  predictions_published: WeeklyBetaMetricDelta;
+  roi_pct: WeeklyBetaMetricDelta;
+  yield_pct: WeeklyBetaMetricDelta;
+  max_drawdown: WeeklyBetaMetricDelta;
+  pipeline_errors: WeeklyBetaMetricDelta;
+  notifications_failed: WeeklyBetaMetricDelta;
+  feedback_total: WeeklyBetaMetricDelta;
+};
+
+export type WeeklyBetaReportPayload = {
+  current: WeeklyBetaPeriodMetrics;
+  previous: WeeklyBetaPeriodMetrics;
+  wow: WeeklyBetaWowDeltas;
+  notes: string[];
+};
+
+export type WeeklyBetaReport = {
+  id: number;
+  week_start: string;
+  week_end: string;
+  week_label: string;
+  payload: WeeklyBetaReportPayload;
+  telegram_status: WeeklyBetaTelegramStatus | string;
+  telegram_error: string | null;
+  telegram_sent_at: string | null;
+  generated_at: string;
+  generated_by: string;
+};
+
+export type WeeklyBetaReportListItem = {
+  id: number;
+  week_start: string;
+  week_end: string;
+  week_label: string;
+  telegram_status: WeeklyBetaTelegramStatus | string;
+  telegram_sent_at: string | null;
+  generated_at: string;
+  generated_by: string;
+  total_users: number;
+  active_users: number;
+  new_users: number;
+  retention_pct: number | null;
+  predictions_published: number;
+  roi_pct: number | null;
+  notifications_failed: number;
+  feedback_total: number;
+};
+
+export type WeeklyBetaReportListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: WeeklyBetaReportListItem[];
+};
+
+export type WeeklyBetaReportGenerateRequest = {
+  week_start?: string | null;
+  send_telegram?: boolean;
+  force?: boolean;
+};
+
+export type WeeklyBetaReportGenerateResponse = {
+  report: WeeklyBetaReport;
+  created: boolean;
+  telegram: Record<string, unknown>;
 };

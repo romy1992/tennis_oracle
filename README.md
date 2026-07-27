@@ -150,6 +150,7 @@ TELEGRAM_MODEL_NAMES=logistic_regression,random_forest
 TELEGRAM_DEFAULT_STAKE=10
 TELEGRAM_SLIP_COUNT=9
 TELEGRAM_MIN_EDGE_PERCENT=2.0
+TELEGRAM_FEEDBACK_URL=
 ```
 
 Pubblicazione live nel registro `PublishedPrediction` (temporanea fino a ML-07; **default OFF**):
@@ -305,6 +306,15 @@ Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, met
 | GET | `/api/models-versions/results` | `global_update.read_models_versions_results` | admin o service | Risultati per versione/modello |
 | GET | `/api/telegram/events` | `telegram.read_telegram_events` | admin | Lista accessi/click bot (admin) |
 | GET | `/api/telegram/stats` | `telegram.read_telegram_stats` | admin | Aggregati accessi bot (admin) |
+| GET | `/api/telegram/users` | `telegram_users.search_telegram_users` | admin | Ricerca utenti beta (whitelist) |
+| GET | `/api/telegram/users/{telegram_user_id}` | `telegram_users.read_telegram_user` | admin | Dettaglio utente beta |
+| POST | `/api/telegram/users` | `telegram_users.create_telegram_user_invite` | admin | Pre-registra / invita utente |
+| POST | `/api/telegram/users/{telegram_user_id}/activate` | `telegram_users.activate_user` | admin | Attiva accesso |
+| POST | `/api/telegram/users/{telegram_user_id}/suspend` | `telegram_users.suspend_user` | admin | Sospende accesso |
+| POST | `/api/telegram/users/{telegram_user_id}/block` | `telegram_users.block_user` | admin | Blocca accesso |
+| GET | `/api/telegram/feedback` | `telegram_feedback.search_telegram_feedback` | admin | Inbox feedback bot |
+| GET | `/api/telegram/feedback/{feedback_id}` | `telegram_feedback.read_telegram_feedback` | admin | Dettaglio feedback |
+| PATCH | `/api/telegram/feedback/{feedback_id}` | `telegram_feedback.patch_telegram_feedback_status` | admin | Aggiorna stato (`new`/`reviewing`/`resolved`/`rejected`) |
 | POST | `/api/published-predictions` | `published_predictions.create_published_prediction` | admin | Pubblica snapshot immutabile |
 | GET | `/api/published-predictions` | `published_predictions.read_published_predictions` | admin | Storico pubblicazioni (filtri) |
 | GET | `/api/published-predictions/stats` | `published_predictions.read_published_live_stats` | admin | Statistiche live tipbook (ledger immutabile; filtri periodo/modello/torneo/superficie/fascia quota) |
@@ -312,6 +322,10 @@ Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, met
 | GET | `/api/published-predictions/{id}` | `published_predictions.read_published_prediction` | admin | Dettaglio snapshot |
 | POST | `/api/published-predictions/{id}/corrections` | `published_predictions.create_published_prediction_correction` | admin | Nuova versione (append-only) |
 | GET | `/api/live-beta-dashboard` | `live_beta_dashboard.read_live_beta_dashboard` | admin | Dashboard aggregata beta live (pipeline, tipbook, bot, completezza, errori) |
+| GET | `/api/weekly-beta-reports` | `weekly_beta_reports.list_reports` | admin | Storico report settimanali beta |
+| GET | `/api/weekly-beta-reports/latest` | `weekly_beta_reports.read_latest_report` | admin | Ultimo report settimanale |
+| GET | `/api/weekly-beta-reports/{report_id}` | `weekly_beta_reports.read_report` | admin | Dettaglio report (payload + WoW) |
+| POST | `/api/weekly-beta-reports/generate` | `weekly_beta_reports.generate_report` | admin | Genera/rigenera report + opz. Telegram admin |
 | GET | `/api/ops/checks` | `ops.get_ops_checks` | admin | Controlli operativi (import, pronostici, durata); `?alert=true` notifica admin |
 | POST | `/api/prematch-odds-snapshots` | `prematch_odds_snapshots.create_prematch_odds_snapshot` | admin | Append singolo rilevamento quote |
 | POST | `/api/prematch-odds-snapshots/from-payload` | `prematch_odds_snapshots.create_prematch_odds_snapshots_from_payload` | admin | Ingest matrice Home/Away |
@@ -340,7 +354,7 @@ Route definite in `matches.py`, `players.py`, `tournaments.py`, `ml.py` — **no
 
 #### `app/core/config.py` — `Settings`
 
-Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`), pubblicazione live temporanea fino a ML-07 (`live_publication_enabled`, `public_model_version`, `public_model_name`; default pubblicazione disabilitata), observability (`log_format`, `metrics_provider`, `metrics_endpoint_enabled`, `error_tracking_*`, `ops_alerts_*`, `telegram_bot_token`, `telegram_admin_chat_id`, soglie `ops_*`).  
+Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`), utenti beta Telegram (`telegram_whitelist_enabled`, `telegram_terms_required`, `telegram_terms_version`), notifiche push utente (`telegram_notifications_enabled`, `telegram_notify_predictions_enabled`, `telegram_notify_results_enabled`, `telegram_notify_empty_day_enabled`, `telegram_notify_min_interval_seconds`, `telegram_notify_max_retries`, `telegram_notify_retry_backoff_seconds`), pubblicazione live temporanea fino a ML-07 (`live_publication_enabled`, `public_model_version`, `public_model_name`; default pubblicazione disabilitata), observability (`log_format`, `metrics_provider`, `metrics_endpoint_enabled`, `error_tracking_*`, `ops_alerts_*`, `telegram_bot_token`, `telegram_admin_chat_id`, soglie `ops_*`).  
 `get_settings()` — settings cacheati; `set_settings_override()` per test/middleware.
 
 #### `app/core/security.py`
@@ -394,6 +408,10 @@ Modulo `backend/src/entity/` (home canonica delle tabelle operative). `app/model
 | `BettingSlip` / `BettingSlipDay` / `BettingSlipPick` | Schedine e selezioni; pick con campi value (`void_odds`, `min_edge_percent`, `value_decision`, …) |
 | `GlobalUpdateRun` / `GlobalUpdateRunItem` | Stato aggiornamento globale e step per combo modello |
 | `TelegramBotEvent` | Accessi/comandi bot (`telegram_bot_event`; migrazione `0010`) |
+| `TelegramUser` | Utenti beta Telegram / whitelist (`telegram_user`; migrazione `0017` + prefs/chat_id in `0018`; stati `invited`/`active`/`suspended`/`blocked`) |
+| `TelegramFeedback` | Feedback in-bot (`telegram_feedback`; migrazione `0019`; categoria, rating 1–5, messaggio, stati `new`/`reviewing`/`resolved`/`rejected`) |
+| `WeeklyBetaReport` | Snapshot report settimanale beta (`weekly_beta_report`; migrazione `0020`; payload KPI + stato invio Telegram admin) |
+| `TelegramNotificationDelivery` | Ledger consegna push (`telegram_notification_delivery`; migrazione `0018`; dedupe per utente/kind/giorno) |
 | `PublishedPrediction` | Registro immutabile pronostici pubblicati (`published_prediction`; migrazione `0013`; versioni via `publication_id` + `content_version`) |
 | `PrematchOddsSnapshot` | Storico append-only quote pre-match per bookmaker/selezione (`prematch_odds_snapshot`; migrazione `0014`; tipi `opening`/`observed`/`publication`/`closing`) |
 | `AdminUser` | Account amministratore (`admin_user`; migrazione `0011`; solo hash password) |
@@ -484,6 +502,19 @@ Aggregato admin per la beta live: riusa pipeline (`global_update` + `import_stat
 | Funzione | Ruolo |
 |----------|-------|
 | `compute_live_beta_dashboard` | Risposta unica per `GET /api/live-beta-dashboard` (include `publication_health` diagnostico e copertura closing) |
+
+#### `app/services/weekly_beta_report.py`
+
+Report settimanale beta (settimana ISO lun–dom, fuso Europe/Rome): utenti totali/attivi/nuovi, retention W1, utilizzo comandi, tip pubblicati + ROI/yield/drawdown live, errori pipeline, notifiche fallite, feedback, confronto settimana precedente. Persistenza in `weekly_beta_report`; riepilogo admin via `send_admin_alert`.
+
+| Funzione | Ruolo |
+|----------|-------|
+| `compute_weekly_beta_report_payload` | Aggrega KPI settimana corrente + precedente + delta WoW |
+| `generate_and_store_weekly_beta_report` | Upsert DB + invio Telegram admin opzionale |
+| `format_admin_telegram_summary` | Testo riepilogo per `TELEGRAM_ADMIN_CHAT_ID` |
+| `list_weekly_beta_reports` / `get_latest_weekly_beta_report` | Lettura storico |
+
+Job: `python -m backend.src.jobs.run_weekly_beta_report` (`docs/SCHEDULING.md`). Flag: `WEEKLY_BETA_REPORT_TELEGRAM_ENABLED` (usa `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ADMIN_CHAT_ID`, indipendente da `OPS_ALERTS_ENABLED`).
 
 #### `app/services/live_publication_service.py`
 
@@ -603,6 +634,50 @@ Gestione refresh upcoming, purge fixture incomplete future, stato ultimo import 
 | `compute_telegram_stats` | KPI: totali, utenti unici, top action, by_action, by_day |
 
 Schema Pydantic: `app/schemas/telegram_analytics.py` (`TelegramBotEventRead`, `TelegramBotEventsResponse`, `TelegramBotStatsResponse`, …).
+
+#### `app/services/telegram_users.py`
+
+Registro utenti beta Telegram (whitelist). Non sostituisce `TelegramBotEvent` (analytics).
+
+| Funzione | Ruolo |
+|----------|-------|
+| `register_or_touch_on_start` / `_safe` | Upsert al `/start` (id, `chat_id`, username, nome, primo/ultimo accesso, origine invito) |
+| `check_telegram_access` / `_safe` | Controllo accesso centralizzato (whitelist + termini) |
+| `accept_telegram_terms` / `_safe` | Accettazione condizioni (versione da settings) |
+| `update_notification_preferences` / `_safe` | Preferenze push (`/notifiche`) |
+| `invite_telegram_user` | Pre-registrazione admin (status tipicamente `invited`) |
+| `list_telegram_users` | Ricerca/filtri admin |
+| `activate_telegram_user` / `suspend_telegram_user` / `block_telegram_user` | Transizioni stato |
+
+Schema: `app/schemas/telegram_users.py`. Route admin: `app/api/routes/telegram_users.py`. Gate bot: `app/telegram/access.require_beta_access`.
+
+Settings: `telegram_whitelist_enabled` (default true), `telegram_terms_required` (default false), `telegram_terms_version`.
+
+#### `app/services/telegram_feedback.py`
+
+Inbox feedback dal comando bot `/feedback`. Persistenza solo al submit finale (niente bozze/conversazioni intermedie).
+
+| Funzione | Ruolo |
+|----------|-------|
+| `create_telegram_feedback` / `_safe` | Crea feedback (`new`) da bot |
+| `list_telegram_feedback` | Ricerca/filtri admin (stato, categoria, utente, testo) |
+| `get_telegram_feedback` | Dettaglio per id |
+| `update_telegram_feedback_status` | Transizioni `new` → `reviewing` → `resolved`/`rejected` |
+
+Schema: `app/schemas/telegram_feedback.py`. Route admin: `app/api/routes/telegram_feedback.py`. Categorie: `bug`/`content`/`ux`/`feature`/`access`/`other`.
+
+#### `app/services/telegram_notifications.py`
+
+Push configurabili verso utenti beta (separati dagli alert admin in `observability/alerts.py`).
+
+| Funzione | Ruolo |
+|----------|-------|
+| `list_notification_recipients` | Destinatari `active` + preferenze + `chat_id` + termini; esclude sospesi |
+| `build_predictions_message` / `build_results_message` / `build_empty_day_message` | Contenuti testuali |
+| `deliver_to_user` | Bot API con dedupe DB, retry 429/5xx, log errore |
+| `run_notification_kind` / `run_daily_telegram_notifications` | Orchestrazione `predictions` / `results` / `empty_day` |
+
+Job: `python -m backend.src.jobs.run_telegram_notifications` (`docs/SCHEDULING.md`). Master: `TELEGRAM_NOTIFICATIONS_ENABLED` (default false).
 
 ---
 
@@ -775,6 +850,9 @@ Wrapper di compatibilità: delega a `run_global_update` (tutte le combo abilitat
 | `/betting-slip-model-stats` | `BettingSlipModelStatsPage` |
 | `/global-update-report` | `GlobalUpdateReportPage` |
 | `/telegram-bot` | `TelegramBotPage` |
+| `/telegram-users` | `TelegramUsersPage` |
+| `/telegram-feedback` | `TelegramFeedbackPage` |
+| `/weekly-beta-report` | `WeeklyBetaReportPage` |
 
 Wrapper: `AuthProvider` → route protette con `ProtectedRoute` → `GlobalUpdateProvider` + `Layout`.  
 L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; test: `createMemoryRouter`).
@@ -793,6 +871,9 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 | `BettingSlipModelStatsPage` | Tabella comparativa stats per modello |
 | `GlobalUpdateReportPage` | Report ultima run globale: errori, warning, fasi, combo |
 | `TelegramBotPage` | Analytics admin bot: KPI, filtri data/action/user, breakdown per giorno, storico eventi |
+| `TelegramUsersPage` | Gestione utenti beta: ricerca, invito, attiva/sospendi/blocca, termini e origine invito |
+| `TelegramFeedbackPage` | Inbox feedback bot: filtri stato/categoria, messaggio, transizioni `new`/`reviewing`/`resolved`/`rejected` |
+| `WeeklyBetaReportPage` | Report settimanale beta salvati: KPI utenti/retention/comandi/tip/ROI/pipeline/notifiche/feedback + WoW; generazione manuale |
 
 ### Componenti / hook
 
@@ -809,7 +890,7 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 
 ### `services/apiClient.ts`
 
-Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, published-predictions (+ live stats), live-beta-dashboard, betting-slips, imports, global-update, single-match-value, Telegram analytics.
+Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, published-predictions (+ live stats), live-beta-dashboard, weekly-beta-reports, betting-slips, imports, global-update, single-match-value, Telegram analytics / users / feedback.
 Invia `Authorization: Bearer` quando presente; su **401** notifica il handler di sessione scaduta.  
 `ApiError` — errore HTTP con `status`.
 
@@ -884,23 +965,30 @@ Modulo `app/telegram/`.
 
 | Modulo | Ruolo |
 |--------|-------|
-| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, `telegram_service_api_key` (S2S, allineata a `SERVICE_API_KEY`), model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 9), `telegram_min_edge_percent` (default 2.0) |
+| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, `telegram_service_api_key` (S2S, allineata a `SERVICE_API_KEY`), model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 9), `telegram_min_edge_percent` (default 2.0), whitelist/termini (`telegram_whitelist_enabled`, `telegram_terms_required`, `telegram_terms_version`), `telegram_feedback_url` (link pubblico opzionale in footer) |
 | `client.BackendApiClient` | Chiama le stesse API FastAPI (`/betting-slips/daily`, `/betting-slips/stats/by-model`, `/predictions/stats/summary`, `/models-versions/results`, `/next-fixtures/predictions`, `/single-match-value`, …) |
 | `bot.build_application` / `main` | Polling + handler comandi |
 | `rate_limit.rate_limited` | Limite comandi per `telegram_user_id` (DB condiviso; messaggio IT se superato) |
+| `access.require_beta_access` | Gate centralizzato whitelist + termini su comandi privilegiati |
 | `tracking.tracked` / `track_callback_query` | Persistenza accessi/click in `telegram_bot_event` (non blocca il bot se il DB fallisce) |
 | `fixture_value.enrich_fixture_value` | Void/valore su `/partite` (SMVA o fallback da probabilità modello) |
 | `messages` / `dates` / `images` / `slips_compare` / `public_labels` | Formattazione risposte, date Roma, PNG, confronto multi-serie, etichette pubbliche (accuratezza) |
 
-Service condiviso: `app/services/telegram_analytics.py` (vedi §4.4).
+Service condivisi: `app/services/telegram_analytics.py`, `app/services/telegram_users.py`, `app/services/telegram_feedback.py`, `app/services/telegram_notifications.py` (vedi §4.4).
 
-**Comandi attivi:** `/start`, `/help`, `/schedine`, `/partite`, `/statistiche`.
+**Comandi attivi:** `/start`, `/help`, `/accetta_condizioni`, `/notifiche`, `/feedback`, `/annulla` (solo durante feedback), `/schedine`, `/partite`, `/statistiche`.
 
-Ogni comando (e i messaggi non gestiti / futuri callback inline) viene registrato in tabella `telegram_bot_event`. Gli aggregati e lo storico sono consultabili solo dalla dashboard admin (`/telegram-bot`), non dagli utenti del bot.
+`/start` registra (o aggiorna) l’utente in `telegram_user` con `telegram_user_id`, `chat_id`, username, nome, primo/ultimo accesso, stato, origine invito (payload deep-link), preferenze notifiche e stato termini, poi mostra menu inline (Partite / Schedine / Statistiche / Aiuto). `/help` è una guida sintetica con la stessa tastiera. `/notifiche` mostra o aggiorna le preferenze push (master, pronostici, risultati, giorno vuoto). `/feedback` avvia una conversazione a step (categoria → valutazione 1–5 → messaggio) con annullo via `/annulla` o pulsante; salva solo il submit finale in `telegram_feedback` (stato iniziale `new`). Con whitelist attiva (default) i nuovi utenti restano `invited` finché un admin non li attiva dalla pagina **Utenti beta Telegram**. `/schedine`, `/partite`, `/statistiche` (e i relativi pulsanti menu) richiedono accesso centralizzato (`active` + termini se `TELEGRAM_TERMS_REQUIRED=true`); `/feedback` resta disponibile senza gate beta (utile anche per segnalazioni di accesso).
 
-`/schedine` carica le schedine di tutti i modelli della versione configurata. Se i contenuti coincidono (stessi match e stessi vincitori previsti) ne mostra una sola serie; se differiscono anche solo per una partita/pick, mostra entrambe con etichetta pubblica basata sull’accuratezza (es. `Serie A · accuratezza 58.2%`), senza nomi tecnici. Il messaggio introduttivo contiene solo data e legenda stati (Presa / Persa / In corso / Annullata). Pick void escludono la quota dalla combinata effettiva.
+Push automatiche (job dedicato, default disabilitato): pronostici del giorno, riepilogo risultati, giorno senza partite; dedupe/retry/ledger in `telegram_notification_delivery`. Alert admin pipeline fallita restano su `OPS_ALERTS_*` / `TELEGRAM_ADMIN_CHAT_ID`.
 
-`/partite` allinea la pagina **Partite**: tabella Ora/Torneo/Surface/Match/Predetto/Conf./Void/Valore/Stato (stato partita normalizzato), void+valore via SMVA (fallback da probabilità modello), multi-serie se i predittori differiscono (stesse etichette pubbliche), intro solo data+legenda stati.
+UX pubblica: messaggi di caricamento sulle operazioni costose, footer uniforme con ultimo aggiornamento (da `GET /models-versions/results` → `last_updated_at`), avvertenza informativa e opzionale `TELEGRAM_FEEDBACK_URL`, errori centralizzati (`format_user_error`), stati vuoti espliciti per partite/schedine/statistiche. Nomi tecnici (`v3`, `logistic_regression`, `random_forest`) restano interni; all’utente solo etichette pubbliche.
+
+Ogni comando/callback menu (e i messaggi non gestiti) viene registrato in tabella `telegram_bot_event`; gli step intermedi di `/feedback` non vengono tracciati come eventi dedicati (solo l’entry `/feedback`). Analytics (`/telegram-bot`), gestione utenti (`/telegram-users`) e inbox feedback (`/telegram-feedback`) sono solo dashboard admin.
+
+`/schedine` carica le schedine di tutti i modelli della versione configurata. Se i contenuti coincidono (stessi match e stessi vincitori previsti) ne mostra una sola serie; se differiscono anche solo per una partita/pick, mostra entrambe con etichetta pubblica basata sull’accuratezza (es. `Serie A · accuratezza 58.2%`). L’intro include data, legende stati/valore, ultimo aggiornamento e disclaimer. Pick void escludono la quota dalla combinata effettiva.
+
+`/partite` allinea la pagina **Partite**: tabella Ora/Torneo/Surface/Match/Predetto/Conf./Void/Valore/Stato (stato partita normalizzato), void+valore via SMVA (fallback da probabilità modello), multi-serie se i predittori differiscono (stesse etichette pubbliche), intro coerente con legende + ultimo aggiornamento. Senza partite risponde con messaggio dedicato (non un fallimento generico).
 
 `/statistiche` mostra PNG di confronto (partite + schedine con profitto/ROI) usando le stesse etichette pubbliche. Comandi pronostici (`/pronostici`, `/giorno`, `/10giorni`, `/cerca`) restano nel codice ma non sono registrati.
 
@@ -913,11 +1001,11 @@ python -m src.app.telegram.bot
 
 ## 9. Schema dati
 
-Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`).
+Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `telegram_user` (utenti beta / whitelist; migrazione `0017`, prefs/`chat_id` in `0018`), `telegram_notification_delivery` (ledger push; migrazione `0018`), `telegram_feedback` (feedback in-bot; migrazione `0019`), `weekly_beta_report` (report settimanale beta; migrazione `0020`), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`).
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
 
-Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency`.
+Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report`.
 
 ```bash
 cd backend
