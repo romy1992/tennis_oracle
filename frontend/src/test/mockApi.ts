@@ -10,10 +10,14 @@ import {
   makeSlipStats,
   modelsCatalog,
   telegramEvents,
+  telegramFeedback,
   telegramStats,
+  telegramUsers,
   publishedPredictions,
   publishedLiveStats,
-  liveBetaDashboard
+  liveBetaDashboard,
+  weeklyBetaReport,
+  weeklyBetaReports
 } from "./fixtures";
 
 export type ApiMocks = Record<string, Mock>;
@@ -38,6 +42,13 @@ export function stubDefaultApi(apiMocks: {
   getBettingSlipStats: Mock;
   getTelegramBotStats: Mock;
   getTelegramBotEvents: Mock;
+  getTelegramUsers?: Mock;
+  inviteTelegramUser?: Mock;
+  activateTelegramUser?: Mock;
+  suspendTelegramUser?: Mock;
+  blockTelegramUser?: Mock;
+  getTelegramFeedback?: Mock;
+  updateTelegramFeedbackStatus?: Mock;
   getPredictionSummary: Mock;
   getDailyPredictionStats: Mock;
   getBettingSlipModelStats: Mock;
@@ -45,6 +56,10 @@ export function stubDefaultApi(apiMocks: {
   getPublishedPredictionVersions: Mock;
   getPublishedLiveStats: Mock;
   getLiveBetaDashboard?: Mock;
+  getWeeklyBetaReports?: Mock;
+  getLatestWeeklyBetaReport?: Mock;
+  getWeeklyBetaReport?: Mock;
+  generateWeeklyBetaReport?: Mock;
 }) {
   apiMocks.getSession.mockResolvedValue({
     id: 1,
@@ -73,6 +88,25 @@ export function stubDefaultApi(apiMocks: {
   apiMocks.getBettingSlipStats.mockResolvedValue(makeSlipStats());
   apiMocks.getTelegramBotStats.mockResolvedValue(telegramStats);
   apiMocks.getTelegramBotEvents.mockResolvedValue(telegramEvents);
+  apiMocks.getTelegramUsers?.mockResolvedValue(telegramUsers);
+  apiMocks.inviteTelegramUser?.mockResolvedValue(telegramUsers.items[0]);
+  apiMocks.activateTelegramUser?.mockResolvedValue({
+    ...telegramUsers.items[0],
+    status: "active"
+  });
+  apiMocks.suspendTelegramUser?.mockResolvedValue({
+    ...telegramUsers.items[0],
+    status: "suspended"
+  });
+  apiMocks.blockTelegramUser?.mockResolvedValue({
+    ...telegramUsers.items[0],
+    status: "blocked"
+  });
+  apiMocks.getTelegramFeedback?.mockResolvedValue(telegramFeedback);
+  apiMocks.updateTelegramFeedbackStatus?.mockResolvedValue({
+    ...telegramFeedback.items[0],
+    status: "reviewing"
+  });
   apiMocks.getPredictionSummary.mockResolvedValue({
     model_version: "v3",
     predictions_total: 0,
@@ -105,4 +139,12 @@ export function stubDefaultApi(apiMocks: {
   });
   apiMocks.getPublishedLiveStats.mockResolvedValue(publishedLiveStats);
   apiMocks.getLiveBetaDashboard?.mockResolvedValue(liveBetaDashboard);
+  apiMocks.getWeeklyBetaReports?.mockResolvedValue(weeklyBetaReports);
+  apiMocks.getLatestWeeklyBetaReport?.mockResolvedValue(weeklyBetaReport);
+  apiMocks.getWeeklyBetaReport?.mockResolvedValue(weeklyBetaReport);
+  apiMocks.generateWeeklyBetaReport?.mockResolvedValue({
+    report: weeklyBetaReport,
+    created: true,
+    telegram: { sent: true, telegram: "ok" }
+  });
 }

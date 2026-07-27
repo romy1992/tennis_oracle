@@ -1,9 +1,13 @@
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 
+from backend.src.app.telegram.bot import MENU_HELP, MENU_PARTITE, main_menu_keyboard
 from backend.src.app.telegram.dates import parse_date_or_offset
 from backend.src.app.telegram.fixture_value import enrich_fixture_value
 from backend.src.app.telegram.messages import (
+    DISCLAIMER,
+    account_status_label,
+    append_message_footer,
     format_betting_slips,
     format_betting_slip_photo_caption,
     format_betting_slip_text,
@@ -11,8 +15,13 @@ from backend.src.app.telegram.messages import (
     format_bot_stats_text,
     format_fixture_group_text,
     format_fixtures,
+    format_fixtures_empty,
     format_fixtures_intro,
+    format_help_text,
+    format_last_updated,
     format_predictions_day,
+    format_user_error,
+    format_welcome_text,
     predicted_winner_name,
     split_message,
 )
@@ -87,7 +96,19 @@ class TelegramFormattingTest(unittest.TestCase):
     def test_format_fixtures_empty_response(self):
         message = format_fixtures([], date(2026, 7, 4))
 
-        self.assertIn("Nessuna partita trovata", message)
+        self.assertIn("Nessuna partita disponibile", message)
+        self.assertIn("Riprova più tardi", message)
+        self.assertIn("informativo/statistico", message)
+
+    def test_format_fixtures_empty_includes_last_updated_and_feedback(self):
+        message = format_fixtures_empty(
+            date(2026, 7, 4),
+            last_updated="2026-07-04T10:15:00+00:00",
+            feedback_url="https://example.com/feedback",
+        )
+        self.assertIn("Ultimo aggiornamento:", message)
+        self.assertIn("Feedback / segnalazioni: https://example.com/feedback", message)
+        self.assertNotIn("logistic", message)
 
     def test_format_fixture_group_text_numbers_matches(self):
         message = format_fixture_group_text(
@@ -117,14 +138,19 @@ class TelegramFormattingTest(unittest.TestCase):
         self.assertIn("Void 1.40", message)
         self.assertIn("Valore PLAY", message)
 
-    def test_format_fixtures_intro_is_date_and_status_legend_only(self):
+    def test_format_fixtures_intro_is_public_and_coherent(self):
         message = format_fixtures_intro(
             [{"event_key": 1}],
             "2026-07-19",
+            last_updated=datetime(2026, 7, 19, 8, 0, tzinfo=timezone.utc),
         )
         self.assertIn("Partite di oggi (2026-07-19)", message)
         self.assertIn("Verde = Presa", message)
+        self.assertIn("PLAY = valore", message)
+        self.assertIn("Ultimo aggiornamento:", message)
+        self.assertIn(DISCLAIMER, message)
         self.assertNotIn("logistic", message)
+        self.assertNotIn("v3", message)
 
     def test_enrich_fixture_value_from_prediction_fallback(self):
         enriched = enrich_fixture_value(
@@ -209,7 +235,7 @@ class TelegramFormattingTest(unittest.TestCase):
         self.assertIn("ROI +12.0%", message)
         self.assertIn("PLAY", message)
 
-    def test_format_betting_slips_intro_is_date_and_status_legend_only(self):
+    def test_format_betting_slips_intro_is_public_and_coherent(self):
         message = format_betting_slips_intro(
             {
                 "date": "2026-07-19",
@@ -219,13 +245,18 @@ class TelegramFormattingTest(unittest.TestCase):
                 "slips": [{"label": "x"}],
             },
             min_edge_percent=2.0,
+            feedback_url="https://example.com/feedback",
         )
 
         self.assertIn("Schedine di oggi (2026-07-19)", message)
         self.assertIn("Verde = Presa", message)
         self.assertIn("Rosso = Persa", message)
         self.assertIn("Grigio = In corso", message)
+        self.assertIn("PLAY = valore", message)
+        self.assertIn(DISCLAIMER, message)
+        self.assertIn("Feedback / segnalazioni:", message)
         self.assertNotIn("logistic_regression", message)
+        self.assertNotIn("random_forest", message)
         self.assertNotIn("Modello:", message)
         self.assertNotIn("Stake:", message)
 
@@ -374,6 +405,64 @@ class TelegramFormattingTest(unittest.TestCase):
 
         self.assertEqual(len(selected), 2)
         self.assertFalse(betting_slips_equivalent(left, right))
+
+
+class TelegramBotUxTest(unittest.TestCase):
+    def test_main_menu_keyboard_has_primary_actions(self):
+        markup = main_menu_keyboard()
+        labels = [button.text for row in markup.inline_keyboard for button in row]
+        data = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertEqual(labels, ["Partite", "Schedine", "Statistiche", "Aiuto"])
+        self.assertIn(MENU_PARTITE, data)
+        self.assertIn(MENU_HELP, data)
+
+    def test_help_and_welcome_are_synthetic_and_public(self):
+        help_text = format_help_text(feedback_url="https://example.com/feedback")
+        welcome = format_welcome_text()
+        self.assertIn("/partite", help_text)
+        self.assertIn("/schedine", help_text)
+        self.assertIn("/statistiche", help_text)
+        self.assertIn("/feedback", help_text)
+        self.assertIn("/annulla", help_text)
+        self.assertIn("pulsanti", help_text.lower())
+        self.assertIn(DISCLAIMER, help_text)
+        self.assertIn("Feedback / segnalazioni:", help_text)
+        self.assertIn("/partite", welcome)
+        self.assertIn("/feedback", welcome)
+        self.assertNotIn("logistic_regression", help_text)
+        self.assertNotIn("random_forest", welcome)
+        self.assertNotIn("v3", welcome)
+
+    def test_format_last_updated_rome(self):
+        line = format_last_updated("2026-07-04T10:15:00+00:00")
+        self.assertIsNotNone(line)
+        assert line is not None
+        self.assertTrue(line.startswith("Ultimo aggiornamento:"))
+        self.assertIn("ora italiana", line)
+
+    def test_format_user_error_is_uniform(self):
+        message = format_user_error("Backend non disponibile.")
+        self.assertIn("Backend non disponibile.", message)
+        self.assertIn(DISCLAIMER, message)
+        scrubbed = format_user_error("Traceback (most recent call last):\nSQLAlchemy boom")
+        self.assertIn("problema temporaneo", scrubbed)
+        self.assertNotIn("SQLAlchemy", scrubbed)
+
+    def test_account_status_label_is_italian(self):
+        self.assertEqual(account_status_label("active"), "Attivo")
+        self.assertEqual(account_status_label("invited"), "In lista di attesa")
+
+    def test_append_message_footer_order(self):
+        text = append_message_footer(
+            "Corpo",
+            last_updated="2026-07-04T10:15:00+00:00",
+            feedback_url="https://example.com/feedback",
+        )
+        disclaimer_at = text.index(DISCLAIMER)
+        feedback_at = text.index("Feedback / segnalazioni:")
+        update_at = text.index("Ultimo aggiornamento:")
+        self.assertLess(update_at, disclaimer_at)
+        self.assertLess(disclaimer_at, feedback_at)
 
 
 if __name__ == "__main__":

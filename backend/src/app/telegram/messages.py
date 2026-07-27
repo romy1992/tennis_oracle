@@ -1,12 +1,89 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
+
+from backend.src.app.telegram.dates import ROME_TZ
 
 
 TELEGRAM_MESSAGE_LIMIT = 4096
-DISCLAIMER = "Pronostici a scopo informativo/statistico, non sono garanzia di risultato."
+DISCLAIMER = (
+    "Avvertenza: contenuti a scopo informativo/statistico. "
+    "Non sono consigli di scommessa né garanzia di risultato."
+)
+USER_ERROR_FALLBACK = "Si è verificato un problema temporaneo. Riprova tra poco."
+LOADING_PARTITE = "Caricamento partite in corso…"
+LOADING_SCHEDINE = "Caricamento schedine in corso…"
+LOADING_STATISTICHE = "Caricamento statistiche in corso…"
+
+WELCOME_TEXT = """Ciao! Sono il bot di tennis_oracle.
+
+Usa i pulsanti qui sotto oppure i comandi:
+/partite — partite di oggi
+/schedine — schedine di oggi
+/statistiche — andamento
+/notifiche — preferenze push
+/feedback — invia un feedback
+
+/help — guida rapida
+/accetta_condizioni — condizioni d'uso (se richieste)"""
+
+HELP_TEXT = """Guida rapida
+
+/partite — partite e pronostici di oggi (con indicazione di valore)
+/schedine — schedine proposte di oggi
+/statistiche — andamento storico (partite e schedine)
+/notifiche — attiva, disattiva e preferenze push
+/feedback — invia un feedback (categoria, valutazione, messaggio)
+/annulla — annulla il feedback in corso
+
+Puoi anche usare i pulsanti del menu iniziale (/start).
+
+Se non ci sono partite o schedine, riprova più tardi dopo l'aggiornamento giornaliero."""
+
+ACCOUNT_STATUS_LABELS = {
+    "active": "Attivo",
+    "invited": "In lista di attesa",
+    "suspended": "Sospeso",
+    "blocked": "Bloccato",
+}
+
+FEEDBACK_CATEGORY_LABELS = {
+    "bug": "Bug / errore",
+    "content": "Contenuti / partite / schedine",
+    "ux": "Usabilità bot",
+    "feature": "Suggerimento",
+    "access": "Accesso / whitelist",
+    "other": "Altro",
+}
+
+FEEDBACK_START_TEXT = (
+    "Invia un feedback\n"
+    "\n"
+    "1) Scegli una categoria.\n"
+    "2) Assegna una valutazione da 1 a 5.\n"
+    "3) Scrivi un messaggio.\n"
+    "\n"
+    "Puoi annullare in qualsiasi momento con /annulla."
+)
+
+FEEDBACK_CANCELLED_TEXT = "Feedback annullato. Nessun dato salvato."
+FEEDBACK_ASK_RATING_TEXT = "Valutazione: scegli un voto da 1 (basso) a 5 (alto)."
+FEEDBACK_ASK_MESSAGE_TEXT = (
+    "Scrivi ora il messaggio del feedback (max 2000 caratteri).\n"
+    "Per annullare: /annulla"
+)
+FEEDBACK_SAVED_TEXT = "Grazie! Feedback inviato correttamente."
+FEEDBACK_SAVE_FAILED_TEXT = (
+    "Non sono riuscito a salvare il feedback. Riprova tra poco con /feedback."
+)
+FEEDBACK_EMPTY_MESSAGE_TEXT = (
+    "Il messaggio non può essere vuoto. Scrivi un testo oppure /annulla."
+)
+FEEDBACK_MESSAGE_TOO_LONG_TEXT = (
+    "Messaggio troppo lungo (max 2000 caratteri). Accorcialo oppure /annulla."
+)
 
 
 def split_message(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
@@ -102,6 +179,80 @@ STATUS_LEGEND = (
 VALUE_LEGEND = "PLAY = valore | BORDERLINE = vicino void | NO BET = sotto valore"
 
 
+def account_status_label(status: str | None) -> str:
+    if not status:
+        return "n.d."
+    return ACCOUNT_STATUS_LABELS.get(status, status)
+
+
+def format_last_updated(value: Any) -> str | None:
+    """Human-readable last-update line for public bot replies (Rome time)."""
+    if value is None or value == "":
+        return None
+    dt: datetime | None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return f"Ultimo aggiornamento: {text}"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    local = dt.astimezone(ROME_TZ)
+    return f"Ultimo aggiornamento: {local.strftime('%d/%m/%Y %H:%M')} (ora italiana)"
+
+
+def format_feedback_line(feedback_url: str | None) -> str | None:
+    if not isinstance(feedback_url, str):
+        return None
+    url = feedback_url.strip()
+    if not url:
+        return None
+    return f"Feedback / segnalazioni: {url}"
+
+
+def format_user_error(message: str | None = None) -> str:
+    """Uniform public error copy (no stack traces / internal detail dumps)."""
+    body = (message or "").strip() or USER_ERROR_FALLBACK
+    # Avoid leaking raw HTTP/JSON payloads that may contain technical tokens.
+    lowered = body.lower()
+    if any(token in lowered for token in ("traceback", "sqlalchemy", "psycopg", "jwt")):
+        body = USER_ERROR_FALLBACK
+    return f"{body}\n\n{DISCLAIMER}"
+
+
+def append_message_footer(
+    text: str,
+    *,
+    last_updated: Any = None,
+    feedback_url: str | None = None,
+    include_disclaimer: bool = True,
+) -> str:
+    """Append last-update, disclaimer and optional feedback in a stable order."""
+    parts = [text.rstrip()]
+    last_line = format_last_updated(last_updated)
+    if last_line:
+        parts.append(last_line)
+    if include_disclaimer and DISCLAIMER not in text:
+        parts.append(DISCLAIMER)
+    feedback = format_feedback_line(feedback_url)
+    if feedback:
+        parts.append(feedback)
+    return "\n\n".join(parts)
+
+
+def format_help_text(*, feedback_url: str | None = None) -> str:
+    return append_message_footer(HELP_TEXT, feedback_url=feedback_url)
+
+
+def format_welcome_text(*, feedback_url: str | None = None) -> str:
+    return append_message_footer(WELCOME_TEXT, feedback_url=feedback_url)
+
+
 def predicted_winner_name(item: dict[str, Any]) -> str | None:
     prediction = item.get("prediction") or {}
     raw_winner = prediction.get("predicted_winner")
@@ -191,9 +342,27 @@ def format_predictions_summary(items: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def format_fixtures_empty(
+    target_date: date | str,
+    *,
+    last_updated: Any = None,
+    feedback_url: str | None = None,
+) -> str:
+    body = (
+        f"Nessuna partita disponibile per {target_date}.\n\n"
+        "Non ci sono incontri con pronostico per oggi, oppure l'aggiornamento "
+        "non è ancora completo. Riprova più tardi."
+    )
+    return append_message_footer(
+        body,
+        last_updated=last_updated,
+        feedback_url=feedback_url,
+    )
+
+
 def format_fixtures(items: list[dict[str, Any]], target_date: date | str) -> str:
     if not items:
-        return f"Nessuna partita trovata per {target_date}."
+        return format_fixtures_empty(target_date)
 
     lines = [format_fixtures_intro(items, target_date), ""]
     lines.append(format_fixture_group_text(items))
@@ -203,10 +372,21 @@ def format_fixtures(items: list[dict[str, Any]], target_date: date | str) -> str
 def format_fixtures_intro(
     items: list[dict[str, Any]] | None = None,
     target_date: date | str | None = None,
+    *,
+    last_updated: Any = None,
+    feedback_url: str | None = None,
 ) -> str:
     del items  # count kept out of intro; legend-only like /schedine
     resolved = target_date or "oggi"
-    return f"Partite di oggi ({resolved})\n\n{STATUS_LEGEND}"
+    body = (
+        f"Partite di oggi ({resolved})\n\n"
+        f"{STATUS_LEGEND}\n{VALUE_LEGEND}"
+    )
+    return append_message_footer(
+        body,
+        last_updated=last_updated,
+        feedback_url=feedback_url,
+    )
 
 
 def format_fixture_group_text(
@@ -268,15 +448,42 @@ def format_player_search(items: list[dict[str, Any]], player: str) -> str:
     return "\n\n".join(lines)
 
 
+def format_betting_slips_empty(
+    slip_date: date | str,
+    *,
+    warnings: list[str] | None = None,
+    last_updated: Any = None,
+    feedback_url: str | None = None,
+) -> str:
+    suffix = f"\n\nNote: {'; '.join(warnings)}" if warnings else ""
+    body = (
+        f"Nessuna schedina disponibile per {slip_date}.{suffix}\n\n"
+        "Può dipendere da margini insufficienti o da dati non ancora aggiornati. "
+        "Riprova più tardi."
+    )
+    return append_message_footer(
+        body,
+        last_updated=last_updated,
+        feedback_url=feedback_url,
+    )
+
+
 def format_betting_slips_intro(
     payload: dict[str, Any] | None = None,
     *,
     slip_date: str | None = None,
     min_edge_percent: float = 2.0,
+    last_updated: Any = None,
+    feedback_url: str | None = None,
 ) -> str:
     del min_edge_percent  # kept for call-site compatibility; not shown in intro
     resolved_date = slip_date or (payload or {}).get("date") or "oggi"
-    return f"Schedine di oggi ({resolved_date})\n\n{STATUS_LEGEND}"
+    body = f"Schedine di oggi ({resolved_date})\n\n{STATUS_LEGEND}\n{VALUE_LEGEND}"
+    return append_message_footer(
+        body,
+        last_updated=last_updated,
+        feedback_url=feedback_url,
+    )
 
 
 def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None = None) -> str:
@@ -372,15 +579,27 @@ def format_betting_slips(
     *,
     min_edge_percent: float = 2.0,
     series_label: str | None = None,
+    last_updated: Any = None,
+    feedback_url: str | None = None,
 ) -> str:
     slips = payload.get("slips") or []
     slip_date = payload.get("date") or "oggi"
     if not slips:
-        warnings = payload.get("warnings") or []
-        suffix = f"\n\nNote: {'; '.join(warnings)}" if warnings else ""
-        return f"Nessuna schedina disponibile per {slip_date}.{suffix}\n\n{DISCLAIMER}"
+        return format_betting_slips_empty(
+            slip_date,
+            warnings=list(payload.get("warnings") or []),
+            last_updated=last_updated,
+            feedback_url=feedback_url,
+        )
 
-    lines = [format_betting_slips_intro(payload, min_edge_percent=min_edge_percent)]
+    lines = [
+        format_betting_slips_intro(
+            payload,
+            min_edge_percent=min_edge_percent,
+            last_updated=last_updated,
+            feedback_url=feedback_url,
+        )
+    ]
     for slip in slips:
         lines.append("")
         lines.append(format_betting_slip_text(slip, series_label=series_label))
@@ -391,21 +610,40 @@ def format_bot_stats_intro(
     *,
     from_date: Any = None,
     to_date: Any = None,
+    last_updated: Any = None,
+    feedback_url: str | None = None,
 ) -> str:
     if from_date and to_date:
         range_text = f"{from_date} → {to_date}"
     else:
         range_text = "storico completo"
-    return (
+    body = (
         f"Statistiche bot ({range_text})\n"
-        "Confronto delle predizioni senza nomi tecnici.\n"
-        f"{DISCLAIMER}"
+        "Confronto delle predizioni (etichette pubbliche, senza nomi tecnici)."
+    )
+    return append_message_footer(
+        body,
+        last_updated=last_updated,
+        feedback_url=feedback_url,
+    )
+
+
+def format_bot_stats_empty(
+    *,
+    last_updated: Any = None,
+    feedback_url: str | None = None,
+) -> str:
+    return append_message_footer(
+        "Nessuna statistica disponibile al momento.\n"
+        "Riprova dopo l'aggiornamento giornaliero.",
+        last_updated=last_updated,
+        feedback_url=feedback_url,
     )
 
 
 def format_bot_stats_text(series: list[dict[str, Any]]) -> str:
     if not series:
-        return "Nessuna statistica disponibile."
+        return format_bot_stats_empty()
 
     lines = ["Andamento predizioni"]
     for entry in series:
@@ -452,3 +690,127 @@ def _format_stats_decimal(value: float | None) -> str:
     if value is None:
         return "n.d."
     return f"{float(value):+.2f}"
+
+
+def format_notification_predictions(
+    items: list[dict[str, Any]],
+    target_date: date | str,
+    *,
+    max_items: int = 12,
+) -> str:
+    """Compact push text for today's fixtures/predictions (no images)."""
+    if not items:
+        return format_fixtures_empty(target_date)
+
+    lines = [
+        f"Pronostici del giorno ({target_date})",
+        f"{len(items)} partite disponibili.",
+        "",
+        DISCLAIMER,
+        "",
+    ]
+    for item in items[:max_items]:
+        prediction = item.get("prediction") if isinstance(item.get("prediction"), dict) else {}
+        winner = (
+            item.get("predicted_winner")
+            or (prediction or {}).get("predicted_winner")
+            or "n.d."
+        )
+        title = _match_title(item)
+        time_label = _format_event_time(item.get("event_time"))
+        lines.append(f"• {time_label} {title} → {winner}")
+    if len(items) > max_items:
+        lines.append(f"… e altre {len(items) - max_items} partite.")
+    lines.append("")
+    lines.append("Dettagli: /partite oppure /schedine")
+    return "\n".join(lines)
+
+
+def format_notification_results(
+    target_date: date | str,
+    day_stats: dict[str, Any] | None,
+) -> str:
+    """Push digest for settled predictions on a given day."""
+    if not day_stats:
+        body = (
+            f"Riepilogo risultati {target_date}\n\n"
+            "Nessun dato disponibile per questa giornata."
+        )
+        return append_message_footer(body)
+
+    total = int(day_stats.get("predictions_total") or 0)
+    resolved = int(day_stats.get("predictions_resolved") or 0)
+    correct = int(day_stats.get("predictions_correct") or 0)
+    lost = int(day_stats.get("predictions_lost") or 0)
+    pending = int(day_stats.get("pending") or 0)
+    accuracy = day_stats.get("accuracy_pct")
+    roi = day_stats.get("theoretical_roi_pct")
+    profit = day_stats.get("theoretical_profit_units")
+
+    if total == 0 and resolved == 0:
+        body = (
+            f"Riepilogo risultati {target_date}\n\n"
+            "Nessun pronostico da valutare per questa giornata."
+        )
+        return append_message_footer(body)
+
+    lines = [
+        f"Riepilogo risultati {target_date}",
+        "",
+        f"Pronostici: {total} | Chiusi: {resolved} | Ok: {correct} | Ko: {lost} | In corso: {pending}",
+        f"Accuratezza: {_format_stats_pct(float(accuracy) if accuracy is not None else None)}",
+        (
+            f"Profitto teorico: {_format_stats_decimal(float(profit) if profit is not None else None)} | "
+            f"ROI: {_format_stats_pct(float(roi) if roi is not None else None)}"
+        ),
+        "",
+        "Andamento completo: /statistiche",
+    ]
+    return append_message_footer("\n".join(lines))
+
+
+def format_notification_preferences(user: Any) -> str:
+    """Show current push preferences for /notifiche."""
+    master = "ON" if getattr(user, "notifications_enabled", True) else "OFF"
+    preds = "ON" if getattr(user, "notify_predictions", True) else "OFF"
+    results = "ON" if getattr(user, "notify_results", True) else "OFF"
+    empty = "ON" if getattr(user, "notify_empty_day", False) else "OFF"
+    return "\n".join(
+        [
+            "Preferenze notifiche",
+            "",
+            f"Master: {master}",
+            f"Pronostici del giorno: {preds}",
+            f"Riepilogo risultati: {results}",
+            f"Giorno senza partite: {empty}",
+            "",
+            "Comandi:",
+            "/notifiche on | off — attiva/disattiva tutte",
+            "/notifiche pronostici on|off",
+            "/notifiche risultati on|off",
+            "/notifiche vuoto on|off",
+        ]
+    )
+
+
+def feedback_category_label(category: str | None) -> str:
+    if not category:
+        return "n.d."
+    return FEEDBACK_CATEGORY_LABELS.get(category, category)
+
+
+def format_feedback_saved(
+    *,
+    category: str,
+    rating: int,
+    feedback_id: int | None = None,
+) -> str:
+    lines = [
+        FEEDBACK_SAVED_TEXT,
+        "",
+        f"Categoria: {feedback_category_label(category)}",
+        f"Valutazione: {rating}/5",
+    ]
+    if feedback_id is not None:
+        lines.append(f"Riferimento: #{feedback_id}")
+    return "\n".join(lines)

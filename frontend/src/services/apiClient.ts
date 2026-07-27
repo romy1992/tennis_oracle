@@ -26,6 +26,14 @@ import type {
   TelegramBotEventsResponse,
   TelegramBotStatsParams,
   TelegramBotStatsResponse,
+  TelegramUser,
+  TelegramUserInviteCreate,
+  TelegramUserListResponse,
+  TelegramUsersParams,
+  TelegramFeedback,
+  TelegramFeedbackListResponse,
+  TelegramFeedbackParams,
+  TelegramFeedbackStatusUpdate,
   PublishedPrediction,
   PublishedPredictionListResponse,
   PublishedPredictionVersionChainResponse,
@@ -33,7 +41,11 @@ import type {
   PublishedLiveStatsParams,
   PublishedLiveStatsSummary,
   LiveBetaDashboardParams,
-  LiveBetaDashboardResponse
+  LiveBetaDashboardResponse,
+  WeeklyBetaReport,
+  WeeklyBetaReportGenerateRequest,
+  WeeklyBetaReportGenerateResponse,
+  WeeklyBetaReportListResponse
 } from "../types/api";
 import { getStoredToken } from "../auth/session";
 
@@ -114,6 +126,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 async function post<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, {
     method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+}
+
+async function patch<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "PATCH",
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined
   });
@@ -204,6 +224,22 @@ export const apiClient = {
     request<TelegramBotStatsResponse>(withQuery("/api/telegram/stats", params)),
   getTelegramBotEvents: (params: TelegramBotEventsParams = {}) =>
     request<TelegramBotEventsResponse>(withQuery("/api/telegram/events", params)),
+  getTelegramUsers: (params: TelegramUsersParams = {}) =>
+    request<TelegramUserListResponse>(withQuery("/api/telegram/users", params)),
+  inviteTelegramUser: (payload: TelegramUserInviteCreate) =>
+    post<TelegramUser>("/api/telegram/users", payload),
+  activateTelegramUser: (telegramUserId: number) =>
+    post<TelegramUser>(`/api/telegram/users/${telegramUserId}/activate`, {}),
+  suspendTelegramUser: (telegramUserId: number) =>
+    post<TelegramUser>(`/api/telegram/users/${telegramUserId}/suspend`, {}),
+  blockTelegramUser: (telegramUserId: number) =>
+    post<TelegramUser>(`/api/telegram/users/${telegramUserId}/block`, {}),
+  getTelegramFeedback: (params: TelegramFeedbackParams = {}) =>
+    request<TelegramFeedbackListResponse>(withQuery("/api/telegram/feedback", params)),
+  updateTelegramFeedbackStatus: (
+    feedbackId: number,
+    payload: TelegramFeedbackStatusUpdate
+  ) => patch<TelegramFeedback>(`/api/telegram/feedback/${feedbackId}`, payload),
   getPublishedPredictions: (params: PublishedPredictionsParams = {}) =>
     request<PublishedPredictionListResponse>(
       withQuery("/api/published-predictions", params)
@@ -219,5 +255,13 @@ export const apiClient = {
       withQuery("/api/published-predictions/stats", params)
     ),
   getLiveBetaDashboard: (params: LiveBetaDashboardParams = {}) =>
-    request<LiveBetaDashboardResponse>(withQuery("/api/live-beta-dashboard", params))
+    request<LiveBetaDashboardResponse>(withQuery("/api/live-beta-dashboard", params)),
+  getWeeklyBetaReports: (params: { limit?: number; offset?: number } = {}) =>
+    request<WeeklyBetaReportListResponse>(withQuery("/api/weekly-beta-reports", params)),
+  getLatestWeeklyBetaReport: () =>
+    request<WeeklyBetaReport>("/api/weekly-beta-reports/latest"),
+  getWeeklyBetaReport: (reportId: number) =>
+    request<WeeklyBetaReport>(`/api/weekly-beta-reports/${reportId}`),
+  generateWeeklyBetaReport: (payload: WeeklyBetaReportGenerateRequest = {}) =>
+    post<WeeklyBetaReportGenerateResponse>("/api/weekly-beta-reports/generate", payload)
 };

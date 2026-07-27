@@ -21,6 +21,12 @@ class TelegramSettings(BaseSettings):
     telegram_min_edge_percent: float = 2.0
     # Comma-separated fallback when /models-versions/results is unavailable.
     telegram_model_names: str = "logistic_regression,random_forest"
+    # Beta access (mirrored from API Settings; same env keys).
+    telegram_whitelist_enabled: bool = True
+    telegram_terms_required: bool = False
+    telegram_terms_version: str = "1"
+    # Optional public feedback / report URL shown in bot footers (no secrets).
+    telegram_feedback_url: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",

@@ -65,6 +65,28 @@ class Settings(BaseSettings):
     rate_limit_telegram: int = 30
     rate_limit_telegram_expensive: int = 10
 
+    # Telegram beta users (whitelist + terms). Used by API admin and bot process.
+    # When true (default), only status=active users may use privileged commands.
+    telegram_whitelist_enabled: bool = True
+    # When true, users must accept terms (version below) before privileged commands.
+    telegram_terms_required: bool = False
+    telegram_terms_version: str = "1"
+
+    # Outbound Telegram user notifications (job run_telegram_notifications).
+    # Admin pipeline alerts use OPS_ALERTS_* separately.
+    telegram_notifications_enabled: bool = False
+    telegram_notify_predictions_enabled: bool = True
+    telegram_notify_results_enabled: bool = True
+    telegram_notify_empty_day_enabled: bool = True
+    # Pace outbound Bot API sends (Telegram ~30 msg/s; keep conservative).
+    telegram_notify_min_interval_seconds: float = 0.05
+    telegram_notify_max_retries: int = 2
+    telegram_notify_retry_backoff_seconds: float = 2.0
+
+    # Weekly beta report admin Telegram summary (job run_weekly_beta_report).
+    # Uses TELEGRAM_BOT_TOKEN + TELEGRAM_ADMIN_CHAT_ID; independent of OPS_ALERTS_ENABLED.
+    weekly_beta_report_telegram_enabled: bool = True
+
     # Temporary public-model config for live tip publication (until ML-07).
     # Default: automatic publication disabled. No silent fallback to another model.
     live_publication_enabled: bool = False
