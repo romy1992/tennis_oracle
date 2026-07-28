@@ -218,7 +218,7 @@ docker compose down           # arresto (volume embedded conservato; non usare -
 
 Comandi separati: `docker compose run --rm migrate`, `docker compose --profile bot up -d bot`, `docker compose --profile jobs run --rm job`. Postgres embedded (opzionale): `docker compose --profile embedded-db up -d db`. Overlay prod: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d`.
 
-Dopo modifiche al codice (stack **prod-like**): `docker compose build api` / `build frontend` poi `up -d`. Per coding con hot-reload: [docs/DOCKER.md — modalità sviluppo](docs/DOCKER.md#modalità-sviluppo-hot-reload) (`docker-compose.dev.yml`). Dataset/modelli/log/segreti **non** finiscono nelle immagini; volume `postgres_data` solo se usi il profilo `embedded-db`. Modelli host opzionali via `MODELS_HOST_PATH`.
+Dopo modifiche al codice (stack **prod-like**): `docker compose build api` / `build frontend` poi `up -d`. Per coding con hot-reload: [docs/DOCKER.md — modalità sviluppo](docs/DOCKER.md#modalità-sviluppo-hot-reload) (`docker-compose.dev.yml`). Dataset/modelli/log/segreti **non** finiscono nelle immagini; volume `postgres_data` solo se usi il profilo `embedded-db`. Sul host: modelli via `MODELS_HOST_PATH`, dataset CSV via `PROCESSED_HOST_PATH`, report via `REPORTS_HOST_PATH` (necessari per walk-forward in container).
 
 Artefatti: `backend/Dockerfile`, `frontend/Dockerfile`, `.dockerignore`, `docker-compose.yml`, `docker-compose.dev.yml`, `docker-compose.prod.yml`, `docker-compose.staging.yml`.
 
@@ -326,6 +326,14 @@ Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, met
 | GET | `/api/weekly-beta-reports/latest` | `weekly_beta_reports.read_latest_report` | admin | Ultimo report settimanale |
 | GET | `/api/weekly-beta-reports/{report_id}` | `weekly_beta_reports.read_report` | admin | Dettaglio report (payload + WoW) |
 | POST | `/api/weekly-beta-reports/generate` | `weekly_beta_reports.generate_report` | admin | Genera/rigenera report + opz. Telegram admin |
+| GET | `/api/walk-forward` | `walk_forward.list_runs` | admin | Storico run walk-forward |
+| GET | `/api/walk-forward/latest` | `walk_forward.read_latest_run` | admin | Ultima run walk-forward |
+| POST | `/api/walk-forward/runs` | `walk_forward.trigger_run` | admin | Avvia walk-forward (background; non cambia modello pubblico) |
+| GET | `/api/walk-forward/runs/{run_id}` | `walk_forward.read_run` | admin | Dettaglio run + fold/metriche/leakage |
+| GET | `/api/calibration` | `calibration.list_runs` | admin | Storico run calibrazione probabilità |
+| GET | `/api/calibration/latest` | `calibration.read_latest_run` | admin | Ultima run calibrazione |
+| POST | `/api/calibration/runs` | `calibration.trigger_run` | admin | Avvia calibrazione OOS walk-forward (non attiva modello pubblico) |
+| GET | `/api/calibration/runs/{run_id}` | `calibration.read_run` | admin | Dettaglio run + metriche/reliability/confronto metodi |
 | GET | `/api/ops/checks` | `ops.get_ops_checks` | admin | Controlli operativi (import, pronostici, durata); `?alert=true` notifica admin |
 | POST | `/api/prematch-odds-snapshots` | `prematch_odds_snapshots.create_prematch_odds_snapshot` | admin | Append singolo rilevamento quote |
 | POST | `/api/prematch-odds-snapshots/from-payload` | `prematch_odds_snapshots.create_prematch_odds_snapshots_from_payload` | admin | Ingest matrice Home/Away |
@@ -354,7 +362,7 @@ Route definite in `matches.py`, `players.py`, `tournaments.py`, `ml.py` — **no
 
 #### `app/core/config.py` — `Settings`
 
-Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`), utenti beta Telegram (`telegram_whitelist_enabled`, `telegram_terms_required`, `telegram_terms_version`), notifiche push utente (`telegram_notifications_enabled`, `telegram_notify_predictions_enabled`, `telegram_notify_results_enabled`, `telegram_notify_empty_day_enabled`, `telegram_notify_min_interval_seconds`, `telegram_notify_max_retries`, `telegram_notify_retry_backoff_seconds`), pubblicazione live temporanea fino a ML-07 (`live_publication_enabled`, `public_model_version`, `public_model_name`; default pubblicazione disabilitata), observability (`log_format`, `metrics_provider`, `metrics_endpoint_enabled`, `error_tracking_*`, `ops_alerts_*`, `telegram_bot_token`, `telegram_admin_chat_id`, soglie `ops_*`).  
+Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`), utenti beta Telegram (`telegram_whitelist_enabled`, `telegram_terms_required`, `telegram_terms_version`), notifiche push utente (`telegram_notifications_enabled`, `telegram_notify_predictions_enabled`, `telegram_notify_results_enabled`, `telegram_notify_empty_day_enabled`, `telegram_notify_min_interval_seconds`, `telegram_notify_max_retries`, `telegram_notify_retry_backoff_seconds`), walk-forward (`walk_forward_in_global_update`, `walk_forward_mode`, `walk_forward_initial_train_days`, `walk_forward_test_days`, `walk_forward_step_days`, `walk_forward_min_train_rows`, `walk_forward_min_test_rows`, `walk_forward_embargo_days`, `walk_forward_edge_threshold`, `walk_forward_random_state`), calibrazione (`calibration_n_bins`, `calibration_min_bin_samples`, `calibration_min_calibrator_train_samples`), pubblicazione live temporanea fino a ML-07 (`live_publication_enabled`, `public_model_version`, `public_model_name`; default pubblicazione disabilitata), observability (`log_format`, `metrics_provider`, `metrics_endpoint_enabled`, `error_tracking_*`, `ops_alerts_*`, `telegram_bot_token`, `telegram_admin_chat_id`, soglie `ops_*`).  
 `get_settings()` — settings cacheati; `set_settings_override()` per test/middleware.
 
 #### `app/core/security.py`
@@ -757,6 +765,35 @@ Feature engineering su tabelle `ml_*` / snapshot: win-rate, H2H, giorni dall’u
 | `compute_value_bet_metrics` (modulo dedicato) | Metriche value bet |
 | `update_model_registry_entry` / `write_model_comparison` | Registry JSON |
 
+#### `app/ml/training/walk_forward.py`
+
+Validazione temporale multi-fold **separata** dalla holdout di `train_baseline` e dalle metriche live.
+
+| Funzione | Ruolo |
+|----------|-------|
+| `WalkForwardConfig` | Finestra iniziale, test/step days, mode expanding/rolling, embargo, min rows |
+| `generate_walk_forward_folds` | Genera fold ordinati cronologicamente (train → test immediatamente successivo) |
+| `prepare_temporal_dataframe` | Ordina per data, nessun shuffle |
+| `evaluate_fold_models` | Training in-memory per fold (non scrive `.pkl` di produzione) |
+| `run_walk_forward_validation` | Esegue tutte le versioni; confronta holdout senza sovrascriverlo |
+| `write_walk_forward_report` | JSON sotto `data/reports/walk_forward/` |
+
+Persistenza: entity `WalkForwardRun` / `WalkForwardFold` (migrazione `0021`), service `app/services/walk_forward.py`, job `jobs/run_walk_forward.py`. Il global update include una fase osservabile `walk_forward_observe` (esecuzione completa solo se `WALK_FORWARD_IN_GLOBAL_UPDATE=true`).
+
+#### `app/ml/training/calibration.py`
+
+| Funzione | Ruolo |
+|----------|-------|
+| `CalibrationConfig` | Bin reliability, min campioni, metodi (raw/platt/isotonic), finestra walk-forward |
+| `compute_calibration_metrics` | Brier, log loss, ECE, MCE, reliability bins per fascia |
+| `fit_calibrator` / `apply_calibrator` | Platt scaling (LogisticRegression) e isotonic regression |
+| `collect_oos_predictions_for_version` | Rigenera probabilità OOS per fold walk-forward |
+| `evaluate_fold_calibration` | Addestra calibratore solo su OOS passato, valuta fold corrente |
+| `run_calibration_validation` | Orchestrazione multi-versione; salva artefatti versionati |
+| `write_calibration_report` | JSON sotto `data/reports/calibration/` (+ `calibration_latest.json`) |
+
+Persistenza: entity `CalibrationRun` / `CalibrationResult` (migrazione `0022`), service `app/services/calibration.py`, job `jobs/run_calibration.py`, UI `CalibrationPage`. Pickle calibratori in `data/models/v{N}/calibrators/calibration_run_{id}_{model}_{method}.pkl` (non sovrascrive run precedenti). **Non** attiva automaticamente la calibrazione sul modello pubblico.
+
 #### `app/ml/prediction/predictor.py`
 
 | Simbolo | Ruolo |
@@ -853,6 +890,8 @@ Wrapper di compatibilità: delega a `run_global_update` (tutte le combo abilitat
 | `/telegram-users` | `TelegramUsersPage` |
 | `/telegram-feedback` | `TelegramFeedbackPage` |
 | `/weekly-beta-report` | `WeeklyBetaReportPage` |
+| `/walk-forward` | `WalkForwardPage` |
+| `/calibration` | `CalibrationPage` |
 
 Wrapper: `AuthProvider` → route protette con `ProtectedRoute` → `GlobalUpdateProvider` + `Layout`.  
 L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; test: `createMemoryRouter`).
@@ -874,6 +913,8 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 | `TelegramUsersPage` | Gestione utenti beta: ricerca, invito, attiva/sospendi/blocca, termini e origine invito |
 | `TelegramFeedbackPage` | Inbox feedback bot: filtri stato/categoria, messaggio, transizioni `new`/`reviewing`/`resolved`/`rejected` |
 | `WeeklyBetaReportPage` | Report settimanale beta salvati: KPI utenti/retention/comandi/tip/ROI/pipeline/notifiche/feedback + WoW; generazione manuale |
+| `WalkForwardPage` | Validazione walk-forward: fold, metriche, copertura, fold saltati e flag leakage; avvio manuale (non aggiorna modello pubblico) |
+| `CalibrationPage` | Calibrazione probabilità OOS: grezzo vs Platt/isotonic, ECE/MCE/Brier/log loss, reliability curve e tabella fasce (campione insufficiente evidenziato); non attiva modello pubblico |
 
 ### Componenti / hook
 
@@ -890,7 +931,7 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 
 ### `services/apiClient.ts`
 
-Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, published-predictions (+ live stats), live-beta-dashboard, weekly-beta-reports, betting-slips, imports, global-update, single-match-value, Telegram analytics / users / feedback.
+Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, published-predictions (+ live stats), live-beta-dashboard, weekly-beta-reports, walk-forward, calibration, betting-slips, imports, global-update, single-match-value, Telegram analytics / users / feedback.
 Invia `Authorization: Bearer` quando presente; su **401** notifica il handler di sessione scaduta.  
 `ApiError` — errore HTTP con `status`.
 
@@ -932,6 +973,12 @@ python -m app.ml.datasets.build_dataset --version v3
 python -m app.ml.datasets.build_atp_singles --version v3
 python -m app.ml.datasets.build_odds_dataset --version v3
 python -m app.ml.training.train_baseline --model-version v3
+# dalla root: walk-forward (non sovrascrive baseline_* né il modello pubblico)
+python -m backend.src.jobs.run_walk_forward --dry-run
+
+# calibrazione probabilità OOS (dipende da walk-forward; non attiva modello pubblico)
+python -m backend.src.jobs.run_calibration --dry-run
+python -m backend.src.jobs.run_calibration
 python -m jobs.generate_upcoming_predictions --model-version v3
 ```
 
@@ -939,9 +986,11 @@ Artefatti:
 
 - Dataset: `backend/data/processed/`
 - Modelli: `backend/data/models/` (`v2/`, `v3/`, …)
-- Metriche: `backend/data/reports/baseline_*_metrics.json`
+- Metriche holdout: `backend/data/reports/baseline_*_metrics.json`
+- Metriche walk-forward: `backend/data/reports/walk_forward/` (DB: `walk_forward_run` / `walk_forward_fold`)
+- Calibrazione probabilità: `backend/data/reports/calibration/` (DB: `calibration_run` / `calibration_result`)
 
-**Anti-leakage**: feature solo con dati *precedenti* al match; `standing` corrente non usata come rank pre-match; split temporale in training.
+**Anti-leakage**: feature solo con dati *precedenti* al match; `standing` corrente non usata come rank pre-match; split temporale in training; walk-forward ufficiale senza shuffle e senza sovrapposizione train/test.
 
 ---
 
@@ -1001,11 +1050,11 @@ python -m src.app.telegram.bot
 
 ## 9. Schema dati
 
-Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `telegram_user` (utenti beta / whitelist; migrazione `0017`, prefs/`chat_id` in `0018`), `telegram_notification_delivery` (ledger push; migrazione `0018`), `telegram_feedback` (feedback in-bot; migrazione `0019`), `weekly_beta_report` (report settimanale beta; migrazione `0020`), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`).
+Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `telegram_user` (utenti beta / whitelist; migrazione `0017`, prefs/`chat_id` in `0018`), `telegram_notification_delivery` (ledger push; migrazione `0018`), `telegram_feedback` (feedback in-bot; migrazione `0019`), `weekly_beta_report` (report settimanale beta; migrazione `0020`), `walk_forward_run` / `walk_forward_fold` (validazione temporale walk-forward; migrazione `0021`), `calibration_run` / `calibration_result` (analisi calibrazione OOS; migrazione `0022`), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`).
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
 
-Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report`.
+Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report` → `0021_walk_forward` → `0022_calibration`.
 
 ```bash
 cd backend

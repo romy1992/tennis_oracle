@@ -87,6 +87,26 @@ class Settings(BaseSettings):
     # Uses TELEGRAM_BOT_TOKEN + TELEGRAM_ADMIN_CHAT_ID; independent of OPS_ALERTS_ENABLED.
     weekly_beta_report_telegram_enabled: bool = True
 
+    # Walk-forward temporal validation (job run_walk_forward / API /walk-forward).
+    # Separate from holdout baseline metrics and live/public model selection.
+    # Default: observe latest run in global-update report; do not retrain inside daily update.
+    walk_forward_in_global_update: bool = False
+    walk_forward_mode: str = "expanding"  # expanding | rolling
+    walk_forward_initial_train_days: int = 365
+    walk_forward_test_days: int = 90
+    walk_forward_step_days: int = 90
+    walk_forward_min_train_rows: int = 200
+    walk_forward_min_test_rows: int = 50
+    walk_forward_embargo_days: int = 0
+    walk_forward_edge_threshold: float = 0.03
+    walk_forward_random_state: int = 42
+
+    # Probability calibration (job run_calibration / API /calibration).
+    # Uses walk-forward OOS data; does not activate on public model automatically.
+    calibration_n_bins: int = 10
+    calibration_min_bin_samples: int = 30
+    calibration_min_calibrator_train_samples: int = 100
+
     # Temporary public-model config for live tip publication (until ML-07).
     # Default: automatic publication disabled. No silent fallback to another model.
     live_publication_enabled: bool = False

@@ -17,7 +17,11 @@ import {
   publishedLiveStats,
   liveBetaDashboard,
   weeklyBetaReport,
-  weeklyBetaReports
+  weeklyBetaReports,
+  walkForwardRun,
+  walkForwardRuns,
+  calibrationRun,
+  calibrationRuns
 } from "./fixtures";
 
 export type ApiMocks = Record<string, Mock>;
@@ -60,6 +64,14 @@ export function stubDefaultApi(apiMocks: {
   getLatestWeeklyBetaReport?: Mock;
   getWeeklyBetaReport?: Mock;
   generateWeeklyBetaReport?: Mock;
+  getWalkForwardRuns?: Mock;
+  getLatestWalkForwardRun?: Mock;
+  getWalkForwardRun?: Mock;
+  startWalkForwardRun?: Mock;
+  getCalibrationRuns?: Mock;
+  getLatestCalibrationRun?: Mock;
+  getCalibrationRun?: Mock;
+  startCalibrationRun?: Mock;
 }) {
   apiMocks.getSession.mockResolvedValue({
     id: 1,
@@ -146,5 +158,21 @@ export function stubDefaultApi(apiMocks: {
     report: weeklyBetaReport,
     created: true,
     telegram: { sent: true, telegram: "ok" }
+  });
+  apiMocks.getWalkForwardRuns?.mockResolvedValue(walkForwardRuns);
+  apiMocks.getLatestWalkForwardRun?.mockResolvedValue(walkForwardRun);
+  apiMocks.getWalkForwardRun?.mockResolvedValue(walkForwardRun);
+  apiMocks.startWalkForwardRun?.mockResolvedValue({
+    run: walkForwardRun,
+    started: true,
+    message: "Walk-forward avviato in background."
+  });
+  apiMocks.getCalibrationRuns?.mockResolvedValue(calibrationRuns);
+  apiMocks.getLatestCalibrationRun?.mockResolvedValue(calibrationRun);
+  apiMocks.getCalibrationRun?.mockResolvedValue(calibrationRun);
+  apiMocks.startCalibrationRun?.mockResolvedValue({
+    run: calibrationRun,
+    started: true,
+    message: "Calibrazione avviata in background."
   });
 }

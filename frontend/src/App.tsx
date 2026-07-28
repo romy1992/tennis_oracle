@@ -22,6 +22,8 @@ import { TelegramBotPage } from "./pages/TelegramBotPage";
 import { TelegramFeedbackPage } from "./pages/TelegramFeedbackPage";
 import { TelegramUsersPage } from "./pages/TelegramUsersPage";
 import { WeeklyBetaReportPage } from "./pages/WeeklyBetaReportPage";
+import { WalkForwardPage } from "./pages/WalkForwardPage";
+import { CalibrationPage } from "./pages/CalibrationPage";
 
 function AuthenticatedShell() {
   return (
@@ -53,7 +55,9 @@ export const appRoutes: RouteObject[] = [
           { path: "telegram-bot", element: <TelegramBotPage /> },
           { path: "telegram-users", element: <TelegramUsersPage /> },
           { path: "telegram-feedback", element: <TelegramFeedbackPage /> },
-          { path: "weekly-beta-report", element: <WeeklyBetaReportPage /> }
+          { path: "weekly-beta-report", element: <WeeklyBetaReportPage /> },
+          { path: "walk-forward", element: <WalkForwardPage /> },
+          { path: "calibration", element: <CalibrationPage /> }
         ]
       }
     ]
