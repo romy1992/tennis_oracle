@@ -17,7 +17,7 @@ Stack containerizzato per **sviluppo locale** e **produzione**. Le immagini non 
 
 **Database di default:** PostgreSQL **sul PC** (`host.docker.internal:5432`), lo stesso di `backend/.env` (`tennis_db`).  
 **db-1** (servizio Compose `db`) resta definito ma **spento** (profilo `embedded-db`); il volume `postgres_data` non viene cancellato.  
-Credenziali: bind-mount di `backend/.env` e `backend/properties/config.env`. Modelli opzionali: `MODELS_HOST_PATH`.
+Credenziali: bind-mount di `backend/.env` e `backend/properties/config.env`. Artefatti ML sul host: `MODELS_HOST_PATH`, `PROCESSED_HOST_PATH` (dataset CSV per walk-forward/training), `REPORTS_HOST_PATH` (metriche JSON scrivibili).
 
 ---
 
@@ -27,6 +27,7 @@ Credenziali: bind-mount di `backend/.env` e `backend/properties/config.env`. Mod
 - PostgreSQL **locale** in esecuzione su `5432` con database `tennis_db`
 - File `.env` in root (parti da `.env.example`)
 - Opzionale: artefatti in `backend/data/models/` sul host
+- Per walk-forward / training in container: CSV in `backend/data/processed/` sul host (montati via `PROCESSED_HOST_PATH`)
 
 ---
 
@@ -191,6 +192,7 @@ docker compose --profile bot up -d --force-recreate bot   # se usi il bot
 |------------|--------|
 | `backend/.env` / `backend/properties/config.env` | `docker compose up -d --force-recreate api` (+ bot se attivo) |
 | Solo modelli `.pkl` sotto `MODELS_HOST_PATH` | nessuna (già montati in sola lettura) |
+| Dataset CSV sotto `PROCESSED_HOST_PATH` / report sotto `REPORTS_HOST_PATH` | nessuna (già montati; recreate `api` se hai appena aggiunto i volume) |
 | Solo documentazione | nessuna |
 | Nuova migrazione Alembic | `docker compose run --rm migrate` (poi riavvia `api` se serve) |
 
@@ -291,6 +293,7 @@ Backup e disaster recovery PostgreSQL (host o embedded): [BACKUP_DR.md](BACKUP_D
 | Porta 5432 in conflitto | Non avviare il profilo `embedded-db` insieme al Postgres host sulla stessa porta |
 | Frontend API sbagliata | `VITE_API_BASE_URL` al build (URL del browser) |
 | Nessuna previsione ML | `MODELS_HOST_PATH` e `.pkl` sul host |
+| Walk-forward fallisce subito (0 fold, `FileNotFoundError` dataset) | CSV in `backend/data/processed/` sul host; volume `PROCESSED_HOST_PATH` montato su `api`/`job`; poi `docker compose up -d --force-recreate api` |
 | Bot non parte | profilo `bot`, `TELEGRAM_BOT_TOKEN`, API healthy |
 | Frontend Vite non aggiorna / non parte | Log `frontend`; primo `npm ci`; polling; porta 5173 libera |
 | Bot non vede edit Python | `restart bot` (dev); oppure rebuild nello stack prod-like |

@@ -44,6 +44,8 @@ from backend.src.app.db.base import (  # noqa: E402
     TelegramUser,
     Tournament,
     WeeklyBetaReport,
+    WalkForwardFold,
+    WalkForwardRun,
 )
 
 _ = (
@@ -67,6 +69,8 @@ _ = (
     TelegramNotificationDelivery,
     TelegramUser,
     WeeklyBetaReport,
+    WalkForwardFold,
+    WalkForwardRun,
     RateLimitBucket,
     FeatureSnapshot,
     MLMatch,
