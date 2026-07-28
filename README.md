@@ -790,9 +790,10 @@ Persistenza: entity `WalkForwardRun` / `WalkForwardFold` (migrazione `0021`), se
 | `collect_oos_predictions_for_version` | Rigenera probabilità OOS per fold walk-forward |
 | `evaluate_fold_calibration` | Addestra calibratore solo su OOS passato, valuta fold corrente |
 | `run_calibration_validation` | Orchestrazione multi-versione; salva artefatti versionati |
+| `save_calibrator_artifact` | Pickle in `reports/calibration/artifacts/`; errore I/O → warning, metriche conservate |
 | `write_calibration_report` | JSON sotto `data/reports/calibration/` (+ `calibration_latest.json`) |
 
-Persistenza: entity `CalibrationRun` / `CalibrationResult` (migrazione `0022`), service `app/services/calibration.py`, job `jobs/run_calibration.py`, UI `CalibrationPage`. Pickle calibratori in `data/models/v{N}/calibrators/calibration_run_{id}_{model}_{method}.pkl` (non sovrascrive run precedenti). **Non** attiva automaticamente la calibrazione sul modello pubblico.
+Persistenza: entity `CalibrationRun` / `CalibrationResult` (migrazione `0022`), service `app/services/calibration.py`, job `jobs/run_calibration.py`, UI `CalibrationPage`. Pickle calibratori in `data/reports/calibration/artifacts/calibration_run_{id}_{version}_{model}_{method}.pkl` (volume `REPORTS_HOST_PATH`, scrivibile in Docker; non sovrascrive run precedenti). **Non** attiva automaticamente la calibrazione sul modello pubblico.
 
 #### `app/ml/prediction/predictor.py`
 

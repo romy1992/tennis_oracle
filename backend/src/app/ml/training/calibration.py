@@ -624,6 +624,7 @@ def run_calibration_for_model(
 
     comparison = _build_method_comparison(aggregate)
     artifacts: dict[str, str] = {}
+    artifact_warnings: list[str] = []
     if persist_artifacts and run_id is not None and len(y_all) >= config.min_calibrator_train_samples:
         y_train_all, prob_train_all, _ = _concat_batches(batches)
         for method in ("platt", "isotonic"):
@@ -639,7 +640,12 @@ def run_calibration_for_model(
                 method=method,
                 run_id=run_id,
             )
-            artifacts[method] = str(path)
+            if path is not None:
+                artifacts[method] = str(path)
+            else:
+                artifact_warnings.append(f"artifact_save_failed:{method}")
+    if artifact_warnings:
+        comparison = {**comparison, "artifact_warnings": artifact_warnings}
 
     date_min = batches[0].test_start.isoformat() if batches else None
     date_max = batches[-1].test_end.isoformat() if batches else None
@@ -760,25 +766,39 @@ def save_calibrator_artifact(
     model_name: str,
     method: str,
     run_id: int,
-) -> Path:
+    reports_dir: str | Path = CALIBRATION_REPORTS_DIR.parent,
+) -> Path | None:
+    """Persist calibrator pickle; returns None on I/O failure (metrics still kept elsewhere)."""
     path = calibrator_artifact_path(
         model_version=model_version,
         model_name=model_name,
         method=method,
         run_id=run_id,
+        reports_dir=reports_dir,
     )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "calibrator": calibrator,
-        "model_version": model_version,
-        "model_name": model_name,
-        "method": method,
-        "run_id": run_id,
-        "saved_at": datetime.now(timezone.utc).isoformat(),
-    }
-    with path.open("wb") as handle:
-        pickle.dump(payload, handle)
-    return path
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "calibrator": calibrator,
+            "model_version": model_version,
+            "model_name": model_name,
+            "method": method,
+            "run_id": run_id,
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with path.open("wb") as handle:
+            pickle.dump(payload, handle)
+        return path
+    except OSError as exc:
+        logger.warning(
+            "Calibrator artifact not saved run_id=%s version=%s model=%s method=%s: %s",
+            run_id,
+            model_version,
+            model_name,
+            method,
+            exc,
+        )
+        return None
 
 
 def write_calibration_report(
