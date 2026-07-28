@@ -119,6 +119,10 @@ export function GlobalUpdateReportPage() {
   const skipped = Number(summary.combinations_skipped ?? 0);
   const fixtures = Number(summary.fixtures_processed ?? 0);
   const slips = Number(summary.slips_generated ?? 0);
+  const walkForward =
+    summary.walk_forward && typeof summary.walk_forward === "object"
+      ? (summary.walk_forward as Record<string, unknown>)
+      : null;
 
   return (
     <section className="page">
@@ -168,6 +172,37 @@ export function GlobalUpdateReportPage() {
         <MetricCard label="Errori" value={report.errors.length} />
         <MetricCard label="Warning" value={report.warnings.length} />
       </div>
+
+      {walkForward ? (
+        <article className="panel">
+          <div className="panel-header">
+            <h3>Walk-forward (osservabilità)</h3>
+            <span className="pill">
+              {walkForward.available ? `run #${String(walkForward.latest_run_id ?? "-")}` : "n/d"}
+            </span>
+          </div>
+          <p className="note">
+            Separato dalle metriche live e dal modello pubblico. Dettaglio fold in{" "}
+            <strong>Walk-forward</strong> (BACKTEST / OPS).
+          </p>
+          <div className="metrics-grid">
+            <MetricCard label="Stato WF" value={String(walkForward.status ?? "n/d")} />
+            <MetricCard label="Modo" value={String(walkForward.mode ?? "-")} />
+            <MetricCard
+              label="Folds ok"
+              value={Number(walkForward.folds_completed ?? 0)}
+            />
+            <MetricCard
+              label="Folds saltati"
+              value={Number(walkForward.folds_skipped ?? 0)}
+            />
+            <MetricCard
+              label="Leakage flags"
+              value={Number(walkForward.leakage_flags_total ?? 0)}
+            />
+          </div>
+        </article>
+      ) : null}
 
       <article className="panel">
         <div className="panel-header">

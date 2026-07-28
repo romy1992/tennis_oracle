@@ -22,6 +22,8 @@ services:
       - ./backend/.env:/app/backend/.env:ro
       - ./backend/properties/config.env:/app/backend/properties/config.env:ro
       - ${MODELS_HOST_PATH:-./backend/data/models}:/app/backend/data/models:ro
+      - ${PROCESSED_HOST_PATH:-./backend/data/processed}:/app/backend/data/processed:ro
+      - ${REPORTS_HOST_PATH:-./backend/data/reports}:/app/backend/data/reports
     command:
       [
         "uvicorn",

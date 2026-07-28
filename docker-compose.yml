@@ -93,9 +93,12 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
+      # Credentials + ML artifacts from host (not baked into the image).
       - ./backend/.env:/app/backend/.env:ro
       - ./backend/properties/config.env:/app/backend/properties/config.env:ro
       - ${MODELS_HOST_PATH:-./backend/data/models}:/app/backend/data/models:ro
+      - ${PROCESSED_HOST_PATH:-./backend/data/processed}:/app/backend/data/processed:ro
+      - ${REPORTS_HOST_PATH:-./backend/data/reports}:/app/backend/data/reports
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -154,6 +157,8 @@ services:
       - ./backend/.env:/app/backend/.env:ro
       - ./backend/properties/config.env:/app/backend/properties/config.env:ro
       - ${MODELS_HOST_PATH:-./backend/data/models}:/app/backend/data/models:ro
+      - ${PROCESSED_HOST_PATH:-./backend/data/processed}:/app/backend/data/processed:ro
+      - ${REPORTS_HOST_PATH:-./backend/data/reports}:/app/backend/data/reports
     working_dir: /app
     command:
       [

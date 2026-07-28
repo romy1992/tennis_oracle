@@ -61,6 +61,7 @@ PHASE_IMPORT_FIXTURES = "import_fixtures"
 PHASE_IMPORT_NEXT = "import_next_fixtures"
 PHASE_COMBINATIONS = "predict_combinations"
 PHASE_SYNC_CLOUD = "sync_cloud"
+PHASE_WALK_FORWARD = "walk_forward_observe"
 PHASE_REPORT = "finalize_report"
 
 GlobalUpdateOrigin = Literal["manual", "cron", "job"]
@@ -1084,6 +1085,61 @@ def _execute_global_update(
             if is_cancel_requested(run_id):
                 raise GlobalUpdateCancelled()
 
+            walk_forward_summary: dict[str, Any] = {"available": False}
+            if not _phase_completed(phases, PHASE_WALK_FORWARD):
+                phase_start = time.perf_counter()
+                _update_run_phase(
+                    db,
+                    run,
+                    phase="Walk-forward (osservabilità)",
+                    progress_pct=93.0,
+                    owner_token=owner_token,
+                )
+                try:
+                    from backend.src.app.services.walk_forward import (
+                        maybe_run_walk_forward_for_global_update,
+                    )
+
+                    walk_forward_summary = maybe_run_walk_forward_for_global_update(
+                        db, get_settings()
+                    )
+                    phases = _upsert_phase(
+                        phases,
+                        {
+                            "phase": PHASE_WALK_FORWARD,
+                            "duration_seconds": round(time.perf_counter() - phase_start, 2),
+                            "status": "completed",
+                            "walk_forward": walk_forward_summary,
+                        },
+                    )
+                except GlobalUpdateCancelled:
+                    raise
+                except Exception as exc:
+                    msg = f"Walk-forward observe/execute failed: {exc}"
+                    run_warnings.append(msg)
+                    try:
+                        from backend.src.app.services.walk_forward import (
+                            build_global_update_walk_forward_summary,
+                        )
+
+                        walk_forward_summary = build_global_update_walk_forward_summary(db)
+                    except Exception:
+                        walk_forward_summary = {"available": False, "error": str(exc)}
+                    walk_forward_summary["executed"] = False
+                    walk_forward_summary["error"] = str(exc)
+                    phases = _upsert_phase(
+                        phases,
+                        {
+                            "phase": PHASE_WALK_FORWARD,
+                            "duration_seconds": round(time.perf_counter() - phase_start, 2),
+                            "status": "failed",
+                            "error": str(exc),
+                            "walk_forward": walk_forward_summary,
+                        },
+                    )
+                    logger.exception(msg)
+                _persist_phases(db, run, phases)
+
             _update_run_phase(
                 db, run, phase="Generazione report", progress_pct=95.0, owner_token=owner_token
             )
@@ -1107,7 +1163,10 @@ def _execute_global_update(
                 )
 
             hard_phase_failures = [
-                p for p in phases if p.get("status") == "failed" and p.get("phase") != PHASE_COMBINATIONS
+                p
+                for p in phases
+                if p.get("status") == "failed"
+                and p.get("phase") not in (PHASE_COMBINATIONS, PHASE_WALK_FORWARD)
             ]
             if failed > 0 and completed > 0:
                 run.status = "completed_with_errors"
@@ -1127,6 +1186,12 @@ def _execute_global_update(
             run.warnings_json = _json_dumps(run_warnings)
 
             import_status = get_import_status(db)
+            stored_phase = next(
+                (p for p in phases if p.get("phase") == PHASE_WALK_FORWARD),
+                None,
+            )
+            if stored_phase and isinstance(stored_phase.get("walk_forward"), dict):
+                walk_forward_summary = stored_phase["walk_forward"]
             report = {
                 "run_id": run.id,
                 "run_date": run.run_date.isoformat(),
@@ -1153,6 +1218,7 @@ def _execute_global_update(
                         "public_model_version": public_cfg.model_version,
                         "public_model_name": public_cfg.model_name,
                     },
+                    "walk_forward": walk_forward_summary,
                     "import_status": {
                         "next_fixtures_imported_today": import_status[
                             "next_fixtures_imported_today"
