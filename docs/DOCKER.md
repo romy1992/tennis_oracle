@@ -17,7 +17,7 @@ Stack containerizzato per **sviluppo locale** e **produzione**. Le immagini non 
 
 **Database di default:** PostgreSQL **sul PC** (`host.docker.internal:5432`), lo stesso di `backend/.env` (`tennis_db`).  
 **db-1** (servizio Compose `db`) resta definito ma **spento** (profilo `embedded-db`); il volume `postgres_data` non viene cancellato.  
-Credenziali: bind-mount di `backend/.env` e `backend/properties/config.env`. Artefatti ML sul host: `MODELS_HOST_PATH`, `PROCESSED_HOST_PATH` (dataset CSV per walk-forward/training), `REPORTS_HOST_PATH` (metriche JSON scrivibili).
+Credenziali: bind-mount di `backend/.env` e `backend/properties/config.env`. Artefatti ML sul host: `MODELS_HOST_PATH` (`.pkl` produzione, **read-only** in container), `PROCESSED_HOST_PATH` (dataset CSV per walk-forward/training, read-only), `REPORTS_HOST_PATH` (metriche JSON **e pickle calibratori ML-02** sotto `calibration/artifacts/`, scrivibile).
 
 ---
 

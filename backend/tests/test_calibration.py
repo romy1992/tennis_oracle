@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import unittest.mock
 from datetime import date, timedelta
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from backend.src.app.ml.model_versioning import calibrator_artifact_path
 from backend.src.app.ml.training.calibration import (
     CalibrationConfig,
     OosPredictionBatch,
@@ -25,6 +28,7 @@ from backend.src.app.ml.training.calibration import (
     fit_platt_calibrator,
     maximum_calibration_error,
     run_calibration_validation,
+    save_calibrator_artifact,
 )
 from backend.src.app.ml.training.walk_forward import WalkForwardConfig
 
@@ -125,6 +129,17 @@ class CalibrationMetricsTest(unittest.TestCase):
 
 
 class CalibrationMethodsTest(unittest.TestCase):
+    def test_calibrator_artifact_path_under_reports(self):
+        path = calibrator_artifact_path(
+            model_version="v2",
+            model_name="logistic_regression",
+            method="platt",
+            run_id=7,
+        )
+        self.assertIn("reports", str(path).replace("\\", "/"))
+        self.assertIn("calibration/artifacts", str(path).replace("\\", "/"))
+        self.assertIn("calibration_run_7_v2_logistic_regression_platt.pkl", path.name)
+
     def test_platt_and_isotonic_produce_valid_probabilities(self):
         rng = np.random.default_rng(42)
         y_true = rng.integers(0, 2, size=200)
@@ -292,7 +307,60 @@ class CalibrationIntegrationTest(unittest.TestCase):
             self.assertEqual(raw_first.ece, raw_second.ece)
 
 
-from pathlib import Path  # noqa: E402 — after test helpers
+class CalibrationArtifactResilienceTest(unittest.TestCase):
+    def test_metrics_kept_when_artifact_save_raises_read_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            processed = Path(tmp) / "processed"
+            processed.mkdir()
+            dataset = _synthetic_dataset(n_days=250, matches_per_day=2)
+            dataset.to_csv(processed / "tennis_winner_dataset_v2.csv", index=False)
+
+            wf = WalkForwardConfig(
+                mode="expanding",
+                initial_train_days=80,
+                test_days=25,
+                step_days=25,
+                min_train_rows=20,
+                min_test_rows=5,
+                embargo_days=0,
+            )
+            config = CalibrationConfig(
+                n_bins=5,
+                min_bin_samples=3,
+                min_calibrator_train_samples=10,
+                methods=("raw", "platt", "isotonic"),
+                walk_forward=wf,
+            )
+            with unittest.mock.patch(
+                "backend.src.app.ml.training.calibration.save_calibrator_artifact",
+                return_value=None,
+            ):
+                result = run_calibration_validation(
+                    config,
+                    versions=("v2",),
+                    model_names=("logistic_regression",),
+                    processed_dir=processed,
+                    run_id=99,
+                    persist_artifacts=True,
+                )
+            model = result.models[0]
+            self.assertGreater(model.oos_samples_total, 0)
+            self.assertIn("raw", model.aggregate)
+            self.assertIsNotNone(model.aggregate["raw"].ece)
+            self.assertEqual(model.artifacts, {})
+            warnings = model.comparison.get("artifact_warnings", [])
+            self.assertTrue(warnings)
+
+    def test_save_calibrator_artifact_swallows_read_only_filesystem(self):
+        with unittest.mock.patch.object(Path, "mkdir", side_effect=OSError(30, "Read-only file system")):
+            path = save_calibrator_artifact(
+                object(),
+                model_version="v2",
+                model_name="logistic_regression",
+                method="platt",
+                run_id=1,
+            )
+        self.assertIsNone(path)
 
 
 if __name__ == "__main__":

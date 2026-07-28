@@ -61,6 +61,9 @@ function metricFromFold(fold: WalkForwardFold, key: string): number | null {
   return typeof value === "number" ? value : null;
 }
 
+const ACTIVE_RUN_STATUSES = new Set(["pending", "running"]);
+const RUN_POLL_INTERVAL_MS = 12_000;
+
 export function WalkForwardPage() {
   const [list, setList] = useState<WalkForwardRunListItem[]>([]);
   const [run, setRun] = useState<WalkForwardRun | null>(null);
@@ -121,6 +124,38 @@ export function WalkForwardPage() {
     }
     void loadSelected();
   }, [selectedId, list.length, run?.id]);
+
+  useEffect(() => {
+    if (!run || !ACTIVE_RUN_STATUSES.has(run.status)) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const detail = await apiClient.getWalkForwardRun(run.id);
+        if (cancelled) return;
+        setRun(detail);
+        setList((items) =>
+          items.map((item) =>
+            item.id === detail.id
+              ? {
+                  ...item,
+                  status: detail.status,
+                  finished_at: detail.finished_at,
+                  duration_seconds: detail.duration_seconds
+                }
+              : item
+          )
+        );
+      } catch {
+        // keep polling on transient errors while run is active
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), RUN_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [run?.id, run?.status]);
 
   const folds = useMemo(() => {
     const items = run?.folds ?? [];

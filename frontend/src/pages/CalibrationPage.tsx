@@ -80,6 +80,9 @@ function metricFromAggregate(
   return typeof value === "number" ? value : null;
 }
 
+const ACTIVE_RUN_STATUSES = new Set(["pending", "running"]);
+const RUN_POLL_INTERVAL_MS = 12_000;
+
 function ReliabilityChart({
   bins,
   title
@@ -246,6 +249,40 @@ export function CalibrationPage() {
     }
     void loadSelected();
   }, [selectedId, list.length, run?.id]);
+
+  useEffect(() => {
+    if (!run || !ACTIVE_RUN_STATUSES.has(run.status)) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const detail = await apiClient.getCalibrationRun(run.id);
+        if (cancelled) return;
+        setRun(detail);
+        setList((items) =>
+          items.map((item) =>
+            item.id === detail.id
+              ? {
+                  ...item,
+                  status: detail.status,
+                  finished_at: detail.finished_at,
+                  duration_seconds: detail.duration_seconds,
+                  models_with_oos: Number(detail.summary?.models_with_oos ?? item.models_with_oos),
+                  oos_samples_total: Number(detail.summary?.oos_samples_total ?? item.oos_samples_total)
+                }
+              : item
+          )
+        );
+      } catch {
+        // keep polling on transient errors while run is active
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), RUN_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [run?.id, run?.status]);
 
   const filteredResults = useMemo(() => {
     if (!run?.results) return [];

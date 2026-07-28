@@ -87,15 +87,14 @@ def calibrator_artifact_path(
     model_name: str,
     method: str,
     run_id: int,
+    reports_dir: str | Path = REPORTS_DIR,
 ) -> Path:
-    """Versioned calibrator pickle path (never overwrites prior runs)."""
-    version_paths = MODEL_VERSIONS.get(model_version)  # type: ignore[arg-type]
-    if version_paths is None:
+    """Versioned calibrator pickle under reports (writable in Docker via REPORTS_HOST_PATH)."""
+    if model_version not in MODEL_VERSIONS:
         raise ValueError(f"Versione modello sconosciuta: {model_version}")
-    return (
-        version_paths.models_dir
-        / "calibrators"
-        / f"calibration_run_{run_id}_{model_name}_{method}.pkl"
+    artifacts_dir = Path(reports_dir) / "calibration" / "artifacts"
+    return artifacts_dir / (
+        f"calibration_run_{run_id}_{model_version}_{model_name}_{method}.pkl"
     )
 
 
