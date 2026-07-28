@@ -753,3 +753,258 @@ export const weeklyBetaReports = {
 };
 
 export const futureExpiresAt = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+export const walkForwardRun = {
+  id: 11,
+  status: "completed",
+  mode: "expanding",
+  initial_train_days: 365,
+  test_days: 90,
+  step_days: 90,
+  min_train_rows: 200,
+  min_test_rows: 50,
+  embargo_days: 0,
+  edge_threshold: 0.03,
+  random_state: 42,
+  versions_requested: "v2,v3",
+  origin: "manual",
+  started_at: `${TODAY}T08:00:00`,
+  finished_at: `${TODAY}T08:20:00`,
+  duration_seconds: 1200,
+  report_path: "backend/data/reports/walk_forward/walk_forward_latest.json",
+  summary: {
+    folds_completed: 1,
+    folds_skipped: 1,
+    folds_errors: 0,
+    leakage_flags_total: 0,
+    official_metrics_shuffled: false,
+    public_model_unchanged: true,
+    holdout_metrics_unchanged: true,
+    versions_detail: [
+      {
+        model_version: "v2",
+        aggregate_metrics: {
+          logistic_regression: {
+            folds_completed: 1,
+            accuracy: { mean: 0.61, std: 0, n: 1 }
+          }
+        },
+        holdout_comparison: {
+          source: "holdout_baseline",
+          models: { logistic_regression: { accuracy: 0.63, roc_auc: 0.66 } }
+        },
+        leakage_flags: []
+      }
+    ]
+  },
+  error_message: null,
+  created_at: `${TODAY}T07:55:00`,
+  created_by: "admin_api",
+  folds: [
+    {
+      id: 101,
+      run_id: 11,
+      fold_index: 0,
+      model_version: "v2",
+      model_name: "logistic_regression",
+      dataset_path: "backend/data/processed/tennis_winner_dataset_v2.csv",
+      status: "completed",
+      train_start: "2024-01-01",
+      train_end: "2024-12-31",
+      test_start: "2025-01-01",
+      test_end: "2025-03-31",
+      train_rows: 1200,
+      test_rows: 300,
+      feature_set: ["surface", "rank_diff", "elo_diff"],
+      metrics: { accuracy: 0.61, roc_auc: 0.64, log_loss: 0.66, f1: 0.6 },
+      market_benchmark: { market_accuracy: 0.58 },
+      coverage: { train_rows: 1200, test_rows: 300 },
+      leakage_flags: [],
+      skip_reason: null
+    },
+    {
+      id: 102,
+      run_id: 11,
+      fold_index: 1,
+      model_version: "v2",
+      model_name: "logistic_regression",
+      dataset_path: "backend/data/processed/tennis_winner_dataset_v2.csv",
+      status: "skipped_insufficient_data",
+      train_start: "2024-01-01",
+      train_end: "2025-03-31",
+      test_start: "2025-04-01",
+      test_end: "2025-06-30",
+      train_rows: 40,
+      test_rows: 10,
+      feature_set: ["surface", "rank_diff"],
+      metrics: null,
+      market_benchmark: null,
+      coverage: { train_rows: 40, test_rows: 10 },
+      leakage_flags: [],
+      skip_reason: "Dati insufficienti: train=40 (min 200), test=10 (min 50)."
+    }
+  ]
+};
+
+export const walkForwardRuns = {
+  total: 1,
+  limit: 20,
+  offset: 0,
+  items: [
+    {
+      id: walkForwardRun.id,
+      status: walkForwardRun.status,
+      mode: walkForwardRun.mode,
+      initial_train_days: walkForwardRun.initial_train_days,
+      test_days: walkForwardRun.test_days,
+      step_days: walkForwardRun.step_days,
+      versions_requested: walkForwardRun.versions_requested,
+      origin: walkForwardRun.origin,
+      started_at: walkForwardRun.started_at,
+      finished_at: walkForwardRun.finished_at,
+      duration_seconds: walkForwardRun.duration_seconds,
+      created_at: walkForwardRun.created_at,
+      created_by: walkForwardRun.created_by,
+      folds_completed: 1,
+      folds_skipped: 1,
+      folds_errors: 0,
+      leakage_flags_total: 0
+    }
+  ]
+};
+
+const calibrationReliabilityBins = [
+  {
+    bin_index: 0,
+    bin_start: 0,
+    bin_end: 0.1,
+    count: 12,
+    mean_predicted: 0.06,
+    mean_actual: 0.08,
+    calibration_gap: 0.02,
+    insufficient_sample: true
+  },
+  {
+    bin_index: 4,
+    bin_start: 0.4,
+    bin_end: 0.5,
+    count: 45,
+    mean_predicted: 0.47,
+    mean_actual: 0.49,
+    calibration_gap: 0.02,
+    insufficient_sample: false
+  },
+  {
+    bin_index: 8,
+    bin_start: 0.8,
+    bin_end: 0.9,
+    count: 38,
+    mean_predicted: 0.84,
+    mean_actual: 0.78,
+    calibration_gap: 0.06,
+    insufficient_sample: false
+  }
+];
+
+const calibrationMethodMetrics = {
+  brier_score: 0.21,
+  log_loss: 0.62,
+  ece: 0.045,
+  mce: 0.09,
+  n_samples: 320,
+  reliability_bins: calibrationReliabilityBins
+};
+
+export const calibrationRun = {
+  id: 3,
+  status: "completed",
+  walk_forward_run_id: 11,
+  n_bins: 10,
+  min_bin_samples: 30,
+  min_calibrator_train_samples: 100,
+  wf_mode: "expanding",
+  wf_initial_train_days: 365,
+  wf_test_days: 90,
+  wf_step_days: 90,
+  wf_min_train_rows: 200,
+  wf_min_test_rows: 50,
+  wf_embargo_days: 0,
+  wf_edge_threshold: 0.03,
+  wf_random_state: 42,
+  methods_requested: "raw,platt,isotonic",
+  versions_requested: "v2",
+  origin: "manual",
+  started_at: `${TODAY}T09:00:00`,
+  finished_at: `${TODAY}T09:15:00`,
+  duration_seconds: 900,
+  report_path: "backend/data/reports/calibration/calibration_latest.json",
+  summary: {
+    models_total: 1,
+    models_with_oos: 1,
+    oos_samples_total: 320,
+    leakage_flags_total: 0,
+    note: "Calibrazione su OOS walk-forward."
+  },
+  error_message: null,
+  created_at: `${TODAY}T08:55:00`,
+  created_by: "admin_api",
+  results: [
+    {
+      id: 31,
+      run_id: 3,
+      model_version: "v2",
+      model_name: "logistic_regression",
+      dataset_path: "backend/data/processed/tennis_winner_dataset_v2.csv",
+      date_min: "2025-01-01",
+      date_max: "2025-06-30",
+      oos_samples_total: 320,
+      aggregate: {
+        raw: calibrationMethodMetrics,
+        platt: { ...calibrationMethodMetrics, ece: 0.032, brier_score: 0.205 },
+        isotonic: { ...calibrationMethodMetrics, ece: 0.028, brier_score: 0.201 }
+      },
+      comparison: {
+        raw: calibrationMethodMetrics,
+        platt: { ...calibrationMethodMetrics, ece: 0.032 },
+        isotonic: { ...calibrationMethodMetrics, ece: 0.028 },
+        deltas: {
+          platt: { brier_score: -0.005, log_loss: -0.01, ece: -0.013, mce: -0.02 },
+          isotonic: { brier_score: -0.009, log_loss: -0.015, ece: -0.017, mce: -0.03 }
+        },
+        note: "Delta negativo indica miglioramento."
+      },
+      fold_outcomes: [],
+      artifacts: {},
+      leakage_flags: [],
+      skip_reason: null
+    }
+  ]
+};
+
+export const calibrationRuns = {
+  total: 1,
+  limit: 20,
+  offset: 0,
+  items: [
+    {
+      id: calibrationRun.id,
+      status: calibrationRun.status,
+      wf_mode: calibrationRun.wf_mode,
+      wf_initial_train_days: calibrationRun.wf_initial_train_days,
+      wf_test_days: calibrationRun.wf_test_days,
+      wf_step_days: calibrationRun.wf_step_days,
+      methods_requested: calibrationRun.methods_requested,
+      versions_requested: calibrationRun.versions_requested,
+      walk_forward_run_id: calibrationRun.walk_forward_run_id,
+      origin: calibrationRun.origin,
+      started_at: calibrationRun.started_at,
+      finished_at: calibrationRun.finished_at,
+      duration_seconds: calibrationRun.duration_seconds,
+      created_at: calibrationRun.created_at,
+      created_by: calibrationRun.created_by,
+      models_with_oos: 1,
+      oos_samples_total: 320,
+      leakage_flags_total: 0
+    }
+  ]
+};

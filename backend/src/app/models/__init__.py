@@ -13,6 +13,8 @@ from backend.src.entity.telegram_notification_delivery import TelegramNotificati
 from backend.src.entity.telegram_user import TelegramUser
 from backend.src.entity.tournaments import Tournament
 from backend.src.entity.weekly_beta_report import WeeklyBetaReport
+from backend.src.entity.calibration import CalibrationResult, CalibrationRun
+from backend.src.entity.walk_forward import WalkForwardFold, WalkForwardRun
 from backend.src.app.models.ml import (
     FeatureSnapshot,
     MLMatch,
@@ -41,6 +43,10 @@ __all__ = [
     "TelegramNotificationDelivery",
     "TelegramUser",
     "WeeklyBetaReport",
+    "WalkForwardFold",
+    "WalkForwardRun",
+    "CalibrationRun",
+    "CalibrationResult",
     "FeatureSnapshot",
     "MLMatch",
     "MLPlayer",

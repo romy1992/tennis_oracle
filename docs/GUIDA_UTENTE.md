@@ -43,6 +43,8 @@ Nel menu laterale trovi:
 | **Consiglio schedina** | Fino a 9 schedine per giorno a difficoltà crescente: 3 solo Play, 3 Play+Borderline, 3 miste |
 | **Statistiche schedine** | Confronto risultati delle schedine tra modelli/versioni |
 | **Statistiche previsioni** | Accuratezza e metriche delle previsioni operative nel tempo (non il registro pubblicazioni) |
+| **Walk-forward** | Validazione temporale multi-periodo (expanding/rolling) su tutti i modelli/versioni: fold, metriche, copertura, fold saltati e possibili segnali di leakage. Separata dalle metriche live; non cambia il modello pubblico |
+| **Calibrazione** | Verifica se le probabilità del modello corrispondono alle frequenze osservate (reliability curve, ECE/MCE, Brier, log loss). Confronto grezzo vs Platt scaling vs isotonic regression su dati out-of-sample del walk-forward. Non attiva automaticamente la calibrazione sulle previsioni live |
 | **Storico pubblicazioni** | Registro immutabile dei pronostici pubblicati (versione, hash, fonte); dopo l’inizio partita non si modifica, le correzioni creano una nuova versione |
 | **Statistiche live** | Performance dei tip pubblicati: hit rate, stake, profitto, ROI/yield, drawdown, serie e distribuzioni. Solo registro immutabile; non confondere con training o backtest |
 | **Report aggiornamento** | Esito dell’ultima run “Aggiorna tutto”: errori, warning, fasi e combo modello |

@@ -21,7 +21,8 @@ Compatibilità: `python -m backend.src.jobs.daily_pipeline` delega allo stesso j
 3. **Import prossime partite** (`next_fixture`)
 4. **Previsioni + schedine + pubblicazione live** per **tutte** le combo con artefatto `.pkl`
 5. **Sync cloud** opzionale (`--sync-cloud` / `SYNC_CLOUD=true`)
-6. **Report finale** in `global_update_run.report_json` (stesso report della UI)
+6. **Walk-forward osservabile** (`summary.walk_forward`; esecuzione completa solo se `WALK_FORWARD_IN_GLOBAL_UPDATE=true`)
+7. **Report finale** in `global_update_run.report_json` (stesso report della UI)
 
 ### Affidabilità
 
@@ -187,6 +188,52 @@ Cron esempio (lunedì 08:30 Rome):
 ```cron
 30 8 * * 1 cd /percorso/tennis_oracle && .venv/bin/python -m backend.src.jobs.run_weekly_beta_report
 ```
+
+## Walk-forward (validazione temporale)
+
+Job on-demand (o settimanale) che valuta tutte le versioni/modelli con fold
+temporali expanding/rolling. **Non** sovrascrive `baseline_*_metrics.json`,
+**non** sostituisce il modello pubblico e **non** mescola i risultati con le
+metriche live. L’aggiornamento globale include sempre una fase osservabile
+(`summary.walk_forward`); l’esecuzione completa nel daily job resta opt-in via
+`WALK_FORWARD_IN_GLOBAL_UPDATE=true`.
+
+```bash
+# Dry-run (calcola + JSON report, senza persistenza DB)
+python3 -m backend.src.jobs.run_walk_forward --dry-run
+
+# Esegue e persiste run/fold
+python3 -m backend.src.jobs.run_walk_forward
+
+# Rolling su subset versioni
+python3 -m backend.src.jobs.run_walk_forward --mode rolling --versions v2,v3
+```
+
+Flag utili: `--initial-train-days`, `--test-days`, `--step-days`, `--embargo-days`,
+`--min-train-rows`, `--min-test-rows`, `--json`. Visibile in dashboard:
+**Walk-forward** (sezione BACKTEST / OPS).
+
+## Calibrazione probabilità (ML-02)
+
+Job opzionale che analizza la **calibrazione** delle probabilità usando solo dati
+out-of-sample prodotti dal walk-forward. Per ogni fold, i calibratori (Platt /
+isotonic) sono addestrati solo sul passato rispetto al periodo valutato.
+
+```bash
+# Dry-run (calcola + JSON report, senza persistenza DB)
+python3 -m backend.src.jobs.run_calibration --dry-run
+
+# Esegue e persiste run/risultati + artefatti versionati
+python3 -m backend.src.jobs.run_calibration
+
+# Subset versioni
+python3 -m backend.src.jobs.run_calibration --versions v2,v3
+```
+
+Flag utili: `--n-bins`, `--min-bin-samples`, `--min-calibrator-train-samples`,
+`--methods raw,platt,isotonic`, più i parametri finestra walk-forward
+(`--mode`, `--initial-train-days`, …). Visibile in dashboard: **Calibrazione**
+(sezione BACKTEST / OPS). **Non** modifica il modello pubblico né le previsioni live.
 
 ## Backup PostgreSQL
 

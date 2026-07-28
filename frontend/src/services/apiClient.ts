@@ -45,7 +45,15 @@ import type {
   WeeklyBetaReport,
   WeeklyBetaReportGenerateRequest,
   WeeklyBetaReportGenerateResponse,
-  WeeklyBetaReportListResponse
+  WeeklyBetaReportListResponse,
+  WalkForwardRun,
+  WalkForwardRunListResponse,
+  WalkForwardTriggerRequest,
+  WalkForwardTriggerResponse,
+  CalibrationRun,
+  CalibrationRunListResponse,
+  CalibrationTriggerRequest,
+  CalibrationTriggerResponse
 } from "../types/api";
 import { getStoredToken } from "../auth/session";
 
@@ -263,5 +271,19 @@ export const apiClient = {
   getWeeklyBetaReport: (reportId: number) =>
     request<WeeklyBetaReport>(`/api/weekly-beta-reports/${reportId}`),
   generateWeeklyBetaReport: (payload: WeeklyBetaReportGenerateRequest = {}) =>
-    post<WeeklyBetaReportGenerateResponse>("/api/weekly-beta-reports/generate", payload)
+    post<WeeklyBetaReportGenerateResponse>("/api/weekly-beta-reports/generate", payload),
+  getWalkForwardRuns: (params: { limit?: number; offset?: number } = {}) =>
+    request<WalkForwardRunListResponse>(withQuery("/api/walk-forward", params)),
+  getLatestWalkForwardRun: () => request<WalkForwardRun>("/api/walk-forward/latest"),
+  getWalkForwardRun: (runId: number) =>
+    request<WalkForwardRun>(`/api/walk-forward/runs/${runId}`),
+  startWalkForwardRun: (payload: WalkForwardTriggerRequest = {}) =>
+    post<WalkForwardTriggerResponse>("/api/walk-forward/runs", payload),
+  getCalibrationRuns: (params: { limit?: number; offset?: number } = {}) =>
+    request<CalibrationRunListResponse>(withQuery("/api/calibration", params)),
+  getLatestCalibrationRun: () => request<CalibrationRun>("/api/calibration/latest"),
+  getCalibrationRun: (runId: number) =>
+    request<CalibrationRun>(`/api/calibration/runs/${runId}`),
+  startCalibrationRun: (payload: CalibrationTriggerRequest = {}) =>
+    post<CalibrationTriggerResponse>("/api/calibration/runs", payload)
 };

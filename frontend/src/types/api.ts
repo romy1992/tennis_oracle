@@ -1318,3 +1318,218 @@ export type WeeklyBetaReportGenerateResponse = {
   created: boolean;
   telegram: Record<string, unknown>;
 };
+
+export type WalkForwardMode = "expanding" | "rolling";
+export type WalkForwardRunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "completed_with_errors"
+  | "failed";
+export type WalkForwardFoldStatus =
+  | "completed"
+  | "skipped_insufficient_data"
+  | "skipped_single_class"
+  | "error";
+
+export type WalkForwardFold = {
+  id: number;
+  run_id: number;
+  fold_index: number;
+  model_version: string;
+  model_name: string;
+  dataset_path: string;
+  status: WalkForwardFoldStatus | string;
+  train_start: string;
+  train_end: string;
+  test_start: string;
+  test_end: string;
+  train_rows: number;
+  test_rows: number;
+  feature_set: string[];
+  metrics: Record<string, unknown> | null;
+  market_benchmark: Record<string, unknown> | null;
+  coverage: Record<string, unknown> | null;
+  leakage_flags: string[];
+  skip_reason: string | null;
+};
+
+export type WalkForwardRun = {
+  id: number;
+  status: WalkForwardRunStatus | string;
+  mode: WalkForwardMode | string;
+  initial_train_days: number;
+  test_days: number;
+  step_days: number;
+  min_train_rows: number;
+  min_test_rows: number;
+  embargo_days: number;
+  edge_threshold: number;
+  random_state: number;
+  versions_requested: string;
+  origin: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  report_path: string | null;
+  summary: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string;
+  created_by: string;
+  folds: WalkForwardFold[];
+};
+
+export type WalkForwardRunListItem = {
+  id: number;
+  status: WalkForwardRunStatus | string;
+  mode: WalkForwardMode | string;
+  initial_train_days: number;
+  test_days: number;
+  step_days: number;
+  versions_requested: string;
+  origin: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  created_at: string;
+  created_by: string;
+  folds_completed: number;
+  folds_skipped: number;
+  folds_errors: number;
+  leakage_flags_total: number;
+};
+
+export type WalkForwardRunListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: WalkForwardRunListItem[];
+};
+
+export type WalkForwardTriggerRequest = {
+  mode?: WalkForwardMode;
+  initial_train_days?: number;
+  test_days?: number;
+  step_days?: number;
+  min_train_rows?: number;
+  min_test_rows?: number;
+  embargo_days?: number;
+  edge_threshold?: number;
+  random_state?: number;
+  versions?: MLModelVersion[] | null;
+  blocking?: boolean;
+};
+
+export type WalkForwardTriggerResponse = {
+  run: WalkForwardRun;
+  started: boolean;
+  message: string;
+};
+
+export type CalibrationMethod = "raw" | "platt" | "isotonic";
+export type CalibrationRunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "completed_with_errors"
+  | "failed";
+
+export type CalibrationResult = {
+  id: number;
+  run_id: number;
+  model_version: string;
+  model_name: string;
+  dataset_path: string;
+  date_min: string | null;
+  date_max: string | null;
+  oos_samples_total: number;
+  aggregate: Record<string, unknown> | null;
+  comparison: Record<string, unknown> | null;
+  fold_outcomes: Record<string, unknown>[];
+  artifacts: Record<string, string>;
+  leakage_flags: string[];
+  skip_reason: string | null;
+};
+
+export type CalibrationRun = {
+  id: number;
+  status: CalibrationRunStatus | string;
+  walk_forward_run_id: number | null;
+  n_bins: number;
+  min_bin_samples: number;
+  min_calibrator_train_samples: number;
+  wf_mode: string;
+  wf_initial_train_days: number;
+  wf_test_days: number;
+  wf_step_days: number;
+  wf_min_train_rows: number;
+  wf_min_test_rows: number;
+  wf_embargo_days: number;
+  wf_edge_threshold: number;
+  wf_random_state: number;
+  methods_requested: string;
+  versions_requested: string;
+  origin: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  report_path: string | null;
+  summary: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string;
+  created_by: string;
+  results: CalibrationResult[];
+};
+
+export type CalibrationRunListItem = {
+  id: number;
+  status: CalibrationRunStatus | string;
+  wf_mode: string;
+  wf_initial_train_days: number;
+  wf_test_days: number;
+  wf_step_days: number;
+  methods_requested: string;
+  versions_requested: string;
+  walk_forward_run_id: number | null;
+  origin: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  created_at: string;
+  created_by: string;
+  models_with_oos: number;
+  oos_samples_total: number;
+  leakage_flags_total: number;
+};
+
+export type CalibrationRunListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: CalibrationRunListItem[];
+};
+
+export type CalibrationTriggerRequest = {
+  n_bins?: number;
+  min_bin_samples?: number;
+  min_calibrator_train_samples?: number;
+  methods?: CalibrationMethod[];
+  mode?: WalkForwardMode;
+  initial_train_days?: number;
+  test_days?: number;
+  step_days?: number;
+  min_train_rows?: number;
+  min_test_rows?: number;
+  embargo_days?: number;
+  edge_threshold?: number;
+  random_state?: number;
+  versions?: MLModelVersion[] | null;
+  walk_forward_run_id?: number | null;
+  blocking?: boolean;
+};
+
+export type CalibrationTriggerResponse = {
+  run: CalibrationRun;
+  started: boolean;
+  message: string;
+};

@@ -81,6 +81,24 @@ MODEL_VERSIONS: dict[ModelVersion, ModelVersionPaths] = {
 }
 
 
+def calibrator_artifact_path(
+    *,
+    model_version: str,
+    model_name: str,
+    method: str,
+    run_id: int,
+) -> Path:
+    """Versioned calibrator pickle path (never overwrites prior runs)."""
+    version_paths = MODEL_VERSIONS.get(model_version)  # type: ignore[arg-type]
+    if version_paths is None:
+        raise ValueError(f"Versione modello sconosciuta: {model_version}")
+    return (
+        version_paths.models_dir
+        / "calibrators"
+        / f"calibration_run_{run_id}_{model_name}_{method}.pkl"
+    )
+
+
 def dataset_candidates(version: ModelVersion) -> list[str]:
     paths = DATASET_VERSIONS[version]
     return [
@@ -100,5 +118,7 @@ def select_training_dataset_path(
         if candidate.exists():
             return candidate
     raise FileNotFoundError(
-        f"Nessun dataset training trovato per versione {version} in {base_path}."
+        f"Nessun dataset training trovato per versione {version} in {base_path}. "
+        "Genera i CSV (build_dataset) oppure, in Docker, monta "
+        "PROCESSED_HOST_PATH=./backend/data/processed sul servizio api/job."
     )

@@ -30,7 +30,9 @@ const navSections: Array<{
     label: "BACKTEST / OPS",
     items: [
       { to: "/prediction-stats", label: "Statistiche previsioni" },
-      { to: "/betting-slip-model-stats", label: "Statistiche schedine" }
+      { to: "/betting-slip-model-stats", label: "Statistiche schedine" },
+      { to: "/walk-forward", label: "Walk-forward" },
+      { to: "/calibration", label: "Calibrazione" }
     ]
   }
 ];

@@ -20,6 +20,10 @@ from backend.src.entity import (
     TelegramUser,
     Tournament,
     WeeklyBetaReport,
+    WalkForwardFold,
+    WalkForwardRun,
+    CalibrationRun,
+    CalibrationResult,
 )
 from backend.src.entity.base import Base
 from backend.src.app.models.ml import (
@@ -54,6 +58,10 @@ __all__ = [
     "TelegramNotificationDelivery",
     "TelegramUser",
     "WeeklyBetaReport",
+    "WalkForwardFold",
+    "WalkForwardRun",
+    "CalibrationRun",
+    "CalibrationResult",
     "RateLimitBucket",
     "FeatureSnapshot",
     "MLMatch",

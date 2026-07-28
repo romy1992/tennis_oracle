@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from backend.src.app.api.routes import (
     auth,
     betting_slips,
+    calibration,
     global_update,
     imports,
     live_beta_dashboard,
@@ -14,6 +15,7 @@ from backend.src.app.api.routes import (
     telegram,
     telegram_feedback,
     telegram_users,
+    walk_forward,
     weekly_beta_reports,
 )
 
@@ -34,4 +36,6 @@ api_router.include_router(published_predictions.router)
 api_router.include_router(prematch_odds_snapshots.router)
 api_router.include_router(live_beta_dashboard.router)
 api_router.include_router(weekly_beta_reports.router)
+api_router.include_router(walk_forward.router)
+api_router.include_router(calibration.router)
 api_router.include_router(ops.router)
