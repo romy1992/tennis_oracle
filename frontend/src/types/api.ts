@@ -950,6 +950,15 @@ export type PublishedPrediction = {
   odds: number | null;
   void_odds: number | null;
   edge: number | null;
+  publication_odds: number | null;
+  publication_bookmaker: string | null;
+  closing_odds: number | null;
+  closing_bookmaker: string | null;
+  no_vig_publication_prob: number | null;
+  no_vig_closing_prob: number | null;
+  clv_pct: number | null;
+  clv_prob_delta_pct: number | null;
+  clv_available: boolean;
   unit_stake: number;
   published_at: string;
   publication_source: PublicationSource | string;
@@ -1006,6 +1015,13 @@ export type PublishedLiveStatsBucket = {
   roi_pct: number | null;
   yield_pct: number | null;
   avg_odds: number | null;
+  clv_count: number;
+  clv_missing: number;
+  clv_coverage_pct: number | null;
+  clv_avg_pct: number | null;
+  clv_median_pct: number | null;
+  clv_positive_pct: number | null;
+  clv_avg_prob_delta_pct: number | null;
 };
 
 export type PublishedLiveStatsSummary = {
@@ -1037,6 +1053,13 @@ export type PublishedLiveStatsSummary = {
   max_drawdown: number;
   max_winning_streak: number;
   max_losing_streak: number;
+  clv_count: number;
+  clv_missing: number;
+  clv_coverage_pct: number | null;
+  clv_avg_pct: number | null;
+  clv_median_pct: number | null;
+  clv_positive_pct: number | null;
+  clv_avg_prob_delta_pct: number | null;
   by_model: PublishedLiveStatsBucket[];
   by_odds: PublishedLiveStatsBucket[];
   by_edge: PublishedLiveStatsBucket[];
@@ -1325,12 +1348,26 @@ export type WalkForwardRunStatus =
   | "running"
   | "completed"
   | "completed_with_errors"
-  | "failed";
+  | "failed"
+  | "cancelled";
 export type WalkForwardFoldStatus =
   | "completed"
   | "skipped_insufficient_data"
   | "skipped_single_class"
   | "error";
+
+export type WalkForwardOfficialBenchmarkMetrics = {
+  accuracy?: number | null;
+  log_loss?: number | null;
+  brier_score?: number | null;
+  roi?: number | null;
+  yield?: number | null;
+  max_drawdown?: number | null;
+  clv_pct?: number | null;
+  official_common_sample_rows?: number | null;
+  official_sample_mismatch_detected?: boolean;
+  [key: string]: unknown;
+};
 
 export type WalkForwardFold = {
   id: number;
@@ -1347,7 +1384,11 @@ export type WalkForwardFold = {
   train_rows: number;
   test_rows: number;
   feature_set: string[];
-  metrics: Record<string, unknown> | null;
+  metrics:
+    | (Record<string, unknown> & {
+        official_benchmark?: WalkForwardOfficialBenchmarkMetrics;
+      })
+    | null;
   market_benchmark: Record<string, unknown> | null;
   coverage: Record<string, unknown> | null;
   leakage_flags: string[];
@@ -1368,11 +1409,22 @@ export type WalkForwardRun = {
   random_state: number;
   versions_requested: string;
   origin: string;
+  current_phase?: string | null;
+  progress_pct?: number | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+  cancel_requested?: boolean;
   started_at: string | null;
   finished_at: string | null;
   duration_seconds: number | null;
   report_path: string | null;
-  summary: Record<string, unknown> | null;
+  summary:
+    | (Record<string, unknown> & {
+        official_contenders?: string[];
+        official_sample_mismatch_folds?: number;
+        versions_detail?: Array<Record<string, unknown>>;
+      })
+    | null;
   error_message: string | null;
   created_at: string;
   created_by: string;
@@ -1388,6 +1440,11 @@ export type WalkForwardRunListItem = {
   step_days: number;
   versions_requested: string;
   origin: string;
+  current_phase?: string | null;
+  progress_pct?: number | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+  cancel_requested?: boolean;
   started_at: string | null;
   finished_at: string | null;
   duration_seconds: number | null;
@@ -1426,13 +1483,20 @@ export type WalkForwardTriggerResponse = {
   message: string;
 };
 
+export type WalkForwardCancelResponse = {
+  run_id: number;
+  status: WalkForwardRunStatus | string;
+  message: string;
+};
+
 export type CalibrationMethod = "raw" | "platt" | "isotonic";
 export type CalibrationRunStatus =
   | "pending"
   | "running"
   | "completed"
   | "completed_with_errors"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type CalibrationResult = {
   id: number;
@@ -1470,6 +1534,11 @@ export type CalibrationRun = {
   methods_requested: string;
   versions_requested: string;
   origin: string;
+  current_phase?: string | null;
+  progress_pct?: number | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+  cancel_requested?: boolean;
   started_at: string | null;
   finished_at: string | null;
   duration_seconds: number | null;
@@ -1492,6 +1561,11 @@ export type CalibrationRunListItem = {
   versions_requested: string;
   walk_forward_run_id: number | null;
   origin: string;
+  current_phase?: string | null;
+  progress_pct?: number | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+  cancel_requested?: boolean;
   started_at: string | null;
   finished_at: string | null;
   duration_seconds: number | null;
@@ -1531,5 +1605,244 @@ export type CalibrationTriggerRequest = {
 export type CalibrationTriggerResponse = {
   run: CalibrationRun;
   started: boolean;
+  message: string;
+};
+
+export type CalibrationCancelResponse = {
+  run_id: number;
+  status: CalibrationRunStatus | string;
+  message: string;
+};
+
+export type BandAnalysisSource = "live" | "walk_forward" | "backtest";
+export type BandDimension = "probability" | "edge";
+
+export type ProbabilityBandBucket = {
+  key: string;
+  label: string;
+  bin_start: number | null;
+  bin_end: number | null;
+  predictions_total: number;
+  closed: number;
+  void: number;
+  open: number;
+  won: number;
+  lost: number;
+  hit_rate_pct: number | null;
+  mean_predicted_pct: number | null;
+  mean_observed_pct: number | null;
+  calibration_gap_pct: number | null;
+  avg_odds: number | null;
+  avg_edge_pct: number | null;
+  stake_total: number;
+  stake_settled: number;
+  profit: number;
+  roi_pct: number | null;
+  yield_pct: number | null;
+  hit_rate_ci_lower_pct: number | null;
+  hit_rate_ci_upper_pct: number | null;
+  insufficient_sample: boolean;
+};
+
+export type ProbabilityBandGroup = {
+  fold_index: number | null;
+  period: string | null;
+  predictions_total: number;
+  closed: number;
+  void: number;
+  open: number;
+  won: number;
+  lost: number;
+  bands: ProbabilityBandBucket[];
+};
+
+export type ProbabilityBandAnalysis = {
+  source: BandAnalysisSource;
+  band_dimension: BandDimension;
+  probability_kind: CalibrationMethod;
+  n_bins: number;
+  min_bin_samples: number;
+  model_version: string | null;
+  model_name: string | null;
+  from_date: string | null;
+  to_date: string | null;
+  event_date_from: string | null;
+  event_date_to: string | null;
+  predictions_total: number;
+  closed: number;
+  void: number;
+  open: number;
+  won: number;
+  lost: number;
+  bands: ProbabilityBandBucket[];
+  comparison: Record<string, ProbabilityBandBucket[]>;
+  by_fold: ProbabilityBandGroup[];
+  by_period: ProbabilityBandGroup[];
+  notes: string[];
+};
+
+export type ProbabilityBandAnalysisParams = {
+  source: BandAnalysisSource;
+  band_dimension?: BandDimension;
+  probability_kind?: CalibrationMethod;
+  model_version?: MLModelVersion;
+  model_name?: string;
+  from?: string;
+  to?: string;
+  event_date_from?: string;
+  event_date_to?: string;
+  publication_source?: string;
+  tournament_name?: string;
+  surface?: string;
+  odds_band?: string;
+  latest_only?: boolean;
+  n_bins?: number;
+  min_bin_samples?: number;
+  include_comparison?: boolean;
+  group_by_fold?: boolean;
+  group_by_period?: boolean;
+};
+
+export type SegmentDimension =
+  | "surface"
+  | "tournament"
+  | "circuit"
+  | "level"
+  | "round"
+  | "favorite_role"
+  | "odds_band"
+  | "bookmaker"
+  | "model"
+  | "version"
+  | "period";
+
+export type SegmentRoiBucket = {
+  key: string;
+  label: string;
+  predictions_total: number;
+  closed: number;
+  void: number;
+  open: number;
+  won: number;
+  lost: number;
+  hit_rate_pct: number | null;
+  avg_odds: number | null;
+  avg_edge_pct: number | null;
+  stake_total: number;
+  stake_settled: number;
+  profit: number;
+  roi_pct: number | null;
+  yield_pct: number | null;
+  max_drawdown: number;
+  hit_rate_ci_lower_pct: number | null;
+  hit_rate_ci_upper_pct: number | null;
+  roi_ci_lower_pct: number | null;
+  roi_ci_upper_pct: number | null;
+  insufficient_sample: boolean;
+};
+
+export type SegmentRoiGroup = {
+  fold_index: number | null;
+  period: string | null;
+  predictions_total: number;
+  closed: number;
+  void: number;
+  open: number;
+  won: number;
+  lost: number;
+  segments: SegmentRoiBucket[];
+};
+
+export type SegmentRoiAnalysis = {
+  source: BandAnalysisSource;
+  segment_dimension: SegmentDimension;
+  min_segment_samples: number;
+  model_version: string | null;
+  model_name: string | null;
+  from_date: string | null;
+  to_date: string | null;
+  event_date_from: string | null;
+  event_date_to: string | null;
+  predictions_total: number;
+  closed: number;
+  void: number;
+  open: number;
+  won: number;
+  lost: number;
+  segments: SegmentRoiBucket[];
+  by_fold: SegmentRoiGroup[];
+  by_period: SegmentRoiGroup[];
+  notes: string[];
+};
+
+export type SegmentRoiAnalysisParams = {
+  source: BandAnalysisSource;
+  segment_dimension?: SegmentDimension;
+  model_version?: MLModelVersion;
+  model_name?: string;
+  from?: string;
+  to?: string;
+  event_date_from?: string;
+  event_date_to?: string;
+  publication_source?: string;
+  tournament_name?: string;
+  surface?: string;
+  odds_band?: string;
+  latest_only?: boolean;
+  min_segment_samples?: number;
+  group_by_fold?: boolean;
+  group_by_period?: boolean;
+};
+
+export type PublicModelRegistryStatus = "candidate" | "active" | "retired";
+
+export type PublicModelRegistryArtifacts = {
+  model_pkl: string | null;
+  metrics_path: string | null;
+  model_exists: boolean;
+  metrics_exists: boolean;
+  walk_forward_run_id: number | null;
+  calibration_run_id: number | null;
+  calibration_artifacts: Record<string, string>;
+};
+
+export type PublicModelRegistryEntry = {
+  id: number;
+  model_version: string;
+  model_name: string;
+  status: PublicModelRegistryStatus;
+  activated_at: string | null;
+  retired_at: string | null;
+  approval_metrics: Record<string, unknown>;
+  motivation: string | null;
+  artifacts: PublicModelRegistryArtifacts;
+  supersedes_entry_id: number | null;
+  walk_forward_run_id: number | null;
+  calibration_run_id: number | null;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+};
+
+export type PublicModelRegistryListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: PublicModelRegistryEntry[];
+  active: PublicModelRegistryEntry | null;
+};
+
+export type PublicModelRegistryCandidateCreate = {
+  model_version: MLModelVersion;
+  model_name: string;
+  motivation?: string | null;
+  approval_metrics?: Record<string, unknown> | null;
+  walk_forward_run_id?: number | null;
+  calibration_run_id?: number | null;
+};
+
+export type PublicModelRegistryActionResponse = {
+  entry: PublicModelRegistryEntry;
+  previous_active: PublicModelRegistryEntry | null;
   message: string;
 };

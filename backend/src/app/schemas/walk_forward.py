@@ -9,7 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 WalkForwardMode = Literal["expanding", "rolling"]
-WalkForwardRunStatus = Literal["pending", "running", "completed", "completed_with_errors", "failed"]
+WalkForwardRunStatus = Literal[
+    "pending",
+    "running",
+    "completed",
+    "completed_with_errors",
+    "failed",
+    "cancelled",
+]
 WalkForwardFoldStatus = Literal[
     "completed",
     "skipped_insufficient_data",
@@ -66,6 +73,11 @@ class WalkForwardRunListItem(BaseModel):
     step_days: int
     versions_requested: str
     origin: str
+    current_phase: str | None = None
+    progress_pct: float | None = None
+    progress_current: int | None = None
+    progress_total: int | None = None
+    cancel_requested: bool = False
     started_at: datetime | None = None
     finished_at: datetime | None = None
     duration_seconds: float | None = None
@@ -93,6 +105,11 @@ class WalkForwardRunRead(BaseModel):
     random_state: int
     versions_requested: str
     origin: str
+    current_phase: str | None = None
+    progress_pct: float | None = None
+    progress_current: int | None = None
+    progress_total: int | None = None
+    cancel_requested: bool = False
     started_at: datetime | None = None
     finished_at: datetime | None = None
     duration_seconds: float | None = None
@@ -120,6 +137,12 @@ class WalkForwardTriggerRequest(WalkForwardConfigSchema):
 class WalkForwardTriggerResponse(BaseModel):
     run: WalkForwardRunRead
     started: bool
+    message: str
+
+
+class WalkForwardCancelResponse(BaseModel):
+    run_id: int
+    status: WalkForwardRunStatus | str
     message: str
 
 

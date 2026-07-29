@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.src.app.core.config import Settings, get_settings
+from backend.src.app.services.live_publication_service import resolve_public_model_config
 from backend.src.app.services.predictions import (
     compute_daily_prediction_stats,
     get_next_fixtures_with_predictions,
@@ -126,6 +127,23 @@ def list_notification_recipients(
     return [row for row in rows if _terms_satisfied(row, settings)]
 
 
+def _resolve_notification_model(
+    db: Session,
+    settings: Settings,
+    *,
+    model_version: str | None,
+    model_name: str | None,
+) -> tuple[str, str | None]:
+    if model_version and model_name:
+        return model_version.strip(), model_name.strip() or None
+    public = resolve_public_model_config(settings, db=db)
+    if public.is_ready and public.model_version and public.model_name:
+        return public.model_version, public.model_name
+    version = (model_version or settings.public_model_version or "v3").strip() or "v3"
+    name = model_name if model_name is not None else settings.public_model_name
+    return version, name
+
+
 def build_predictions_message(
     db: Session,
     *,
@@ -136,8 +154,9 @@ def build_predictions_message(
 ) -> tuple[str, int]:
     """Return (message text, fixture count) for today's predictions push."""
     settings = settings or get_settings()
-    version = (model_version or settings.public_model_version or "v3").strip() or "v3"
-    name = model_name if model_name is not None else settings.public_model_name
+    version, name = _resolve_notification_model(
+        db, settings, model_version=model_version, model_name=model_name
+    )
     page = get_next_fixtures_with_predictions(
         db,
         model_version=version,  # type: ignore[arg-type]
@@ -164,8 +183,9 @@ def build_results_message(
 ) -> str:
     """Results digest for a settled day (typically yesterday Rome)."""
     settings = settings or get_settings()
-    version = (model_version or settings.public_model_version or "v3").strip() or "v3"
-    name = model_name if model_name is not None else settings.public_model_name
+    version, name = _resolve_notification_model(
+        db, settings, model_version=model_version, model_name=model_name
+    )
     day_offset = (today_rome() - target_date).days
     if day_offset < 0:
         day_offset = 0

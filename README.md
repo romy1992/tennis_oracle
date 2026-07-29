@@ -10,6 +10,7 @@ Il backend importa dati tennis da API esterna in PostgreSQL (`tennis_db`), espon
 |-----------|----------|
 | **Questo file** | Sviluppatori: architettura, classi, metodi, API, ML |
 | [docs/GUIDA_UTENTE.md](docs/GUIDA_UTENTE.md) | Utente medio: cosa fa il prodotto e come usarlo |
+| [docs/GUIDA_DASHBOARD.md](docs/GUIDA_DASHBOARD.md) | Admin dashboard: guida operativa pagina per pagina (filtri, metriche, esempi) |
 | [docs/DOCKER.md](docs/DOCKER.md) | Docker: compose locale/prod/dev hot-reload, migrate, bot, job, rebuild BE/FE |
 | [docs/STAGING.md](docs/STAGING.md) | Staging: DB separato, CORS/HTTPS-ready, migrazioni controllate, smoke, deploy/rollback |
 | [docs/SCHEDULING.md](docs/SCHEDULING.md) | Job giornaliero, cron, sync cloud |
@@ -153,7 +154,7 @@ TELEGRAM_MIN_EDGE_PERCENT=2.0
 TELEGRAM_FEEDBACK_URL=
 ```
 
-Pubblicazione live nel registro `PublishedPrediction` (temporanea fino a ML-07; **default OFF**):
+Pubblicazione live nel registro `PublishedPrediction` (**default OFF**). Il modello pubblico è definito dal **registro ML-07** (`public_model_registry_entry`, migrazione `0024`); le env sotto servono solo come fallback se non c’è voce `active`:
 
 ```env
 LIVE_PUBLICATION_ENABLED=false
@@ -161,7 +162,7 @@ PUBLIC_MODEL_VERSION=
 PUBLIC_MODEL_NAME=
 ```
 
-Prima di abilitare: applicare migrazioni fino a `0015`, impostare esplicitamente versione/nome pubblici (es. `v3` / `logistic_regression`, allineati a ciò che mostri in produzione/bot), verificare un global-update e il report `summary.live_publication`. Nessun fallback silenzioso ad un’altra combo.
+Prima di abilitare: applicare migrazioni fino a `0024`, registrare e **attivare** un candidato da dashboard (`/public-model-registry`) o API admin, verificare un global-update e il report `summary.live_publication`. Nessun fallback silenzioso ad un’altra combo. Le pubblicazioni già salvate non vengono riscritte al cambio modello attivo.
 
 `TELEGRAM_SERVICE_API_KEY` deve coincidere con `SERVICE_API_KEY` quando quest’ultima è valorizzata (header `X-Service-Token`). Per ruotare: imposta la nuova chiave in `SERVICE_API_KEY`, lascia la vecchia in `SERVICE_API_KEY_PREVIOUS`, aggiorna `TELEGRAM_SERVICE_API_KEY` sul bot, poi rimuovi `SERVICE_API_KEY_PREVIOUS`.
 
@@ -329,11 +330,20 @@ Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, met
 | GET | `/api/walk-forward` | `walk_forward.list_runs` | admin | Storico run walk-forward |
 | GET | `/api/walk-forward/latest` | `walk_forward.read_latest_run` | admin | Ultima run walk-forward |
 | POST | `/api/walk-forward/runs` | `walk_forward.trigger_run` | admin | Avvia walk-forward (background; non cambia modello pubblico) |
+| POST | `/api/walk-forward/runs/{run_id}/cancel` | `walk_forward.cancel_run` | admin | Annulla run walk-forward attiva |
 | GET | `/api/walk-forward/runs/{run_id}` | `walk_forward.read_run` | admin | Dettaglio run + fold/metriche/leakage |
 | GET | `/api/calibration` | `calibration.list_runs` | admin | Storico run calibrazione probabilità |
 | GET | `/api/calibration/latest` | `calibration.read_latest_run` | admin | Ultima run calibrazione |
 | POST | `/api/calibration/runs` | `calibration.trigger_run` | admin | Avvia calibrazione OOS walk-forward (non attiva modello pubblico) |
+| POST | `/api/calibration/runs/{run_id}/cancel` | `calibration.cancel_run` | admin | Annulla run calibrazione attiva |
 | GET | `/api/calibration/runs/{run_id}` | `calibration.read_run` | admin | Dettaglio run + metriche/reliability/confronto metodi |
+| GET | `/api/public-model-registry` | `public_model_registry.list_entries` | admin | Storico registro modello pubblico (candidate/active/retired) |
+| GET | `/api/public-model-registry/active` | `public_model_registry.read_active_public_model` | admin o service token | Modello pubblico attivo (bot + live publication) |
+| POST | `/api/public-model-registry/candidates` | `public_model_registry.create_candidate` | admin | Registra candidato con metriche/artefatti |
+| POST | `/api/public-model-registry/entries/{id}/activate` | `public_model_registry.activate_entry` | admin | Promuove candidato → active (ritira il precedente) |
+| POST | `/api/public-model-registry/rollback` | `public_model_registry.rollback_active` | admin | Ripristina il modello precedente |
+| GET | `/api/probability-bands` | `probability_bands.read_probability_band_analysis` | admin | Analisi prestazioni per fasce probabilità/edge (live, walk-forward OOS, backtest) |
+| GET | `/api/segment-roi` | `segment_roi.read_segment_roi_analysis` | admin | ROI/yield/hit rate/drawdown per segmento (superficie, torneo, circuito, …) |
 | GET | `/api/ops/checks` | `ops.get_ops_checks` | admin | Controlli operativi (import, pronostici, durata); `?alert=true` notifica admin |
 | POST | `/api/prematch-odds-snapshots` | `prematch_odds_snapshots.create_prematch_odds_snapshot` | admin | Append singolo rilevamento quote |
 | POST | `/api/prematch-odds-snapshots/from-payload` | `prematch_odds_snapshots.create_prematch_odds_snapshots_from_payload` | admin | Ingest matrice Home/Away |
@@ -498,7 +508,7 @@ KPI live **solo** dal ledger `PublishedPrediction` (non da `MatchPrediction` / s
 
 | Funzione | Ruolo |
 |----------|-------|
-| `compute_published_live_stats` | Totale/chiusi/aperti/void, hit rate, stake, profitto, ROI, yield, quota media, max drawdown, streak, distribuzioni; filtri `tournament_name` / `surface` / `odds_band` |
+| `compute_published_live_stats` | Totale/chiusi/aperti/void, hit rate, stake, profitto, ROI, yield, quota media, **CLV**, max drawdown, streak, distribuzioni; filtri `tournament_name` / `surface` / `odds_band` |
 | `settle_published_tips` / `list_settled_published_tips` | Settlement a lettura + liste tip con esito |
 | `selection_to_predicted_winner` | Mappa selection (nome/lato) → First/Second Player |
 | `odds_bucket` / `edge_bucket` / `period_key` | Bucket per distribuzioni |
@@ -526,13 +536,24 @@ Job: `python -m backend.src.jobs.run_weekly_beta_report` (`docs/SCHEDULING.md`).
 
 #### `app/services/live_publication_service.py`
 
-Pubblica nel registro immutabile solo le giocate ufficiali **PLAY** della combo pubblica (env), riusando `build_candidate_pool` e `publish_prediction`. Idempotente su `(event_key, selection, model_version, model_name, publication_source)` per `content_version=1`.
+Pubblica nel registro immutabile solo le giocate ufficiali **PLAY** della combo pubblica (registro ML-07, fallback env), riusando `build_candidate_pool` e `publish_prediction`. Idempotente su `(event_key, selection, model_version, model_name, publication_source)` per `content_version=1`.
 
 | Funzione | Ruolo |
 |---|---|
-| `resolve_public_model_config` | Valida `LIVE_PUBLICATION_ENABLED` / `PUBLIC_MODEL_*` senza fallback silenzioso |
+| `resolve_public_model_config` | Preferisce voce `active` del registro ML-07; fallback `LIVE_PUBLICATION_*` / `PUBLIC_MODEL_*` senza fallback silenzioso |
 | `publish_official_plays_for_day` | Filtra PLAY → `PublishedPrediction` + snapshot `publication` |
 | `find_existing_live_publication` | Dedup pre-insert |
+
+#### `app/services/public_model_registry.py` (ML-07)
+
+Registro ufficiale del modello pubblico: versione, estimatore, data attivazione, metriche di approvazione, stato (`candidate` / `active` / `retired`), motivazione, riferimenti artefatti (`.pkl`, metrics JSON, opz. run walk-forward/calibration), rollback al predecessore. Una sola voce `active`. Non modifica retroattivamente `PublishedPrediction`.
+
+| Funzione | Ruolo |
+|---|---|
+| `register_candidate` | Crea candidato se artefatto `.pkl` presente |
+| `activate_registry_entry` | Promuove candidato, ritira l’attivo precedente |
+| `rollback_active_registry_entry` | Ripristina il modello sostituito dall’attivo corrente |
+| `get_active_registry_entry` | Combo usata da bot e live publication |
 
 Convenzione bookmaker snapshot di pubblicazione senza book reale: `publication`.
 
@@ -552,6 +573,12 @@ Convenzione bookmaker snapshot di pubblicazione senza book reale: `publication`.
 - **Profitto** = Σ P/L (won: stake×(odds−1); lost: −stake; void/open: 0).
 - **ROI %** = **Yield %** = profit / stake_settled × 100 (`null` se stake settled = 0).
 - **Quota media** = media aritmetica delle odds pubblicate presenti.
+- **Quota di pubblicazione** = snapshot `publication` della selezione più vicino a `published_at` (fallback: `PublishedPrediction.odds` se snapshot assente).
+- **Closing odds** = snapshot `closing` della stessa selezione; priorità stesso bookmaker della pubblicazione, fallback cross-bookmaker sul valore mediano dell’ultimo timestamp disponibile.
+- **Probabilità senza margine (no-vig)** = `(1/odds_selezione) / ((1/odds_selezione) + (1/odds_opposta))` calcolata con le due quote dello stesso bookmaker e stesso snapshot type (`publication` o `closing`).
+- **CLV %** = `((quota_pubblicazione / quota_closing) - 1) * 100` (positivo quando la quota presa è migliore della chiusura).
+- **CLV probability delta (pp)** = `(p_no_vig_closing - p_no_vig_publication) * 100`.
+- **Copertura CLV** = percentuale tip con CLV calcolabile (closing disponibile); i mancanti restano nel denominatore globale ma non nelle medie CLV.
 - **Max drawdown** = massimo calo peak→trough sulla equity cumulata dei soli tip chiusi (ordine `event_date`, `published_at`).
 - **Serie +/-** = run consecutive di won / lost nella stessa sequenza (void/open saltati, non interrompono).
 - Default: `latest_only=true` (una riga per `publication_id`).
@@ -778,7 +805,9 @@ Validazione temporale multi-fold **separata** dalla holdout di `train_baseline` 
 | `run_walk_forward_validation` | Esegue tutte le versioni; confronta holdout senza sovrascriverlo |
 | `write_walk_forward_report` | JSON sotto `data/reports/walk_forward/` |
 
-Persistenza: entity `WalkForwardRun` / `WalkForwardFold` (migrazione `0021`), service `app/services/walk_forward.py`, job `jobs/run_walk_forward.py`. Il global update include una fase osservabile `walk_forward_observe` (esecuzione completa solo se `WALK_FORWARD_IN_GLOBAL_UPDATE=true`).
+Persistenza: entity `WalkForwardRun` / `WalkForwardFold` (migrazioni `0021`, `0023`), service `app/services/walk_forward.py` (`start_walk_forward_run`, `cancel_walk_forward_run`, `reconcile_orphaned_walk_forward_runs`), job `jobs/run_walk_forward.py`. Progresso incrementale (`progress_pct`, `current_phase`) e annullamento cooperativo; run orfane riconciliate all'avvio API. Il global update include una fase osservabile `walk_forward_observe` (esecuzione completa solo se `WALK_FORWARD_IN_GLOBAL_UPDATE=true`).
+
+Benchmark ufficiali inclusi nei fold walk-forward (stesso campione/range/regole): `market_favorite`, `market_no_vig`, `atp_ranking`, `elo`, `logistic_regression`, `random_forest`. Le metriche ufficiali includono accuracy, log loss, Brier score, ROI, yield, drawdown e CLV (se disponibile; in OOS offline senza closing odds viene marcata non disponibile). Il report salva anche `official_benchmark_sample` per impedire confronti silenziosi su campioni differenti.
 
 #### `app/ml/training/calibration.py`
 
@@ -793,7 +822,31 @@ Persistenza: entity `WalkForwardRun` / `WalkForwardFold` (migrazione `0021`), se
 | `save_calibrator_artifact` | Pickle in `reports/calibration/artifacts/`; errore I/O → warning, metriche conservate |
 | `write_calibration_report` | JSON sotto `data/reports/calibration/` (+ `calibration_latest.json`) |
 
-Persistenza: entity `CalibrationRun` / `CalibrationResult` (migrazione `0022`), service `app/services/calibration.py`, job `jobs/run_calibration.py`, UI `CalibrationPage`. Pickle calibratori in `data/reports/calibration/artifacts/calibration_run_{id}_{version}_{model}_{method}.pkl` (volume `REPORTS_HOST_PATH`, scrivibile in Docker; non sovrascrive run precedenti). **Non** attiva automaticamente la calibrazione sul modello pubblico.
+Persistenza: entity `CalibrationRun` / `CalibrationResult` (migrazioni `0022`, `0023`), service `app/services/calibration.py` (`start_calibration_run`, `cancel_calibration_run`, `reconcile_orphaned_calibration_runs`), job `jobs/run_calibration.py`, UI `CalibrationPage`. Progresso e annullamento come walk-forward. Pickle calibratori in `data/reports/calibration/artifacts/calibration_run_{id}_{version}_{model}_{method}.pkl` (volume `REPORTS_HOST_PATH`, scrivibile in Docker; non sovrascrive run precedenti). **Non** attiva automaticamente la calibrazione sul modello pubblico.
+
+#### `app/ml/training/probability_band_analysis.py` (ML-03)
+
+| Funzione | Ruolo |
+|----------|-------|
+| `BandAnalysisRecord` | Predizione singola (live o OOS) con prob, edge, quota, esito |
+| `wilson_score_interval` | Intervallo di confidenza 95% sul hit rate (Wilson score) |
+| `assign_probability_band` / `assign_edge_band` | Assegnazione fasce configurabili |
+| `analyze_band_records` | Aggregazione KPI per fascia (hit rate, gap calibrazione, ROI, yield, IC) |
+| `collect_oos_band_records` | Record OOS walk-forward con calibrazione fold-wise opzionale |
+| `collect_oos_comparison_records` | Confronto raw / platt / isotonic |
+
+Service `app/services/probability_band_stats.py`, API `GET /api/probability-bands`, UI `ProbabilityBandsPage`. Sorgenti: **live** (`PublishedPrediction`), **walk-forward** / **backtest** (OOS offline). Fasce con campione &lt; `min_bin_samples` marcate `insufficient_sample`.
+
+#### `app/ml/training/segment_roi_analysis.py` (ML-04)
+
+| Funzione | Ruolo |
+|----------|-------|
+| `SegmentAnalysisRecord` | Predizione singola con metadati segmento (superficie, torneo, circuito, livello, turno, quota, …) |
+| `assign_favorite_role` / `assign_odds_band` | Favorito/sfavorito (soglia quota 2.0) e fasce quota |
+| `analyze_segment_records` | Aggregazione KPI per segmento (hit rate, ROI, yield, drawdown, IC hit/ROI) |
+| `collect_oos_segment_records` | Record OOS walk-forward con colonne dataset + arricchimento fixture opzionale |
+
+Service `app/services/segment_roi_stats.py`, API `GET /api/segment-roi`, UI `SegmentRoiPage`. Dimensioni: superficie, torneo, circuito, livello, turno, favorito/sfavorito, fascia quota, bookmaker (aggregato se quote medie), modello, versione, periodo. Soglia minima campione: `min_segment_samples` (default `calibration_min_bin_samples`).
 
 #### `app/ml/prediction/predictor.py`
 
@@ -891,8 +944,11 @@ Wrapper di compatibilità: delega a `run_global_update` (tutte le combo abilitat
 | `/telegram-users` | `TelegramUsersPage` |
 | `/telegram-feedback` | `TelegramFeedbackPage` |
 | `/weekly-beta-report` | `WeeklyBetaReportPage` |
+| `/public-model-registry` | `PublicModelRegistryPage` |
 | `/walk-forward` | `WalkForwardPage` |
 | `/calibration` | `CalibrationPage` |
+| `/probability-bands` | `ProbabilityBandsPage` |
+| `/segment-roi` | `SegmentRoiPage` |
 
 Wrapper: `AuthProvider` → route protette con `ProtectedRoute` → `GlobalUpdateProvider` + `Layout`.  
 L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; test: `createMemoryRouter`).
@@ -914,8 +970,11 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 | `TelegramUsersPage` | Gestione utenti beta: ricerca, invito, attiva/sospendi/blocca, termini e origine invito |
 | `TelegramFeedbackPage` | Inbox feedback bot: filtri stato/categoria, messaggio, transizioni `new`/`reviewing`/`resolved`/`rejected` |
 | `WeeklyBetaReportPage` | Report settimanale beta salvati: KPI utenti/retention/comandi/tip/ROI/pipeline/notifiche/feedback + WoW; generazione manuale |
-| `WalkForwardPage` | Validazione walk-forward: fold, metriche, copertura, fold saltati e flag leakage; avvio manuale (non aggiorna modello pubblico) |
-| `CalibrationPage` | Calibrazione probabilità OOS: grezzo vs Platt/isotonic, ECE/MCE/Brier/log loss, reliability curve e tabella fasce (campione insufficiente evidenziato); non attiva modello pubblico |
+| `PublicModelRegistryPage` | Registro ML-07: candidati, attivazione, rollback, artefatti e metriche approvazione |
+| `WalkForwardPage` | Validazione walk-forward: fold, metriche, copertura, fold saltati e flag leakage; avvio manuale, barra avanzamento e annullamento (non aggiorna modello pubblico) |
+| `CalibrationPage` | Calibrazione probabilità OOS: grezzo vs Platt/isotonic, ECE/MCE/Brier/log loss, reliability curve e tabella fasce; barra avanzamento e annullamento; non attiva modello pubblico |
+| `ProbabilityBandsPage` | Analisi prestazioni per fasce probabilità/edge: live vs walk-forward vs backtest, confronto raw/calibrato, filtri modello/periodo, IC Wilson, ROI/yield; fasce a campione basso evidenziate |
+| `SegmentRoiPage` | ROI per segmento (superficie, torneo, circuito, livello, turno, favorito/sfavorito, fascia quota, bookmaker, modello, versione, periodo): hit rate, ROI/yield, drawdown, IC; live vs OOS |
 
 ### Componenti / hook
 
@@ -932,7 +991,7 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 
 ### `services/apiClient.ts`
 
-Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, published-predictions (+ live stats), live-beta-dashboard, weekly-beta-reports, walk-forward, calibration, betting-slips, imports, global-update, single-match-value, Telegram analytics / users / feedback.
+Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, published-predictions (+ live stats), live-beta-dashboard, weekly-beta-reports, walk-forward, calibration, public-model-registry, probability-bands, segment-roi, betting-slips, imports, global-update, single-match-value, Telegram analytics / users / feedback.
 Invia `Authorization: Bearer` quando presente; su **401** notifica il handler di sessione scaduta.  
 `ApiError` — errore HTTP con `status`.
 
@@ -1051,11 +1110,11 @@ python -m src.app.telegram.bot
 
 ## 9. Schema dati
 
-Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `telegram_user` (utenti beta / whitelist; migrazione `0017`, prefs/`chat_id` in `0018`), `telegram_notification_delivery` (ledger push; migrazione `0018`), `telegram_feedback` (feedback in-bot; migrazione `0019`), `weekly_beta_report` (report settimanale beta; migrazione `0020`), `walk_forward_run` / `walk_forward_fold` (validazione temporale walk-forward; migrazione `0021`), `calibration_run` / `calibration_result` (analisi calibrazione OOS; migrazione `0022`), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`).
+Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `telegram_user` (utenti beta / whitelist; migrazione `0017`, prefs/`chat_id` in `0018`), `telegram_notification_delivery` (ledger push; migrazione `0018`), `telegram_feedback` (feedback in-bot; migrazione `0019`), `weekly_beta_report` (report settimanale beta; migrazione `0020`), `walk_forward_run` / `walk_forward_fold` (validazione temporale walk-forward; migrazione `0021`), `calibration_run` / `calibration_result` (analisi calibrazione OOS; migrazione `0022`), `public_model_registry_entry` (registro modello pubblico ML-07; migrazione `0024`), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`).
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
 
-Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report` → `0021_walk_forward` → `0022_calibration`.
+Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report` → `0021_walk_forward` → `0022_calibration` → `0023_background_job_progress`.
 
 ```bash
 cd backend

@@ -38,11 +38,19 @@ from backend.src.app.schemas.walk_forward import (
     WalkForwardRunRead,
     WalkForwardTriggerRequest,
 )
+from backend.src.app.services.background_job import (
+    BackgroundJobCancelled,
+    clear_cancel_state,
+    get_active_thread_lock,
+    is_cancel_requested,
+    mark_cancel_requested,
+    update_run_progress,
+)
 from backend.src.entity.walk_forward import WalkForwardFold, WalkForwardRun
 
 logger = logging.getLogger(__name__)
 
-_active_thread_lock = threading.Lock()
+_active_thread_lock = get_active_thread_lock()
 _active_run_id: int | None = None
 RUNNING_STATUSES = ("pending", "running")
 
@@ -139,6 +147,11 @@ def run_to_read(run: WalkForwardRun, *, include_folds: bool = True) -> WalkForwa
         random_state=run.random_state,
         versions_requested=run.versions_requested,
         origin=run.origin,
+        current_phase=run.current_phase,
+        progress_pct=run.progress_pct,
+        progress_current=run.progress_current,
+        progress_total=run.progress_total,
+        cancel_requested=run.cancel_requested == "true",
         started_at=run.started_at,
         finished_at=run.finished_at,
         duration_seconds=run.duration_seconds,
@@ -162,12 +175,17 @@ def run_to_list_item(run: WalkForwardRun) -> WalkForwardRunListItem:
         step_days=run.step_days,
         versions_requested=run.versions_requested,
         origin=run.origin,
+        current_phase=run.current_phase,
+        progress_pct=run.progress_pct,
+        progress_current=run.progress_current,
+        progress_total=run.progress_total,
+        cancel_requested=run.cancel_requested == "true",
         started_at=run.started_at,
         finished_at=run.finished_at,
         duration_seconds=run.duration_seconds,
         created_at=run.created_at,
         created_by=run.created_by,
-        folds_completed=int(summary.get("folds_completed") or 0),
+        folds_completed=int(summary.get("folds_completed") or run.progress_current or 0),
         folds_skipped=int(summary.get("folds_skipped") or 0),
         folds_errors=int(summary.get("folds_errors") or 0),
         leakage_flags_total=int(summary.get("leakage_flags_total") or 0),
@@ -257,6 +275,11 @@ def _create_run_row(
         random_state=config.random_state,
         versions_requested=",".join(versions),
         origin=origin,
+        current_phase="In coda",
+        progress_pct=0.0,
+        progress_current=0,
+        progress_total=0,
+        cancel_requested="false",
         created_at=now,
         created_by=created_by,
     )
@@ -332,21 +355,173 @@ def _persist_result(db: Session, run: WalkForwardRun, result: WalkForwardRunResu
     db.commit()
 
 
+def _finalize_cancelled_run(db: Session, run: WalkForwardRun, *, reason: str) -> None:
+    finished = datetime.now(timezone.utc).replace(tzinfo=None)
+    run.status = "cancelled"
+    run.current_phase = "Annullato"
+    run.finished_at = finished
+    run.cancel_requested = "false"
+    run.error_message = reason
+    if run.started_at:
+        run.duration_seconds = max(0.0, (finished - run.started_at).total_seconds())
+    db.commit()
+
+
+def _mark_interrupted_run(db: Session, run: WalkForwardRun, *, reason: str) -> None:
+    finished = datetime.now(timezone.utc).replace(tzinfo=None)
+    run.status = "failed"
+    run.current_phase = "Interrotto"
+    run.finished_at = finished
+    run.cancel_requested = "false"
+    run.error_message = reason
+    if run.started_at:
+        run.duration_seconds = max(0.0, (finished - run.started_at).total_seconds())
+    db.commit()
+
+
+def reconcile_orphaned_walk_forward_runs(db: Session) -> int:
+    """Mark process-dead active runs as failed so new runs can start."""
+    global _active_run_id
+
+    with _active_thread_lock:
+        active_id = _active_run_id
+
+    runs = db.scalars(
+        select(WalkForwardRun).where(WalkForwardRun.status.in_(RUNNING_STATUSES))
+    ).all()
+    reconciled = 0
+    for run in runs:
+        if active_id == run.id:
+            continue
+        _mark_interrupted_run(
+            db,
+            run,
+            reason="Run interrotta (backend riavviato o worker perso).",
+        )
+        clear_cancel_state(run.id)
+        reconciled += 1
+    return reconciled
+
+
+def cancel_walk_forward_run(db: Session, run_id: int) -> tuple[bool, str]:
+    global _active_run_id
+
+    run = get_walk_forward_run(db, run_id)
+    if run is None:
+        return False, f"Run {run_id} non trovata."
+    if run.status not in RUNNING_STATUSES:
+        return False, f"Run {run_id} non attiva (status={run.status})."
+
+    run.cancel_requested = "true"
+    db.commit()
+    mark_cancel_requested(run_id)
+
+    with _active_thread_lock:
+        thread_active = _active_run_id == run_id
+
+    if thread_active:
+        return True, "Annullamento richiesto."
+
+    _finalize_cancelled_run(db, run, reason="Run annullata dall'utente.")
+    clear_cancel_state(run_id)
+    with _active_thread_lock:
+        if _active_run_id == run_id:
+            _active_run_id = None
+    return True, "Run annullata."
+
+
+def _persist_progress(
+    run_id: int,
+    *,
+    phase: str,
+    progress_current: int,
+    progress_total: int,
+) -> None:
+    pct = (100.0 * progress_current / progress_total) if progress_total else 0.0
+    with SessionLocal() as db:
+        run = get_walk_forward_run(db, run_id)
+        if run is None or run.status not in RUNNING_STATUSES:
+            return
+        update_run_progress(
+            db,
+            run,
+            phase=phase,
+            progress_pct=pct,
+            progress_current=progress_current,
+            progress_total=progress_total,
+        )
+
+
+def _mark_run_failed(db: Session, run: WalkForwardRun, *, reason: str) -> None:
+    finished = datetime.now(timezone.utc).replace(tzinfo=None)
+    run.status = "failed"
+    run.current_phase = "Fallita"
+    run.finished_at = finished
+    run.cancel_requested = "false"
+    run.error_message = reason
+    if run.started_at:
+        run.duration_seconds = max(0.0, (finished - run.started_at).total_seconds())
+    db.commit()
+
+
+def _walk_forward_thread_entry(run_id: int) -> None:
+    try:
+        execute_walk_forward_run(run_id)
+    except Exception:
+        logger.exception("Walk-forward thread run_id=%s terminated uncaught", run_id)
+        try:
+            with SessionLocal() as db:
+                run = get_walk_forward_run(db, run_id)
+                if run is not None and run.status in RUNNING_STATUSES:
+                    _mark_run_failed(
+                        db,
+                        run,
+                        reason="Worker terminato in modo anomalo (controlla i log API).",
+                    )
+        except Exception:
+            logger.exception("Failed to persist failure for walk-forward run_id=%s", run_id)
+
+
 def execute_walk_forward_run(run_id: int) -> WalkForwardRun:
     """Blocking execution used by CLI / background worker."""
     global _active_run_id
-    with SessionLocal() as db:
-        run = get_walk_forward_run(db, run_id)
-        if run is None:
-            raise ValueError(f"Walk-forward run {run_id} non trovata.")
-        run.status = "running"
-        run.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        db.commit()
+    logger.info(
+        "Walk-forward worker started run_id=%s thread=%s",
+        run_id,
+        threading.current_thread().name,
+    )
 
     with _active_thread_lock:
         _active_run_id = run_id
 
+    def should_cancel() -> bool:
+        return is_cancel_requested(
+            run_id,
+            db_check=lambda: _read_cancel_flag(run_id),
+        )
+
+    def on_progress(phase: str, completed: int, total: int) -> None:
+        _persist_progress(run_id, phase=phase, progress_current=completed, progress_total=total)
+
+    def on_prepare(phase: str) -> None:
+        with SessionLocal() as db:
+            run = get_walk_forward_run(db, run_id)
+            if run is None or run.status not in RUNNING_STATUSES:
+                return
+            update_run_progress(db, run, phase=phase, progress_pct=run.progress_pct or 0.0)
+
     try:
+        with SessionLocal() as db:
+            run = get_walk_forward_run(db, run_id)
+            if run is None:
+                raise ValueError(f"Walk-forward run {run_id} non trovata.")
+            run.status = "running"
+            run.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            run.current_phase = "Avvio"
+            run.cancel_requested = "false"
+            run.progress_pct = 0.0
+            db.commit()
+
         with SessionLocal() as db:
             run = get_walk_forward_run(db, run_id)
             assert run is not None
@@ -366,29 +541,49 @@ def execute_walk_forward_run(run_id: int) -> WalkForwardRun:
                 for part in run.versions_requested.split(",")
                 if part.strip()
             )
-            result = run_walk_forward_validation(config, versions=versions)
+            result = run_walk_forward_validation(
+                config,
+                versions=versions,
+                progress_callback=on_progress,
+                prepare_progress_callback=on_prepare,
+                should_cancel=should_cancel,
+            )
             _persist_result(db, run, result)
+            run.current_phase = "Completato"
+            run.progress_pct = 100.0
+            db.commit()
             db.refresh(run)
+            logger.info("Walk-forward worker completed run_id=%s status=%s", run_id, run.status)
             return run
+    except BackgroundJobCancelled:
+        logger.info("Walk-forward run_id=%s cancelled", run_id)
+        with SessionLocal() as db:
+            run = get_walk_forward_run(db, run_id)
+            if run is not None:
+                _finalize_cancelled_run(db, run, reason="Run annullata dall'utente.")
+                return run
+        raise
     except Exception as exc:
         logger.exception("Walk-forward run_id=%s failed: %s", run_id, exc)
         with SessionLocal() as db:
             run = get_walk_forward_run(db, run_id)
             if run is not None:
-                run.status = "failed"
-                run.error_message = str(exc)
-                run.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                if run.started_at:
-                    run.duration_seconds = max(
-                        0.0, (run.finished_at - run.started_at).total_seconds()
-                    )
-                db.commit()
+                _mark_run_failed(db, run, reason=str(exc))
                 return run
         raise
     finally:
+        clear_cancel_state(run_id)
         with _active_thread_lock:
             if _active_run_id == run_id:
                 _active_run_id = None
+
+
+def _read_cancel_flag(run_id: int) -> bool:
+    with SessionLocal() as db:
+        flag = db.scalar(
+            select(WalkForwardRun.cancel_requested).where(WalkForwardRun.id == run_id)
+        )
+        return flag == "true"
 
 
 def start_walk_forward_run(
@@ -434,12 +629,13 @@ def start_walk_forward_run(
         return refreshed, True, "Walk-forward completato."
 
     thread = threading.Thread(
-        target=execute_walk_forward_run,
+        target=_walk_forward_thread_entry,
         args=(run.id,),
         name=f"walk-forward-{run.id}",
         daemon=True,
     )
     thread.start()
+    logger.info("Walk-forward background thread started run_id=%s", run.id)
     refreshed = get_walk_forward_run(db, run.id)
     assert refreshed is not None
     return refreshed, True, "Walk-forward avviato in background."

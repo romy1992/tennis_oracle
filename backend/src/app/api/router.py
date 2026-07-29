@@ -10,7 +10,10 @@ from backend.src.app.api.routes import (
     ops,
     predictions,
     prematch_odds_snapshots,
+    probability_bands,
+    public_model_registry,
     published_predictions,
+    segment_roi,
     single_match_value,
     telegram,
     telegram_feedback,
@@ -38,4 +41,7 @@ api_router.include_router(live_beta_dashboard.router)
 api_router.include_router(weekly_beta_reports.router)
 api_router.include_router(walk_forward.router)
 api_router.include_router(calibration.router)
+api_router.include_router(public_model_registry.router)
+api_router.include_router(probability_bands.router)
+api_router.include_router(segment_roi.router)
 api_router.include_router(ops.router)

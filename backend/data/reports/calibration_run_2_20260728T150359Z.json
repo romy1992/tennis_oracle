@@ -1,0 +1,143 @@
+{
+  "config": {
+    "n_bins": 10,
+    "min_bin_samples": 30,
+    "min_calibrator_train_samples": 100,
+    "methods": [
+      "raw",
+      "platt",
+      "isotonic"
+    ],
+    "walk_forward": {
+      "mode": "expanding",
+      "initial_train_days": 365,
+      "test_days": 90,
+      "step_days": 90,
+      "min_train_rows": 200,
+      "min_test_rows": 50,
+      "embargo_days": 0,
+      "edge_threshold": 0.03,
+      "random_state": 42
+    }
+  },
+  "started_at": "2026-07-28T14:43:23.588899+00:00",
+  "finished_at": "2026-07-28T15:03:59.200310+00:00",
+  "walk_forward_run_id": null,
+  "models": [
+    {
+      "model_version": "v1",
+      "model_name": "logistic_regression",
+      "dataset_path": "",
+      "date_min": null,
+      "date_max": null,
+      "oos_samples_total": 0,
+      "fold_outcomes": [],
+      "aggregate": {},
+      "comparison": {
+        "error": "[Errno 30] Read-only file system: '/app/backend/data/models/calibrators'"
+      },
+      "artifacts": {},
+      "leakage_flags": [
+        "error:[Errno 30] Read-only file system: '/app/backend/data/models/calibrators'"
+      ]
+    },
+    {
+      "model_version": "v1",
+      "model_name": "random_forest",
+      "dataset_path": "",
+      "date_min": null,
+      "date_max": null,
+      "oos_samples_total": 0,
+      "fold_outcomes": [],
+      "aggregate": {},
+      "comparison": {
+        "error": "[Errno 30] Read-only file system: '/app/backend/data/models/calibrators'"
+      },
+      "artifacts": {},
+      "leakage_flags": [
+        "error:[Errno 30] Read-only file system: '/app/backend/data/models/calibrators'"
+      ]
+    },
+    {
+      "model_version": "v2",
+      "model_name": "logistic_regression",
+      "dataset_path": "",
+      "date_min": null,
+      "date_max": null,
+      "oos_samples_total": 0,
+      "fold_outcomes": [],
+      "aggregate": {},
+      "comparison": {
+        "error": "[Errno 30] Read-only file system: '/app/backend/data/models/v2/calibrators'"
+      },
+      "artifacts": {},
+      "leakage_flags": [
+        "error:[Errno 30] Read-only file system: '/app/backend/data/models/v2/calibrators'"
+      ]
+    },
+    {
+      "model_version": "v2",
+      "model_name": "random_forest",
+      "dataset_path": "",
+      "date_min": null,
+      "date_max": null,
+      "oos_samples_total": 0,
+      "fold_outcomes": [],
+      "aggregate": {},
+      "comparison": {
+        "error": "[Errno 30] Read-only file system: '/app/backend/data/models/v2/calibrators'"
+      },
+      "artifacts": {},
+      "leakage_flags": [
+        "error:[Errno 30] Read-only file system: '/app/backend/data/models/v2/calibrators'"
+      ]
+    },
+    {
+      "model_version": "v3",
+      "model_name": "logistic_regression",
+      "dataset_path": "",
+      "date_min": null,
+      "date_max": null,
+      "oos_samples_total": 0,
+      "fold_outcomes": [],
+      "aggregate": {},
+      "comparison": {
+        "error": "[Errno 30] Read-only file system: '/app/backend/data/models/v3/calibrators'"
+      },
+      "artifacts": {},
+      "leakage_flags": [
+        "error:[Errno 30] Read-only file system: '/app/backend/data/models/v3/calibrators'"
+      ]
+    },
+    {
+      "model_version": "v3",
+      "model_name": "random_forest",
+      "dataset_path": "",
+      "date_min": null,
+      "date_max": null,
+      "oos_samples_total": 0,
+      "fold_outcomes": [],
+      "aggregate": {},
+      "comparison": {
+        "error": "[Errno 30] Read-only file system: '/app/backend/data/models/v3/calibrators'"
+      },
+      "artifacts": {},
+      "leakage_flags": [
+        "error:[Errno 30] Read-only file system: '/app/backend/data/models/v3/calibrators'"
+      ]
+    }
+  ],
+  "summary": {
+    "models_total": 6,
+    "models_with_oos": 0,
+    "oos_samples_total": 0,
+    "leakage_flags_total": 6,
+    "methods_compared": [
+      "raw",
+      "platt",
+      "isotonic"
+    ],
+    "note": "Calibrazione su OOS walk-forward. Non attiva automaticamente il modello pubblico."
+  },
+  "report_path": "/app/backend/data/reports/calibration_run_2_20260728T150359Z.json"
+}

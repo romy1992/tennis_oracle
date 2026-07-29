@@ -14,6 +14,7 @@ from backend.src.app.services.live_betting_metrics import hit_rate_pct, roi_pct
 from backend.src.app.services.published_live_stats import (
     compute_published_live_stats,
     edge_bucket,
+    list_settled_published_tips,
     odds_bucket,
     selection_to_predicted_winner,
 )
@@ -23,6 +24,7 @@ from backend.src.app.services.published_predictions import (
 )
 from backend.src.entity.fixture import Fixture
 from backend.src.entity.next_fixture import NextFixture
+from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
 from backend.src.entity.tournaments import Tournament
 
 
@@ -135,6 +137,47 @@ def _publish(
     return publish_prediction(db_session, payload, published_at=published_at)
 
 
+def _add_snapshot_pair(
+    db_session,
+    *,
+    event_key: int,
+    snapshot_type: str,
+    bookmaker: str,
+    captured_at: datetime,
+    alice_odds: float,
+    bob_odds: float,
+) -> None:
+    db_session.add(
+        PrematchOddsSnapshot(
+            event_key=event_key,
+            selection="Alice",
+            bookmaker=bookmaker,
+            odds=alice_odds,
+            implied_probability=1 / alice_odds,
+            margin=(1 / alice_odds) + (1 / bob_odds) - 1,
+            captured_at=captured_at,
+            source="test",
+            snapshot_type=snapshot_type,
+            detection_hash=f"{event_key}-{snapshot_type}-{bookmaker}-alice-{captured_at.isoformat()}",
+        )
+    )
+    db_session.add(
+        PrematchOddsSnapshot(
+            event_key=event_key,
+            selection="Bob",
+            bookmaker=bookmaker,
+            odds=bob_odds,
+            implied_probability=1 / bob_odds,
+            margin=(1 / alice_odds) + (1 / bob_odds) - 1,
+            captured_at=captured_at,
+            source="test",
+            snapshot_type=snapshot_type,
+            detection_hash=f"{event_key}-{snapshot_type}-{bookmaker}-bob-{captured_at.isoformat()}",
+        )
+    )
+    db_session.commit()
+
+
 def test_selection_mapping():
     assert selection_to_predicted_winner("Alice", "Alice", "Bob") == "First Player"
     assert selection_to_predicted_winner("Bob", "Alice", "Bob") == "Second Player"
@@ -231,6 +274,43 @@ def test_live_stats_known_numeric_case(db_session):
     )
     _cancelled_fixture(db_session, event_key=9103, event_day=day3)
 
+    _add_snapshot_pair(
+        db_session,
+        event_key=9101,
+        snapshot_type="publication",
+        bookmaker="book_a",
+        captured_at=datetime(2026, 5, 30, 10, 0, 0),
+        alice_odds=2.0,
+        bob_odds=1.8,
+    )
+    _add_snapshot_pair(
+        db_session,
+        event_key=9101,
+        snapshot_type="closing",
+        bookmaker="book_a",
+        captured_at=datetime(2026, 5, 30, 14, 0, 0),
+        alice_odds=1.8,
+        bob_odds=2.0,
+    )
+    _add_snapshot_pair(
+        db_session,
+        event_key=9102,
+        snapshot_type="publication",
+        bookmaker="book_b",
+        captured_at=datetime(2026, 5, 30, 11, 0, 0),
+        alice_odds=1.5,
+        bob_odds=2.5,
+    )
+    _add_snapshot_pair(
+        db_session,
+        event_key=9102,
+        snapshot_type="closing",
+        bookmaker="book_c",
+        captured_at=datetime(2026, 5, 30, 15, 0, 0),
+        alice_odds=1.6,
+        bob_odds=2.3,
+    )
+
     stats = compute_published_live_stats(db_session)
 
     assert tip1.id and tip2.id and tip3.id and tip4.id
@@ -250,6 +330,20 @@ def test_live_stats_known_numeric_case(db_session):
     assert stats.max_drawdown == 2.0
     assert stats.max_winning_streak == 1
     assert stats.max_losing_streak == 1
+    assert stats.clv_count == 2
+    assert stats.clv_missing == 2
+    assert round(stats.clv_coverage_pct or 0.0, 4) == 50.0
+    assert round(stats.clv_avg_pct or 0.0, 4) == 2.4306
+    assert round(stats.clv_median_pct or 0.0, 4) == 2.4306
+    assert round(stats.clv_positive_pct or 0.0, 4) == 50.0
+
+    settled_items = list_settled_published_tips(db_session, latest_only=True)
+    event_9101 = next(item for item in settled_items if item.event_key == 9101)
+    event_9102 = next(item for item in settled_items if item.event_key == 9102)
+    event_9104 = next(item for item in settled_items if item.event_key == 9104)
+    assert round(event_9101.clv_pct or 0.0, 4) == 11.1111
+    assert round(event_9102.clv_pct or 0.0, 4) == -6.25
+    assert event_9104.clv_pct is None
 
     model_keys = {bucket.key for bucket in stats.by_model}
     assert "v3|logistic_regression" in model_keys

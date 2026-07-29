@@ -569,9 +569,10 @@ async def giorno(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     settings = _settings(context)
     try:
+        model_version, model_name = await _resolve_active_public_model(context)
         items = await _api(context).predictions(
-            model_version=settings.telegram_model_version,
-            model_name=settings.telegram_model_name,
+            model_version=model_version,
+            model_name=model_name,
             from_date=target_date,
             to_date=target_date,
             status="upcoming",
@@ -588,9 +589,10 @@ async def ten_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = _settings(context)
     start_date, end_date = prediction_window(today=today_rome(), days=10)
     try:
+        model_version, model_name = await _resolve_active_public_model(context)
         items = await _api(context).predictions(
-            model_version=settings.telegram_model_version,
-            model_name=settings.telegram_model_name,
+            model_version=model_version,
+            model_name=model_name,
             from_date=start_date,
             to_date=end_date,
             status="upcoming",
@@ -628,42 +630,30 @@ async def _schedine_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     target_date = today_rome()
     settings = _settings(context)
     api = _api(context)
-    fallback_models = _fallback_models(settings)
     try:
+        model_version, model_name = await _resolve_active_public_model(context)
         versions_payload = await api.models_versions_results(target_date=target_date)
         last_updated = versions_payload.get("last_updated_at")
-        model_names = _model_names_from_versions(
-            versions_payload,
-            model_version=settings.telegram_model_version,
-            fallback=fallback_models,
+        payload = await api.daily_betting_slips(
+            slip_date=target_date,
+            model_version=model_version,
+            model_name=model_name,
+            stake=settings.telegram_default_stake,
+            slip_count=settings.telegram_slip_count,
+            min_edge_percent=settings.telegram_min_edge_percent,
         )
-        payloads: list[dict] = []
-        for model_name in model_names:
-            payload = await api.daily_betting_slips(
-                slip_date=target_date,
-                model_version=settings.telegram_model_version,
-                model_name=model_name,
-                stake=settings.telegram_default_stake,
-                slip_count=settings.telegram_slip_count,
-                min_edge_percent=settings.telegram_min_edge_percent,
-            )
-            payloads.append(payload)
     except BackendApiError as exc:
         await _reply(update, format_user_error(exc.message))
         return
 
-    selected = select_distinct_model_payloads(
-        payloads,
-        preferred_model_name=settings.telegram_model_name,
-    )
     public_labels = await _public_labels_for_models(
         api,
-        model_version=settings.telegram_model_version,
-        model_names=[str(payload.get("model_name") or "") for payload in selected],
+        model_version=model_version,
+        model_names=[model_name],
     )
     await _reply_betting_slips(
         update,
-        selected,
+        [payload],
         min_edge_percent=settings.telegram_min_edge_percent,
         slip_date=str(target_date),
         public_labels=public_labels,
@@ -676,61 +666,50 @@ async def _partite_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     target_date = today_rome()
     settings = _settings(context)
     api = _api(context)
-    fallback_models = _fallback_models(settings)
     try:
+        model_version, model_name = await _resolve_active_public_model(context)
         versions_payload = await api.models_versions_results(target_date=target_date)
         last_updated = versions_payload.get("last_updated_at")
-        model_names = _model_names_from_versions(
-            versions_payload,
-            model_version=settings.telegram_model_version,
-            fallback=fallback_models,
+        items = await api.predictions(
+            model_version=model_version,
+            model_name=model_name,
+            from_date=target_date,
+            to_date=target_date,
+            status="upcoming",
+            limit=200,
         )
-        model_items: list[tuple[str, list[dict]]] = []
-        for model_name in model_names:
-            items = await api.predictions(
-                model_version=settings.telegram_model_version,
-                model_name=model_name,
+        smva_items: list[dict] = []
+        try:
+            smva = await api.single_match_value(
                 from_date=target_date,
                 to_date=target_date,
+                model_version=model_version,
+                model_name=model_name,
+                min_edge_percent=settings.telegram_min_edge_percent,
                 status="upcoming",
                 limit=200,
             )
-            smva_items: list[dict] = []
-            try:
-                smva = await api.single_match_value(
-                    from_date=target_date,
-                    to_date=target_date,
-                    model_version=settings.telegram_model_version,
-                    model_name=model_name,
-                    min_edge_percent=settings.telegram_min_edge_percent,
-                    status="upcoming",
-                    limit=200,
-                )
-                smva_items = list(smva.get("items") or [])
-            except BackendApiError:
-                logger.exception("SMVA non disponibile per Telegram /partite; uso fallback locale.")
-            enriched = enrich_fixtures_with_value(
-                items,
-                min_edge_percent=settings.telegram_min_edge_percent,
-                smva_items=smva_items,
-            )
-            model_items.append((model_name, enriched))
+            smva_items = list(smva.get("items") or [])
+        except BackendApiError:
+            logger.exception("SMVA non disponibile per Telegram /partite; uso fallback locale.")
+        enriched = enrich_fixtures_with_value(
+            items,
+            min_edge_percent=settings.telegram_min_edge_percent,
+            smva_items=smva_items,
+        )
+        model_items = [(model_name, enriched)]
     except BackendApiError as exc:
         await _reply(update, format_user_error(exc.message))
         return
 
-    selected = select_distinct_fixture_models(
-        model_items,
-        preferred_model_name=settings.telegram_model_name,
-    )
     public_labels = await _public_labels_for_models(
         api,
-        model_version=settings.telegram_model_version,
-        model_names=[name for name, _items in selected],
+        model_version=model_version,
+        model_names=[model_name],
     )
     await _reply_fixtures(
         update,
-        selected,
+        model_items,
         target_date,
         min_edge_percent=settings.telegram_min_edge_percent,
         public_labels=public_labels,
@@ -742,17 +721,13 @@ async def _partite_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def _statistiche_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = _settings(context)
     api = _api(context)
-    fallback_models = _fallback_models(settings)
     try:
+        model_version, model_name = await _resolve_active_public_model(context)
         versions_payload = await api.models_versions_results(target_date=today_rome())
         last_updated = versions_payload.get("last_updated_at")
-        model_names = _model_names_from_versions(
-            versions_payload,
-            model_version=settings.telegram_model_version,
-            fallback=fallback_models,
-        )
         prediction_summary = await api.prediction_summary(
-            model_version=settings.telegram_model_version,
+            model_version=model_version,
+            model_name=model_name,
         )
         slip_stats = await api.betting_slip_stats_by_model(
             stake=settings.telegram_default_stake,
@@ -763,8 +738,8 @@ async def _statistiche_body(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     series = build_stats_series(
-        model_names=model_names,
-        model_version=settings.telegram_model_version,
+        model_names=[model_name],
+        model_version=model_version,
         prediction_summary=prediction_summary,
         slip_stats=slip_stats,
     )
@@ -815,9 +790,10 @@ async def cerca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     start_date = today_rome()
     end_date = start_date + timedelta(days=10)
     try:
+        model_version, model_name = await _resolve_active_public_model(context)
         items = await _api(context).predictions(
-            model_version=settings.telegram_model_version,
-            model_name=settings.telegram_model_name,
+            model_version=model_version,
+            model_name=model_name,
             from_date=start_date,
             to_date=end_date,
             status="upcoming",
@@ -1094,6 +1070,26 @@ def _settings(context: ContextTypes.DEFAULT_TYPE) -> TelegramSettings:
 
 def _api(context: ContextTypes.DEFAULT_TYPE) -> BackendApiClient:
     return context.application.bot_data["api_client"]
+
+
+async def _resolve_active_public_model(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> tuple[str, str]:
+    """Return the ML-07 active public model (bot must not use other combos)."""
+    try:
+        payload = await _api(context).active_public_model()
+    except BackendApiError as exc:
+        raise BackendApiError(
+            "Nessun modello pubblico attivo nel registro ML-07. "
+            f"Dettaglio: {exc.message}"
+        ) from exc
+    version = str(payload.get("model_version") or "").strip()
+    name = str(payload.get("model_name") or "").strip()
+    if not version or not name:
+        raise BackendApiError(
+            "Registro modello pubblico incompleto: model_version/model_name mancanti."
+        )
+    return version, name
 
 
 async def _post_init(application: Application) -> None:

@@ -36,6 +36,11 @@ class WalkForwardRun(Base):
     # Comma-separated versions e.g. v1,v2,v3
     versions_requested = Column(String(64), nullable=False)
     origin = Column(String(32), nullable=False, default="manual")
+    current_phase = Column(String(256), nullable=True)
+    progress_pct = Column(Float, nullable=True)
+    progress_current = Column(Integer, nullable=True)
+    progress_total = Column(Integer, nullable=True)
+    cancel_requested = Column(String(8), nullable=False, default="false")
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     duration_seconds = Column(Float, nullable=True)

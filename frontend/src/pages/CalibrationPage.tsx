@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { MetricCard } from "../components/MetricCard";
+import { LongRunningJobProgress } from "../components/LongRunningJobProgress";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient, ApiError } from "../services/apiClient";
 import type {
@@ -42,6 +43,8 @@ function statusLabel(status: string) {
       return "In coda";
     case "failed":
       return "Fallita";
+    case "cancelled":
+      return "Annullata";
     default:
       return status;
   }
@@ -82,6 +85,25 @@ function metricFromAggregate(
 
 const ACTIVE_RUN_STATUSES = new Set(["pending", "running"]);
 const RUN_POLL_INTERVAL_MS = 12_000;
+
+function syncListItemProgress(
+  item: CalibrationRunListItem,
+  detail: CalibrationRun
+): CalibrationRunListItem {
+  return {
+    ...item,
+    status: detail.status,
+    finished_at: detail.finished_at,
+    duration_seconds: detail.duration_seconds,
+    current_phase: detail.current_phase,
+    progress_pct: detail.progress_pct,
+    progress_current: detail.progress_current,
+    progress_total: detail.progress_total,
+    cancel_requested: detail.cancel_requested,
+    models_with_oos: Number(detail.summary?.models_with_oos ?? item.models_with_oos),
+    oos_samples_total: Number(detail.summary?.oos_samples_total ?? detail.progress_current ?? item.oos_samples_total)
+  };
+}
 
 function ReliabilityChart({
   bins,
@@ -250,26 +272,37 @@ export function CalibrationPage() {
     void loadSelected();
   }, [selectedId, list.length, run?.id]);
 
+  const activeRun = useMemo(
+    () => list.find((item) => ACTIVE_RUN_STATUSES.has(item.status)) ?? null,
+    [list]
+  );
+  const activeRunId = activeRun?.id ?? null;
+  const progressRun =
+    activeRun && run?.id === activeRun.id
+      ? run
+      : activeRun
+        ? {
+            status: activeRun.status,
+            current_phase: activeRun.current_phase,
+            progress_pct: activeRun.progress_pct,
+            progress_current: activeRun.progress_current,
+            progress_total: activeRun.progress_total
+          }
+        : null;
+
   useEffect(() => {
-    if (!run || !ACTIVE_RUN_STATUSES.has(run.status)) return;
+    if (activeRunId === null) return;
     let cancelled = false;
     const poll = async () => {
       try {
-        const detail = await apiClient.getCalibrationRun(run.id);
+        const detail = await apiClient.getCalibrationRun(activeRunId);
         if (cancelled) return;
-        setRun(detail);
+        if (run?.id === detail.id) {
+          setRun(detail);
+        }
         setList((items) =>
           items.map((item) =>
-            item.id === detail.id
-              ? {
-                  ...item,
-                  status: detail.status,
-                  finished_at: detail.finished_at,
-                  duration_seconds: detail.duration_seconds,
-                  models_with_oos: Number(detail.summary?.models_with_oos ?? item.models_with_oos),
-                  oos_samples_total: Number(detail.summary?.oos_samples_total ?? item.oos_samples_total)
-                }
-              : item
+            item.id === detail.id ? syncListItemProgress(item, detail) : item
           )
         );
       } catch {
@@ -282,7 +315,7 @@ export function CalibrationPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [run?.id, run?.status]);
+  }, [activeRunId, run?.id]);
 
   const filteredResults = useMemo(() => {
     if (!run?.results) return [];
@@ -315,6 +348,22 @@ export function CalibrationPage() {
     }
   }
 
+  async function handleCancel() {
+    const targetId = run?.id ?? activeRun?.id;
+    if (targetId === undefined) return;
+    try {
+      setActionError(null);
+      await apiClient.cancelCalibrationRun(targetId);
+      const detail = await apiClient.getCalibrationRun(targetId);
+      setRun(detail);
+      setList((items) =>
+        items.map((item) => (item.id === detail.id ? syncListItemProgress(item, detail) : item))
+      );
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Annullamento calibrazione fallito.");
+    }
+  }
+
   if (loading) {
     return <LoadingState title="Caricamento calibrazione..." />;
   }
@@ -334,11 +383,27 @@ export function CalibrationPage() {
           </p>
         </div>
         <div className="actions inline">
-          <button type="button" className="btn primary" disabled={busy} onClick={() => void handleStart()}>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy || Boolean(activeRun)}
+            onClick={() => void handleStart()}
+          >
             {busy ? "Avvio..." : "Avvia calibrazione"}
           </button>
         </div>
       </header>
+
+      {progressRun ? (
+        <LongRunningJobProgress
+          status={progressRun.status}
+          currentPhase={progressRun.current_phase}
+          progressPct={progressRun.progress_pct}
+          progressCurrent={progressRun.progress_current}
+          progressTotal={progressRun.progress_total}
+          onCancel={() => handleCancel()}
+        />
+      ) : null}
 
       {actionError ? <div className="alert error">{actionError}</div> : null}
       {run?.error_message ? <div className="alert error">{run.error_message}</div> : null}

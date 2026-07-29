@@ -13,7 +13,7 @@ import logging
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import pandas as pd
 
@@ -37,12 +37,25 @@ from backend.src.app.ml.training.train_baseline import (
 from backend.src.app.ml.training.value_bet_metrics import DEFAULT_EDGE_THRESHOLD
 
 
+from backend.src.app.services.background_job import BackgroundJobCancelled
+
 logger = logging.getLogger(__name__)
 
 WalkForwardMode = Literal["expanding", "rolling"]
 FoldStatus = Literal["completed", "skipped_insufficient_data", "skipped_single_class", "error"]
 
+PrepareProgressCallback = Callable[[str], None]
+ProgressCallback = Callable[[str, int, int], None]
+ShouldCancel = Callable[[], bool]
+
 MODEL_NAMES = ("logistic_regression", "random_forest")
+OFFICIAL_BENCHMARK_NAMES = (
+    "market_favorite",
+    "market_no_vig",
+    "atp_ranking",
+    "elo",
+)
+OFFICIAL_CONTENDERS = (*OFFICIAL_BENCHMARK_NAMES, *MODEL_NAMES)
 WALK_FORWARD_REPORTS_DIR = REPORTS_DIR / "walk_forward"
 
 DEFAULT_INITIAL_TRAIN_DAYS = 365
@@ -321,6 +334,205 @@ def _estimators(random_state: int) -> dict[str, Any]:
     }
 
 
+def _clip_probabilities(series: pd.Series) -> pd.Series:
+    return series.astype(float).clip(lower=1e-6, upper=1.0 - 1e-6)
+
+
+def _safe_side_odds(value: Any) -> float | None:
+    try:
+        odd = float(value)
+    except (TypeError, ValueError):
+        return None
+    if odd <= 1.0:
+        return None
+    return odd
+
+
+def _numeric_column_or_nan(test: pd.DataFrame, column: str) -> pd.Series:
+    if column not in test.columns:
+        return pd.Series(float("nan"), index=test.index, dtype=float)
+    return pd.to_numeric(test[column], errors="coerce")
+
+
+def _series_max_drawdown(profits: list[float]) -> float:
+    equity = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+    for profit in profits:
+        equity += float(profit)
+        if equity > peak:
+            peak = equity
+        drawdown = peak - equity
+        if drawdown > max_drawdown:
+            max_drawdown = drawdown
+    return round(float(max_drawdown), 6)
+
+
+def _compute_official_metrics(
+    y_true: pd.Series,
+    probabilities: pd.Series,
+    player_1_odds: pd.Series,
+    player_2_odds: pd.Series,
+) -> dict[str, Any]:
+    from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
+
+    probs = _clip_probabilities(probabilities)
+    predictions = (probs >= 0.5).astype(int)
+    chosen_odds: list[float] = []
+    profits: list[float] = []
+    for pred, odd_1, odd_2, actual in zip(predictions, player_1_odds, player_2_odds, y_true):
+        odd = _safe_side_odds(odd_1 if pred == 1 else odd_2)
+        if odd is None:
+            continue
+        chosen_odds.append(odd)
+        won = int(actual) == int(pred)
+        profits.append(odd - 1.0 if won else -1.0)
+
+    settled = len(profits)
+    total_profit = float(sum(profits))
+    roi = (total_profit / settled) if settled else None
+    avg_odds = (sum(chosen_odds) / len(chosen_odds)) if chosen_odds else None
+
+    return {
+        "accuracy": round(float(accuracy_score(y_true, predictions)), 6),
+        "log_loss": round(float(log_loss(y_true, probs, labels=[0, 1])), 6),
+        "brier_score": round(float(brier_score_loss(y_true, probs)), 6),
+        "roi": round(float(roi), 6) if roi is not None else None,
+        "yield": round(float(roi), 6) if roi is not None else None,
+        "max_drawdown": _series_max_drawdown(profits),
+        "clv_pct": None,
+        "clv_available_count": 0,
+        "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+        "bets_settled": settled,
+        "total_profit": round(total_profit, 6),
+        "avg_odds": round(float(avg_odds), 6) if avg_odds is not None else None,
+    }
+
+
+def _market_no_vig_probabilities(test: pd.DataFrame) -> pd.Series:
+    odd_1 = _numeric_column_or_nan(test, "avg_player_1_odds")
+    odd_2 = _numeric_column_or_nan(test, "avg_player_2_odds")
+    denom = (1.0 / odd_1) + (1.0 / odd_2)
+    probs = (1.0 / odd_1) / denom
+    return probs.where((odd_1 > 1.0) & (odd_2 > 1.0) & denom.notna() & (denom > 0.0))
+
+
+def _market_favorite_probabilities(test: pd.DataFrame) -> pd.Series:
+    odd_1 = _numeric_column_or_nan(test, "avg_player_1_odds")
+    odd_2 = _numeric_column_or_nan(test, "avg_player_2_odds")
+    probabilities = pd.Series(index=test.index, dtype=float)
+    favorite_p1 = (odd_1 < odd_2) & odd_1.notna() & odd_2.notna()
+    favorite_p2 = (odd_2 < odd_1) & odd_1.notna() & odd_2.notna()
+    tie = (odd_1 == odd_2) & odd_1.notna()
+    probabilities.loc[favorite_p1] = 1.0
+    probabilities.loc[favorite_p2] = 0.0
+    probabilities.loc[tie] = 0.5
+    return probabilities
+
+
+def _atp_rank_probabilities(test: pd.DataFrame) -> pd.Series:
+    rank_1 = _numeric_column_or_nan(test, "player_1_atp_rank")
+    rank_2 = _numeric_column_or_nan(test, "player_2_atp_rank")
+    probabilities = pd.Series(index=test.index, dtype=float)
+    valid = rank_1.notna() & rank_2.notna() & (rank_1 > 0) & (rank_2 > 0)
+    stronger_p1 = valid & (rank_1 < rank_2)
+    stronger_p2 = valid & (rank_2 < rank_1)
+    tie = valid & (rank_1 == rank_2)
+    probabilities.loc[stronger_p1] = 1.0
+    probabilities.loc[stronger_p2] = 0.0
+    probabilities.loc[tie] = 0.5
+    return probabilities
+
+
+def _elo_probabilities(test: pd.DataFrame) -> pd.Series:
+    if "elo_diff" in test.columns:
+        elo_diff = pd.to_numeric(test["elo_diff"], errors="coerce")
+        probabilities = 1.0 / (1.0 + (10.0 ** (-elo_diff / 400.0)))
+        return probabilities.where(elo_diff.notna())
+
+    elo_1 = _numeric_column_or_nan(test, "player_1_elo")
+    elo_2 = _numeric_column_or_nan(test, "player_2_elo")
+    elo_diff = elo_1 - elo_2
+    probabilities = 1.0 / (1.0 + (10.0 ** (-elo_diff / 400.0)))
+    return probabilities.where(elo_1.notna() & elo_2.notna())
+
+
+def _official_probability_inputs(
+    test: pd.DataFrame,
+    model_probabilities: dict[str, pd.Series],
+) -> dict[str, pd.Series]:
+    return {
+        "market_favorite": _market_favorite_probabilities(test),
+        "market_no_vig": _market_no_vig_probabilities(test),
+        "atp_ranking": _atp_rank_probabilities(test),
+        "elo": _elo_probabilities(test),
+        **model_probabilities,
+    }
+
+
+def _evaluate_official_contenders(
+    test: pd.DataFrame,
+    *,
+    probabilities_by_name: dict[str, pd.Series],
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    if TARGET_COLUMN not in test.columns:
+        raise ValueError(f"Colonna target mancante: {TARGET_COLUMN}")
+
+    y_true_all = pd.to_numeric(test[TARGET_COLUMN], errors="coerce")
+    odds_1_all = _numeric_column_or_nan(test, "avg_player_1_odds")
+    odds_2_all = _numeric_column_or_nan(test, "avg_player_2_odds")
+    required = y_true_all.notna() & (odds_1_all > 1.0) & (odds_2_all > 1.0)
+
+    contender_masks: dict[str, pd.Series] = {}
+    for name in OFFICIAL_CONTENDERS:
+        series = probabilities_by_name.get(name)
+        if series is None:
+            contender_masks[name] = pd.Series(False, index=test.index)
+        else:
+            contender_masks[name] = pd.to_numeric(series, errors="coerce").notna()
+
+    common_mask = required.copy()
+    for mask in contender_masks.values():
+        common_mask &= mask
+
+    rows_total = int(len(test))
+    rows_with_required = int(required.sum())
+    common_rows = int(common_mask.sum())
+    rows_excluded = rows_total - common_rows
+    missing_by_contender = {
+        name: int((~mask & required).sum()) for name, mask in contender_masks.items()
+    }
+    sample_meta = {
+        "rows_total_test": rows_total,
+        "rows_with_required_fields": rows_with_required,
+        "rows_common_official": common_rows,
+        "rows_excluded_for_common_sample": rows_excluded,
+        "common_sample_ratio_pct": round((common_rows / rows_total) * 100, 4) if rows_total else 0.0,
+        "sample_mismatch_detected": common_rows < rows_with_required,
+        "missing_rows_by_contender": missing_by_contender,
+        "comparison_guard": (
+            "Tutte le metriche ufficiali sono calcolate sul campione comune. "
+            "Se sample_mismatch_detected=true, alcune righe sono state escluse per evitare "
+            "confronti su campioni differenti."
+        ),
+    }
+
+    metrics_by_contender: dict[str, dict[str, Any]] = {}
+    if common_rows <= 0:
+        return metrics_by_contender, sample_meta
+
+    y_true = y_true_all.loc[common_mask].astype(int)
+    odds_1 = odds_1_all.loc[common_mask]
+    odds_2 = odds_2_all.loc[common_mask]
+    for name in OFFICIAL_CONTENDERS:
+        probs = pd.to_numeric(probabilities_by_name[name], errors="coerce").loc[common_mask]
+        metrics = _compute_official_metrics(y_true, probs, odds_1, odds_2)
+        metrics["official_common_sample_rows"] = common_rows
+        metrics["official_sample_mismatch_detected"] = sample_meta["sample_mismatch_detected"]
+        metrics_by_contender[name] = metrics
+    return metrics_by_contender, sample_meta
+
+
 def evaluate_fold_models(
     train: pd.DataFrame,
     test: pd.DataFrame,
@@ -421,6 +633,7 @@ def evaluate_fold_models(
     x_test = test[feature_columns]
     market = market_benchmark_metrics(test)
     estimators = _estimators(config.random_state)
+    trained_probabilities: dict[str, pd.Series] = {}
 
     for model_name in model_names:
         if model_name not in estimators:
@@ -449,6 +662,7 @@ def evaluate_fold_models(
             )
             pipeline.fit(x_train, y_train)
             probabilities = pipeline.predict_proba(x_test)[:, 1]
+            trained_probabilities[model_name] = pd.Series(probabilities, index=test.index)
             predictions = (probabilities >= 0.5).astype(int)
             metrics = classification_metrics(
                 y_train,
@@ -497,6 +711,77 @@ def evaluate_fold_models(
                     coverage=coverage,
                 )
             )
+
+    official_probabilities = _official_probability_inputs(test, trained_probabilities)
+    official_metrics, sample_meta = _evaluate_official_contenders(
+        test,
+        probabilities_by_name=official_probabilities,
+    )
+
+    for outcome in outcomes:
+        if outcome.status != "completed":
+            continue
+        model_official = official_metrics.get(outcome.model_name)
+        if model_official is not None:
+            outcome.metrics = {**(outcome.metrics or {}), "official_benchmark": model_official}
+        coverage = dict(outcome.coverage)
+        coverage["official_benchmark_sample"] = sample_meta
+        outcome.coverage = coverage
+
+    completed_reference = next((item for item in outcomes if item.status == "completed"), None)
+    for benchmark_name in OFFICIAL_BENCHMARK_NAMES:
+        benchmark_metrics = official_metrics.get(benchmark_name)
+        if completed_reference is None:
+            outcomes.append(
+                WalkForwardFoldOutcome(
+                    fold=fold,
+                    model_version=model_version,
+                    model_name=benchmark_name,
+                    dataset_path=dataset_path,
+                    feature_set=feature_columns,
+                    status="skipped_insufficient_data",
+                    train_rows=len(train),
+                    test_rows=len(test),
+                    skip_reason="Nessun modello ML completato nel fold.",
+                    leakage_flags=leakage_flags,
+                    coverage={**coverage, "official_benchmark_sample": sample_meta},
+                )
+            )
+            continue
+        if benchmark_metrics is None:
+            outcomes.append(
+                WalkForwardFoldOutcome(
+                    fold=fold,
+                    model_version=model_version,
+                    model_name=benchmark_name,
+                    dataset_path=dataset_path,
+                    feature_set=feature_columns,
+                    status="skipped_insufficient_data",
+                    train_rows=len(train),
+                    test_rows=len(test),
+                    skip_reason="Campione comune insufficiente per benchmark ufficiali.",
+                    leakage_flags=leakage_flags,
+                    coverage={**coverage, "official_benchmark_sample": sample_meta},
+                )
+            )
+            continue
+        outcomes.append(
+            WalkForwardFoldOutcome(
+                fold=fold,
+                model_version=model_version,
+                model_name=benchmark_name,
+                dataset_path=dataset_path,
+                feature_set=feature_columns,
+                status="completed",
+                train_rows=len(train),
+                test_rows=len(test),
+                metrics={"official_benchmark": benchmark_metrics},
+                market_benchmark=market if benchmark_name.startswith("market_") else None,
+                leakage_flags=leakage_flags,
+                coverage={**coverage, "official_benchmark_sample": sample_meta},
+            )
+        )
+
     return outcomes
 
 
@@ -504,6 +789,8 @@ def _mean_metrics(completed: list[WalkForwardFoldOutcome]) -> dict[str, Any]:
     by_model: dict[str, list[dict[str, Any]]] = {}
     for outcome in completed:
         if outcome.metrics is None:
+            continue
+        if "accuracy" not in outcome.metrics:
             continue
         by_model.setdefault(outcome.model_name, []).append(outcome.metrics)
 
@@ -523,6 +810,32 @@ def _mean_metrics(completed: list[WalkForwardFoldOutcome]) -> dict[str, Any]:
                 "n": len(values),
             }
         aggregate[model_name] = model_agg
+    return aggregate
+
+
+def _aggregate_official_benchmarks(completed: list[WalkForwardFoldOutcome]) -> dict[str, Any]:
+    keys = ("accuracy", "log_loss", "brier_score", "roi", "yield", "max_drawdown", "clv_pct")
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for outcome in completed:
+        payload = (outcome.metrics or {}).get("official_benchmark")
+        if isinstance(payload, dict):
+            by_name.setdefault(outcome.model_name, []).append(payload)
+
+    aggregate: dict[str, Any] = {}
+    for name, entries in by_name.items():
+        row: dict[str, Any] = {"folds_completed": len(entries)}
+        for key in keys:
+            values = [item.get(key) for item in entries if item.get(key) is not None]
+            if not values:
+                row[key] = {"mean": None, "std": None, "n": 0}
+                continue
+            series = pd.Series(values, dtype=float)
+            row[key] = {
+                "mean": round(float(series.mean()), 6),
+                "std": round(float(series.std(ddof=0)), 6) if len(values) > 1 else 0.0,
+                "n": len(values),
+            }
+        aggregate[name] = row
     return aggregate
 
 
@@ -571,6 +884,32 @@ def _fold_test_overlaps(folds: list[WalkForwardFoldSpec]) -> list[str]:
     return flags
 
 
+def _count_planned_fold_units(
+    config: WalkForwardConfig,
+    versions: tuple[str, ...],
+    *,
+    processed_dir: str | Path,
+    model_names: tuple[str, ...],
+    should_cancel: ShouldCancel | None = None,
+    prepare_progress_callback: PrepareProgressCallback | None = None,
+) -> int:
+    total = 0
+    version_list = [version for version in versions if version in MODEL_VERSIONS]
+    for index, version in enumerate(version_list):
+        if should_cancel and should_cancel():
+            raise BackgroundJobCancelled("Walk-forward cancelled.")
+        if prepare_progress_callback:
+            prepare_progress_callback(
+                f"Preparazione fold · {version} ({index + 1}/{len(version_list)})"
+            )
+        dataset_path = select_training_dataset(processed_dir, model_version=version)
+        raw = pd.read_csv(dataset_path, low_memory=False)
+        dataframe = prepare_temporal_dataframe(raw, model_version=version)
+        folds = generate_walk_forward_folds(dataframe, config)
+        total += len(folds) * len(model_names)
+    return total
+
+
 def run_walk_forward_for_version(
     model_version: ModelVersion | str,
     config: WalkForwardConfig,
@@ -578,6 +917,8 @@ def run_walk_forward_for_version(
     processed_dir: str | Path = PROCESSED_DATA_DIR,
     reports_dir: str | Path = REPORTS_DIR,
     model_names: tuple[str, ...] = MODEL_NAMES,
+    progress_callback: ProgressCallback | None = None,
+    should_cancel: ShouldCancel | None = None,
 ) -> WalkForwardVersionResult:
     config.validate()
     dataset_path = select_training_dataset(processed_dir, model_version=model_version)
@@ -592,6 +933,8 @@ def run_walk_forward_for_version(
         version_leakage.append("no_folds_generated_insufficient_date_span")
 
     for fold in folds:
+        if should_cancel and should_cancel():
+            raise BackgroundJobCancelled("Walk-forward cancelled.")
         train, test = slice_fold_frames(dataframe, fold)
         outcomes.extend(
             evaluate_fold_models(
@@ -604,6 +947,12 @@ def run_walk_forward_for_version(
                 model_names=model_names,
             )
         )
+        if progress_callback:
+            progress_callback(
+                f"{model_version} · fold {fold.fold_index + 1}/{len(folds)}",
+                len(model_names),
+                len(folds),
+            )
 
     completed = [item for item in outcomes if item.status == "completed"]
     skipped = [item for item in outcomes if item.status.startswith("skipped")]
@@ -630,6 +979,9 @@ def run_walk_forward_for_version(
         )[:40],
     }
 
+    aggregate_metrics = _mean_metrics(completed)
+    aggregate_metrics["official_benchmarks"] = _aggregate_official_benchmarks(completed)
+
     return WalkForwardVersionResult(
         model_version=str(model_version),
         dataset_path=str(dataset_path),
@@ -638,7 +990,7 @@ def run_walk_forward_for_version(
         date_max=_date_max(dataframe),
         feature_set=feature_set,
         folds=outcomes,
-        aggregate_metrics=_mean_metrics(completed),
+        aggregate_metrics=aggregate_metrics,
         holdout_comparison=load_holdout_metrics_for_comparison(
             str(model_version), reports_dir=reports_dir
         ),
@@ -654,6 +1006,9 @@ def run_walk_forward_validation(
     processed_dir: str | Path = PROCESSED_DATA_DIR,
     reports_dir: str | Path = REPORTS_DIR,
     model_names: tuple[str, ...] = MODEL_NAMES,
+    progress_callback: ProgressCallback | None = None,
+    prepare_progress_callback: PrepareProgressCallback | None = None,
+    should_cancel: ShouldCancel | None = None,
 ) -> WalkForwardRunResult:
     """Run walk-forward for all (or selected) versions. Does not touch public models."""
     resolved = config or WalkForwardConfig()
@@ -661,10 +1016,29 @@ def run_walk_forward_validation(
     selected_versions = versions or tuple(MODEL_VERSIONS.keys())
     started = datetime.now(timezone.utc)
     version_results: list[WalkForwardVersionResult] = []
+    if prepare_progress_callback:
+        prepare_progress_callback("Conteggio fold pianificati…")
+    total_units = _count_planned_fold_units(
+        resolved,
+        selected_versions,
+        processed_dir=processed_dir,
+        model_names=model_names,
+        should_cancel=should_cancel,
+        prepare_progress_callback=prepare_progress_callback,
+    )
+    completed_units = 0
+
+    def on_version_progress(phase: str, delta: int, _fold_total: int) -> None:
+        nonlocal completed_units
+        completed_units += delta
+        if progress_callback:
+            progress_callback(phase, completed_units, max(total_units, 1))
 
     for version in selected_versions:
         if version not in MODEL_VERSIONS:
             raise ValueError(f"Versione modello sconosciuta: {version}")
+        if should_cancel and should_cancel():
+            raise BackgroundJobCancelled("Walk-forward cancelled.")
         logger.info("Walk-forward start version=%s mode=%s", version, resolved.mode)
         version_results.append(
             run_walk_forward_for_version(
@@ -673,10 +1047,18 @@ def run_walk_forward_validation(
                 processed_dir=processed_dir,
                 reports_dir=reports_dir,
                 model_names=model_names,
+                progress_callback=on_version_progress,
+                should_cancel=should_cancel,
             )
         )
 
     finished = datetime.now(timezone.utc)
+    sample_mismatch_total = 0
+    for version in version_results:
+        for fold in version.folds:
+            sample = (fold.coverage or {}).get("official_benchmark_sample")
+            if isinstance(sample, dict) and sample.get("sample_mismatch_detected"):
+                sample_mismatch_total += 1
     summary = {
         "versions": [item.model_version for item in version_results],
         "folds_completed": sum(
@@ -695,6 +1077,8 @@ def run_walk_forward_validation(
         "official_metrics_shuffled": False,
         "public_model_unchanged": True,
         "holdout_metrics_unchanged": True,
+        "official_contenders": list(OFFICIAL_CONTENDERS),
+        "official_sample_mismatch_folds": sample_mismatch_total,
     }
     return WalkForwardRunResult(
         config=resolved,

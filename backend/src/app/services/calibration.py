@@ -32,11 +32,19 @@ from backend.src.app.schemas.calibration import (
     CalibrationRunRead,
     CalibrationTriggerRequest,
 )
+from backend.src.app.services.background_job import (
+    BackgroundJobCancelled,
+    clear_cancel_state,
+    get_active_thread_lock,
+    is_cancel_requested,
+    mark_cancel_requested,
+    update_run_progress,
+)
 from backend.src.entity.calibration import CalibrationResult, CalibrationRun
 
 logger = logging.getLogger(__name__)
 
-_active_thread_lock = threading.Lock()
+_active_thread_lock = get_active_thread_lock()
 _active_run_id: int | None = None
 RUNNING_STATUSES = ("pending", "running")
 
@@ -137,6 +145,11 @@ def run_to_read(run: CalibrationRun, *, include_results: bool = True) -> Calibra
         methods_requested=run.methods_requested,
         versions_requested=run.versions_requested,
         origin=run.origin,
+        current_phase=run.current_phase,
+        progress_pct=run.progress_pct,
+        progress_current=run.progress_current,
+        progress_total=run.progress_total,
+        cancel_requested=run.cancel_requested == "true",
         started_at=run.started_at,
         finished_at=run.finished_at,
         duration_seconds=run.duration_seconds,
@@ -162,13 +175,18 @@ def run_to_list_item(run: CalibrationRun) -> CalibrationRunListItem:
         versions_requested=run.versions_requested,
         walk_forward_run_id=run.walk_forward_run_id,
         origin=run.origin,
+        current_phase=run.current_phase,
+        progress_pct=run.progress_pct,
+        progress_current=run.progress_current,
+        progress_total=run.progress_total,
+        cancel_requested=run.cancel_requested == "true",
         started_at=run.started_at,
         finished_at=run.finished_at,
         duration_seconds=run.duration_seconds,
         created_at=run.created_at,
         created_by=run.created_by,
         models_with_oos=int(summary.get("models_with_oos") or 0),
-        oos_samples_total=int(summary.get("oos_samples_total") or 0),
+        oos_samples_total=int(summary.get("oos_samples_total") or run.progress_current or 0),
         leakage_flags_total=int(summary.get("leakage_flags_total") or 0),
     )
 
@@ -235,6 +253,11 @@ def _create_run_row(
         methods_requested=",".join(methods),
         versions_requested=",".join(versions),
         origin=origin,
+        current_phase="In coda",
+        progress_pct=0.0,
+        progress_current=0,
+        progress_total=0,
+        cancel_requested="false",
         created_at=now,
         created_by=created_by,
     )
@@ -286,20 +309,179 @@ def _persist_result(db: Session, run: CalibrationRun, result: CalibrationRunResu
     db.commit()
 
 
-def execute_calibration_run(run_id: int) -> CalibrationRun:
+def _finalize_cancelled_run(db: Session, run: CalibrationRun, *, reason: str) -> None:
+    finished = datetime.now(timezone.utc).replace(tzinfo=None)
+    run.status = "cancelled"
+    run.current_phase = "Annullato"
+    run.finished_at = finished
+    run.cancel_requested = "false"
+    run.error_message = reason
+    if run.started_at:
+        run.duration_seconds = max(0.0, (finished - run.started_at).total_seconds())
+    db.commit()
+
+
+def _mark_interrupted_run(db: Session, run: CalibrationRun, *, reason: str) -> None:
+    finished = datetime.now(timezone.utc).replace(tzinfo=None)
+    run.status = "failed"
+    run.current_phase = "Interrotto"
+    run.finished_at = finished
+    run.cancel_requested = "false"
+    run.error_message = reason
+    if run.started_at:
+        run.duration_seconds = max(0.0, (finished - run.started_at).total_seconds())
+    db.commit()
+
+
+def reconcile_orphaned_calibration_runs(db: Session) -> int:
     global _active_run_id
+
+    with _active_thread_lock:
+        active_id = _active_run_id
+
+    runs = db.scalars(
+        select(CalibrationRun).where(CalibrationRun.status.in_(RUNNING_STATUSES))
+    ).all()
+    reconciled = 0
+    for run in runs:
+        if active_id == run.id:
+            continue
+        _mark_interrupted_run(
+            db,
+            run,
+            reason="Run interrotta (backend riavviato o worker perso).",
+        )
+        clear_cancel_state(run.id)
+        reconciled += 1
+    return reconciled
+
+
+def cancel_calibration_run(db: Session, run_id: int) -> tuple[bool, str]:
+    global _active_run_id
+
+    run = get_calibration_run(db, run_id)
+    if run is None:
+        return False, f"Run {run_id} non trovata."
+    if run.status not in RUNNING_STATUSES:
+        return False, f"Run {run_id} non attiva (status={run.status})."
+
+    run.cancel_requested = "true"
+    db.commit()
+    mark_cancel_requested(run_id)
+
+    with _active_thread_lock:
+        thread_active = _active_run_id == run_id
+
+    if thread_active:
+        return True, "Annullamento richiesto."
+
+    _finalize_cancelled_run(db, run, reason="Run annullata dall'utente.")
+    clear_cancel_state(run_id)
+    with _active_thread_lock:
+        if _active_run_id == run_id:
+            _active_run_id = None
+    return True, "Run annullata."
+
+
+def _read_cancel_flag(run_id: int) -> bool:
+    with SessionLocal() as db:
+        flag = db.scalar(
+            select(CalibrationRun.cancel_requested).where(CalibrationRun.id == run_id)
+        )
+        return flag == "true"
+
+
+def _persist_progress(
+    run_id: int,
+    *,
+    phase: str,
+    progress_current: int,
+    progress_total: int,
+) -> None:
+    pct = (100.0 * progress_current / progress_total) if progress_total else 0.0
     with SessionLocal() as db:
         run = get_calibration_run(db, run_id)
-        if run is None:
-            raise ValueError(f"Calibration run {run_id} non trovata.")
-        run.status = "running"
-        run.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        db.commit()
+        if run is None or run.status not in RUNNING_STATUSES:
+            return
+        update_run_progress(
+            db,
+            run,
+            phase=phase,
+            progress_pct=pct,
+            progress_current=progress_current,
+            progress_total=progress_total,
+        )
+
+
+def _mark_run_failed(db: Session, run: CalibrationRun, *, reason: str) -> None:
+    finished = datetime.now(timezone.utc).replace(tzinfo=None)
+    run.status = "failed"
+    run.current_phase = "Fallita"
+    run.finished_at = finished
+    run.cancel_requested = "false"
+    run.error_message = reason
+    if run.started_at:
+        run.duration_seconds = max(0.0, (finished - run.started_at).total_seconds())
+    db.commit()
+
+
+def _calibration_thread_entry(run_id: int) -> None:
+    try:
+        execute_calibration_run(run_id)
+    except Exception:
+        logger.exception("Calibration thread run_id=%s terminated uncaught", run_id)
+        try:
+            with SessionLocal() as db:
+                run = get_calibration_run(db, run_id)
+                if run is not None and run.status in RUNNING_STATUSES:
+                    _mark_run_failed(
+                        db,
+                        run,
+                        reason="Worker terminato in modo anomalo (controlla i log API).",
+                    )
+        except Exception:
+            logger.exception("Failed to persist failure for calibration run_id=%s", run_id)
+
+
+def execute_calibration_run(run_id: int) -> CalibrationRun:
+    global _active_run_id
+    logger.info(
+        "Calibration worker started run_id=%s thread=%s",
+        run_id,
+        threading.current_thread().name,
+    )
 
     with _active_thread_lock:
         _active_run_id = run_id
 
+    def should_cancel() -> bool:
+        return is_cancel_requested(
+            run_id,
+            db_check=lambda: _read_cancel_flag(run_id),
+        )
+
+    def on_progress(phase: str, completed: int, total: int) -> None:
+        _persist_progress(run_id, phase=phase, progress_current=completed, progress_total=total)
+
+    def on_prepare(phase: str) -> None:
+        with SessionLocal() as db:
+            run = get_calibration_run(db, run_id)
+            if run is None or run.status not in RUNNING_STATUSES:
+                return
+            update_run_progress(db, run, phase=phase, progress_pct=run.progress_pct or 0.0)
+
     try:
+        with SessionLocal() as db:
+            run = get_calibration_run(db, run_id)
+            if run is None:
+                raise ValueError(f"Calibration run {run_id} non trovata.")
+            run.status = "running"
+            run.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            run.current_phase = "Avvio"
+            run.cancel_requested = "false"
+            run.progress_pct = 0.0
+            db.commit()
+
         with SessionLocal() as db:
             run = get_calibration_run(db, run_id)
             assert run is not None
@@ -334,26 +516,35 @@ def execute_calibration_run(run_id: int) -> CalibrationRun:
                 walk_forward_run_id=run.walk_forward_run_id,
                 run_id=run.id,
                 persist_artifacts=True,
+                progress_callback=on_progress,
+                prepare_progress_callback=on_prepare,
+                should_cancel=should_cancel,
             )
             _persist_result(db, run, result)
+            run.current_phase = "Completato"
+            run.progress_pct = 100.0
+            db.commit()
             db.refresh(run)
+            logger.info("Calibration worker completed run_id=%s status=%s", run_id, run.status)
             return run
+    except BackgroundJobCancelled:
+        logger.info("Calibration run_id=%s cancelled", run_id)
+        with SessionLocal() as db:
+            run = get_calibration_run(db, run_id)
+            if run is not None:
+                _finalize_cancelled_run(db, run, reason="Run annullata dall'utente.")
+                return run
+        raise
     except Exception as exc:
         logger.exception("Calibration run_id=%s failed: %s", run_id, exc)
         with SessionLocal() as db:
             run = get_calibration_run(db, run_id)
             if run is not None:
-                run.status = "failed"
-                run.error_message = str(exc)
-                run.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                if run.started_at:
-                    run.duration_seconds = max(
-                        0.0, (run.finished_at - run.started_at).total_seconds()
-                    )
-                db.commit()
+                _mark_run_failed(db, run, reason=str(exc))
                 return run
         raise
     finally:
+        clear_cancel_state(run_id)
         with _active_thread_lock:
             if _active_run_id == run_id:
                 _active_run_id = None
@@ -404,12 +595,13 @@ def start_calibration_run(
         return refreshed, True, "Calibrazione completata."
 
     thread = threading.Thread(
-        target=execute_calibration_run,
+        target=_calibration_thread_entry,
         args=(run.id,),
         name=f"calibration-{run.id}",
         daemon=True,
     )
     thread.start()
+    logger.info("Calibration background thread started run_id=%s", run.id)
     refreshed = get_calibration_run(db, run.id)
     assert refreshed is not None
     return refreshed, True, "Calibrazione avviata in background."

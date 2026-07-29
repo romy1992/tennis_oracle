@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     calibration_min_bin_samples: int = 30
     calibration_min_calibrator_train_samples: int = 100
 
-    # Temporary public-model config for live tip publication (until ML-07).
+    # Public-model config for live tip publication (ML-07 registry preferred; env fallback).
     # Default: automatic publication disabled. No silent fallback to another model.
     live_publication_enabled: bool = False
     public_model_version: str | None = None

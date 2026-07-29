@@ -24,6 +24,7 @@ from backend.src.entity.telegram_user import TelegramUser
 from backend.src.entity.tournaments import Tournament
 from backend.src.entity.weekly_beta_report import WeeklyBetaReport
 from backend.src.entity.calibration import CalibrationResult, CalibrationRun
+from backend.src.entity.public_model_registry import PublicModelRegistryEntry
 from backend.src.entity.walk_forward import WalkForwardFold, WalkForwardRun
 
 __all__ = [
@@ -52,5 +53,6 @@ __all__ = [
     "WalkForwardRun",
     "CalibrationRun",
     "CalibrationResult",
+    "PublicModelRegistryEntry",
     "RateLimitBucket",
 ]

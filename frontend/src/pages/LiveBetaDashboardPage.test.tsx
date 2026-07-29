@@ -65,6 +65,8 @@ describe("LiveBetaDashboardPage", () => {
     expect(screen.getByText("Completezza dati")).toBeInTheDocument();
     expect(screen.getByText("Errori recenti")).toBeInTheDocument();
     expect(screen.getByText("Max drawdown")).toBeInTheDocument();
+    expect(screen.getByText("CLV medio")).toBeInTheDocument();
+    expect(screen.getByText("CLV copertura")).toBeInTheDocument();
     expect(screen.getByText("Pronostici totali")).toBeInTheDocument();
     expect(screen.getByText("BACKTEST")).toBeInTheDocument();
     expect(screen.getByText(/Area separata/i)).toBeInTheDocument();

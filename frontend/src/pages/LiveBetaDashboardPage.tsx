@@ -88,6 +88,9 @@ function TipsTable({
                 <th>Selezione</th>
                 <th>Modello</th>
                 <th>Quota</th>
+                <th>Quota pubbl.</th>
+                <th>Closing</th>
+                <th>CLV</th>
                 <th>Esito</th>
                 <th>Profitto</th>
                 <th>Superficie</th>
@@ -109,6 +112,9 @@ function TipsTable({
                     {tip.model_version} / {tip.model_name}
                   </td>
                   <td>{formatNum(tip.odds)}</td>
+                  <td>{formatNum(tip.publication_odds)}</td>
+                  <td>{formatNum(tip.closing_odds)}</td>
+                  <td>{formatPct(tip.clv_pct)}</td>
                   <td>{outcomeLabel(tip.outcome)}</td>
                   <td>{formatNum(tip.profit)}</td>
                   <td>{tip.surface || "-"}</td>
@@ -397,6 +403,8 @@ export function LiveBetaDashboardPage() {
         <MetricCard label="Profitto" value={formatNum(stats.profit)} />
         <MetricCard label="ROI" value={formatPct(stats.roi_pct)} />
         <MetricCard label="Yield" value={formatPct(stats.yield_pct)} />
+        <MetricCard label="CLV medio" value={formatPct(stats.clv_avg_pct)} />
+        <MetricCard label="CLV copertura" value={formatPct(stats.clv_coverage_pct)} />
         <MetricCard label="Max drawdown" value={formatNum(stats.max_drawdown)} />
         <MetricCard
           label="Serie +/-"

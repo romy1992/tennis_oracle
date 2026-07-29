@@ -7,12 +7,14 @@ from backend.src.app.api.deps import require_admin
 from backend.src.app.core.config import get_settings
 from backend.src.app.db.session import get_db
 from backend.src.app.schemas.calibration import (
+    CalibrationCancelResponse,
     CalibrationRunListResponse,
     CalibrationRunRead,
     CalibrationTriggerRequest,
     CalibrationTriggerResponse,
 )
 from backend.src.app.services.calibration import (
+    cancel_calibration_run,
     get_calibration_run,
     get_latest_calibration_run,
     list_calibration_runs,
@@ -80,3 +82,13 @@ def read_run(run_id: int, db: Session = Depends(get_db)) -> CalibrationRunRead:
     if row is None:
         raise HTTPException(status_code=404, detail="Run non trovata")
     return run_to_read(row)
+
+
+@router.post("/runs/{run_id}/cancel", response_model=CalibrationCancelResponse)
+def cancel_run(run_id: int, db: Session = Depends(get_db)) -> CalibrationCancelResponse:
+    ok, message = cancel_calibration_run(db, run_id)
+    if not ok:
+        raise HTTPException(status_code=409, detail=message)
+    row = get_calibration_run(db, run_id)
+    assert row is not None
+    return CalibrationCancelResponse(run_id=row.id, status=row.status, message=message)

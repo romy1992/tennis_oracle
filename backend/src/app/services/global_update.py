@@ -810,7 +810,7 @@ def _execute_global_update(
             total_slips = sum(int(item.slips_generated or 0) for item in run.items)
             live_publication_report: dict[str, Any] | None = None
 
-            public_cfg = resolve_public_model_config()
+            public_cfg = resolve_public_model_config(db=db)
             if public_cfg.warning and public_cfg.warning not in run_warnings:
                 run_warnings.append(public_cfg.warning)
             if public_cfg.is_ready:
@@ -934,7 +934,9 @@ def _execute_global_update(
                                 step_db.rollback()
                                 local_warnings.append(f"betting_slips:{slip_exc}")
 
-                            if is_public_combination(combo.model_version, combo.model_name):
+                            if is_public_combination(
+                                combo.model_version, combo.model_name, db=step_db
+                            ):
                                 try:
                                     pub_report = publish_official_plays_for_day(
                                         step_db,

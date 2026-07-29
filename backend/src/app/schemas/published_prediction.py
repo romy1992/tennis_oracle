@@ -75,6 +75,15 @@ class PublishedPredictionRead(BaseModel):
     odds: float | None = None
     void_odds: float | None = None
     edge: float | None = None
+    publication_odds: float | None = None
+    publication_bookmaker: str | None = None
+    closing_odds: float | None = None
+    closing_bookmaker: str | None = None
+    no_vig_publication_prob: float | None = None
+    no_vig_closing_prob: float | None = None
+    clv_pct: float | None = None
+    clv_prob_delta_pct: float | None = None
+    clv_available: bool = False
     unit_stake: float
     published_at: datetime
     publication_source: str
@@ -121,6 +130,13 @@ class PublishedLiveStatsBucket(BaseModel):
     roi_pct: float | None = None
     yield_pct: float | None = None
     avg_odds: float | None = None
+    clv_count: int = 0
+    clv_missing: int = 0
+    clv_coverage_pct: float | None = None
+    clv_avg_pct: float | None = None
+    clv_median_pct: float | None = None
+    clv_positive_pct: float | None = None
+    clv_avg_prob_delta_pct: float | None = None
 
 
 OddsBand = Literal["lt_1_50", "1_50_2_00", "2_00_3_00", "gte_3_00", "missing"]
@@ -167,6 +183,13 @@ class PublishedLiveStatsSummary(BaseModel):
     max_drawdown: float
     max_winning_streak: int
     max_losing_streak: int
+    clv_count: int = 0
+    clv_missing: int = 0
+    clv_coverage_pct: float | None = None
+    clv_avg_pct: float | None = None
+    clv_median_pct: float | None = None
+    clv_positive_pct: float | None = None
+    clv_avg_prob_delta_pct: float | None = None
 
     by_model: list[PublishedLiveStatsBucket]
     by_odds: list[PublishedLiveStatsBucket]

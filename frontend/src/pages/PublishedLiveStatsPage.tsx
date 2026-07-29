@@ -59,6 +59,8 @@ function DistributionTable({
               <th>ROI</th>
               <th>Yield</th>
               <th>Quota media</th>
+              <th>CLV copertura</th>
+              <th>CLV medio</th>
             </tr>
           </thead>
           <tbody>
@@ -75,6 +77,8 @@ function DistributionTable({
                 <td>{formatPct(row.roi_pct)}</td>
                 <td>{formatPct(row.yield_pct)}</td>
                 <td>{formatNum(row.avg_odds)}</td>
+                <td>{formatPct(row.clv_coverage_pct)}</td>
+                <td>{formatPct(row.clv_avg_pct)}</td>
               </tr>
             ))}
           </tbody>
@@ -186,6 +190,10 @@ export function PublishedLiveStatsPage() {
           label="Serie +/-"
           value={`${stats.max_winning_streak} / ${stats.max_losing_streak}`}
         />
+        <MetricCard label="CLV coverage" value={formatPct(stats.clv_coverage_pct)} />
+        <MetricCard label="CLV medio" value={formatPct(stats.clv_avg_pct)} />
+        <MetricCard label="CLV mediano" value={formatPct(stats.clv_median_pct)} />
+        <MetricCard label="CLV positivo" value={formatPct(stats.clv_positive_pct)} />
       </div>
 
       <DistributionTable title="Per modello" rows={stats.by_model} />

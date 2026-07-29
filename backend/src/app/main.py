@@ -17,7 +17,9 @@ from backend.src.app.scheduler import (
     stop_global_update_scheduler,
 )
 from backend.src.app.services.auth import ensure_bootstrap_admin
+from backend.src.app.services.calibration import reconcile_orphaned_calibration_runs
 from backend.src.app.services.global_update import reconcile_orphaned_runs
+from backend.src.app.services.walk_forward import reconcile_orphaned_walk_forward_runs
 
 
 configure_logging()
@@ -34,6 +36,22 @@ async def lifespan(_app: FastAPI):
             logging.getLogger(__name__).info(
                 "Reconciled %s orphaned global update run(s) on startup.",
                 reconciled,
+            )
+        wf_reconciled = reconcile_orphaned_walk_forward_runs(db)
+        if wf_reconciled:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "Reconciled %s orphaned walk-forward run(s) on startup.",
+                wf_reconciled,
+            )
+        cal_reconciled = reconcile_orphaned_calibration_runs(db)
+        if cal_reconciled:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "Reconciled %s orphaned calibration run(s) on startup.",
+                cal_reconciled,
             )
         try:
             ensure_bootstrap_admin(db, settings)
