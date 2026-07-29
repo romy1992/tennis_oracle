@@ -13,7 +13,7 @@ import pickle
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -35,9 +35,13 @@ from backend.src.app.ml.training.walk_forward import (
     prepare_temporal_dataframe,
     slice_fold_frames,
 )
-
+from backend.src.app.services.background_job import BackgroundJobCancelled
 
 logger = logging.getLogger(__name__)
+
+PrepareProgressCallback = Callable[[str], None]
+ProgressCallback = Callable[[str, int, int], None]
+ShouldCancel = Callable[[], bool]
 
 CalibrationMethod = Literal["raw", "platt", "isotonic"]
 CALIBRATION_METHODS: tuple[CalibrationMethod, ...] = ("raw", "platt", "isotonic")
@@ -423,6 +427,8 @@ def collect_oos_predictions_for_version(
     *,
     processed_dir: str | Path = PROCESSED_DATA_DIR,
     model_names: tuple[str, ...] = MODEL_NAMES,
+    should_cancel: ShouldCancel | None = None,
+    on_fold_complete: Callable[[str], None] | None = None,
 ) -> dict[str, list[OosPredictionBatch]]:
     config.validate()
     dataset_path = select_training_dataset_path(processed_dir, version=model_version)  # type: ignore[arg-type]
@@ -431,6 +437,8 @@ def collect_oos_predictions_for_version(
     folds = generate_walk_forward_folds(dataframe, config)
     batches_by_model: dict[str, list[OosPredictionBatch]] = {name: [] for name in model_names}
     for fold in folds:
+        if should_cancel and should_cancel():
+            raise BackgroundJobCancelled("Calibration cancelled.")
         train, test = slice_fold_frames(dataframe, fold)
         for model_name in model_names:
             batch = _extract_oos_batch(
@@ -444,6 +452,10 @@ def collect_oos_predictions_for_version(
             )
             if batch is not None:
                 batches_by_model[model_name].append(batch)
+            if on_fold_complete:
+                on_fold_complete(
+                    f"{model_version} · {model_name} · OOS fold {fold.fold_index + 1}/{len(folds)}"
+                )
     return batches_by_model
 
 
@@ -538,6 +550,8 @@ def run_calibration_for_model(
     model_name: str,
     run_id: int | None = None,
     persist_artifacts: bool = True,
+    should_cancel: ShouldCancel | None = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> ModelCalibrationResult:
     config.validate()
     wf_config = config.walk_forward
@@ -547,6 +561,8 @@ def run_calibration_for_model(
         wf_config,
         processed_dir=processed_dir,
         model_names=(model_name,),
+        should_cancel=should_cancel,
+        on_fold_complete=on_progress,
     )[model_name]
     leakage_flags: list[str] = []
     fold_outcomes: list[FoldCalibrationOutcome] = []
@@ -554,6 +570,8 @@ def run_calibration_for_model(
     aggregated_truth: list[np.ndarray] = []
 
     for index, batch in enumerate(batches):
+        if should_cancel and should_cancel():
+            raise BackgroundJobCancelled("Calibration cancelled.")
         prior = batches[:index]
         if index == 0:
             fold_outcomes.append(
@@ -599,6 +617,10 @@ def run_calibration_for_model(
                     aggregated_probs[method].append(batch.prob_raw.copy())
             else:
                 aggregated_probs[method].append(batch.prob_raw.copy())
+        if on_progress:
+            on_progress(
+                f"{model_version} · {model_name} · calib fold {index + 1}/{len(batches)}"
+            )
 
     y_all = np.concatenate(aggregated_truth) if aggregated_truth else np.array([])
     aggregate: dict[str, CalibrationMetrics] = {}
@@ -688,6 +710,34 @@ def _build_method_comparison(aggregate: dict[str, CalibrationMetrics]) -> dict[s
     return comparison
 
 
+def _count_calibration_units(
+    config: CalibrationConfig,
+    versions: tuple[str, ...],
+    *,
+    processed_dir: str | Path,
+    model_names: tuple[str, ...],
+    should_cancel: ShouldCancel | None = None,
+    prepare_progress_callback: PrepareProgressCallback | None = None,
+) -> int:
+    wf = config.walk_forward
+    total = 0
+    version_list = [version for version in versions if version in MODEL_VERSIONS]
+    for index, version in enumerate(version_list):
+        if should_cancel and should_cancel():
+            raise BackgroundJobCancelled("Calibration cancelled.")
+        if prepare_progress_callback:
+            prepare_progress_callback(
+                f"Preparazione OOS · {version} ({index + 1}/{len(version_list)})"
+            )
+        dataset_path = select_training_dataset_path(processed_dir, version=version)  # type: ignore[arg-type]
+        raw = pd.read_csv(dataset_path, low_memory=False)
+        dataframe = prepare_temporal_dataframe(raw, model_version=version)
+        folds = generate_walk_forward_folds(dataframe, wf)
+        # OOS extraction + calibration evaluation per fold, per model.
+        total += len(folds) * 2 * len(model_names)
+    return total
+
+
 def run_calibration_validation(
     config: CalibrationConfig,
     *,
@@ -697,15 +747,38 @@ def run_calibration_validation(
     walk_forward_run_id: int | None = None,
     run_id: int | None = None,
     persist_artifacts: bool = True,
+    progress_callback: ProgressCallback | None = None,
+    prepare_progress_callback: PrepareProgressCallback | None = None,
+    should_cancel: ShouldCancel | None = None,
 ) -> CalibrationRunResult:
     config.validate()
     started = datetime.now(timezone.utc).isoformat()
     selected_versions = versions or tuple(MODEL_VERSIONS.keys())
     models: list[ModelCalibrationResult] = []
+    if prepare_progress_callback:
+        prepare_progress_callback("Conteggio unità calibrazione…")
+    total_units = _count_calibration_units(
+        config,
+        selected_versions,
+        processed_dir=processed_dir,
+        model_names=model_names,
+        should_cancel=should_cancel,
+        prepare_progress_callback=prepare_progress_callback,
+    )
+    completed_units = 0
+
+    def on_progress(phase: str) -> None:
+        nonlocal completed_units
+        completed_units += 1
+        if progress_callback:
+            progress_callback(phase, completed_units, max(total_units, 1))
+
     for version in selected_versions:
         if version not in MODEL_VERSIONS:
             continue
         for model_name in model_names:
+            if should_cancel and should_cancel():
+                raise BackgroundJobCancelled("Calibration cancelled.")
             try:
                 result = run_calibration_for_model(
                     version,
@@ -714,8 +787,12 @@ def run_calibration_validation(
                     model_name=model_name,
                     run_id=run_id,
                     persist_artifacts=persist_artifacts,
+                    should_cancel=should_cancel,
+                    on_progress=on_progress,
                 )
                 models.append(result)
+            except BackgroundJobCancelled:
+                raise
             except Exception as exc:  # noqa: BLE001 — version isolation
                 logger.exception("Calibration failed version=%s model=%s: %s", version, model_name, exc)
                 models.append(

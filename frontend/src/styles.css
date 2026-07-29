@@ -202,6 +202,44 @@ a {
   color: #fee2e2;
 }
 
+.long-running-job-panel {
+  margin-bottom: 1rem;
+}
+
+.long-running-job-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.long-running-job-header h3 {
+  margin: 0 0 0.25rem;
+}
+
+.long-running-job-meta {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
+  transition: width 0.35s ease;
+}
+
 .content {
   padding: 32px;
 }

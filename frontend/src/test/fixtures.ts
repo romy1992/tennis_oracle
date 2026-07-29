@@ -418,6 +418,15 @@ export const publishedPredictions: PublishedPredictionListResponse = {
       odds: 1.85,
       void_odds: 1.6129,
       edge: 14.7,
+      publication_odds: 1.85,
+      publication_bookmaker: "book_a",
+      closing_odds: 1.72,
+      closing_bookmaker: "book_a",
+      no_vig_publication_prob: 0.54,
+      no_vig_closing_prob: 0.57,
+      clv_pct: 7.5581,
+      clv_prob_delta_pct: 3,
+      clv_available: true,
       unit_stake: 1,
       published_at: `${TODAY}T10:30:00Z`,
       publication_source: "admin_api",
@@ -465,6 +474,13 @@ export const publishedLiveStats: PublishedLiveStatsSummary = {
   max_drawdown: 2,
   max_winning_streak: 1,
   max_losing_streak: 1,
+  clv_count: 3,
+  clv_missing: 1,
+  clv_coverage_pct: 75,
+  clv_avg_pct: 2.4,
+  clv_median_pct: 1.8,
+  clv_positive_pct: 66.6667,
+  clv_avg_prob_delta_pct: 1.2,
   by_model: [
     {
       key: "v3|logistic_regression",
@@ -481,7 +497,14 @@ export const publishedLiveStats: PublishedLiveStatsSummary = {
       profit: -1,
       roi_pct: -33.3333,
       yield_pct: -33.3333,
-      avg_odds: 2.1667
+      avg_odds: 2.1667,
+      clv_count: 2,
+      clv_missing: 1,
+      clv_coverage_pct: 66.6667,
+      clv_avg_pct: 1.7,
+      clv_median_pct: 1.7,
+      clv_positive_pct: 50,
+      clv_avg_prob_delta_pct: 0.9
     }
   ],
   by_odds: [],
@@ -502,7 +525,14 @@ export const publishedLiveStats: PublishedLiveStatsSummary = {
       profit: -1,
       roi_pct: -33.3333,
       yield_pct: -33.3333,
-      avg_odds: 2.1667
+      avg_odds: 2.1667,
+      clv_count: 2,
+      clv_missing: 1,
+      clv_coverage_pct: 66.6667,
+      clv_avg_pct: 1.7,
+      clv_median_pct: 1.7,
+      clv_positive_pct: 50,
+      clv_avg_prob_delta_pct: 0.9
     }
   ],
   by_period: [
@@ -521,7 +551,14 @@ export const publishedLiveStats: PublishedLiveStatsSummary = {
       profit: -1,
       roi_pct: -33.3333,
       yield_pct: -33.3333,
-      avg_odds: 2.1667
+      avg_odds: 2.1667,
+      clv_count: 2,
+      clv_missing: 1,
+      clv_coverage_pct: 66.6667,
+      clv_avg_pct: 1.7,
+      clv_median_pct: 1.7,
+      clv_positive_pct: 50,
+      clv_avg_prob_delta_pct: 0.9
     }
   ]
 };
@@ -773,13 +810,22 @@ export const walkForwardRun = {
   duration_seconds: 1200,
   report_path: "backend/data/reports/walk_forward/walk_forward_latest.json",
   summary: {
-    folds_completed: 1,
+    folds_completed: 3,
     folds_skipped: 1,
     folds_errors: 0,
     leakage_flags_total: 0,
     official_metrics_shuffled: false,
     public_model_unchanged: true,
     holdout_metrics_unchanged: true,
+    official_contenders: [
+      "market_favorite",
+      "market_no_vig",
+      "atp_ranking",
+      "elo",
+      "logistic_regression",
+      "random_forest"
+    ],
+    official_sample_mismatch_folds: 1,
     versions_detail: [
       {
         model_version: "v2",
@@ -787,6 +833,26 @@ export const walkForwardRun = {
           logistic_regression: {
             folds_completed: 1,
             accuracy: { mean: 0.61, std: 0, n: 1 }
+          },
+          official_benchmarks: {
+            logistic_regression: {
+              accuracy: { mean: 0.61, std: 0, n: 1 },
+              log_loss: { mean: 0.66, std: 0, n: 1 },
+              brier_score: { mean: 0.22, std: 0, n: 1 },
+              roi: { mean: 0.05, std: 0, n: 1 },
+              yield: { mean: 0.05, std: 0, n: 1 },
+              max_drawdown: { mean: 1.2, std: 0, n: 1 },
+              clv_pct: { mean: null, std: null, n: 0 }
+            },
+            market_no_vig: {
+              accuracy: { mean: 0.58, std: 0, n: 1 },
+              log_loss: { mean: 0.68, std: 0, n: 1 },
+              brier_score: { mean: 0.24, std: 0, n: 1 },
+              roi: { mean: 0.01, std: 0, n: 1 },
+              yield: { mean: 0.01, std: 0, n: 1 },
+              max_drawdown: { mean: 1.8, std: 0, n: 1 },
+              clv_pct: { mean: null, std: null, n: 0 }
+            }
           }
         },
         holdout_comparison: {
@@ -816,9 +882,115 @@ export const walkForwardRun = {
       train_rows: 1200,
       test_rows: 300,
       feature_set: ["surface", "rank_diff", "elo_diff"],
-      metrics: { accuracy: 0.61, roc_auc: 0.64, log_loss: 0.66, f1: 0.6 },
+      metrics: {
+        accuracy: 0.61,
+        roc_auc: 0.64,
+        log_loss: 0.66,
+        f1: 0.6,
+        official_benchmark: {
+          accuracy: 0.61,
+          log_loss: 0.66,
+          brier_score: 0.22,
+          roi: 0.05,
+          yield: 0.05,
+          max_drawdown: 1.2,
+          clv_pct: null
+        }
+      },
       market_benchmark: { market_accuracy: 0.58 },
-      coverage: { train_rows: 1200, test_rows: 300 },
+      coverage: {
+        train_rows: 1200,
+        test_rows: 300,
+        official_benchmark_sample: {
+          rows_total_test: 300,
+          rows_common_official: 300,
+          rows_excluded_for_common_sample: 0,
+          sample_mismatch_detected: false,
+          missing_rows_by_contender: {}
+        }
+      },
+      leakage_flags: [],
+      skip_reason: null
+    },
+    {
+      id: 103,
+      run_id: 11,
+      fold_index: 0,
+      model_version: "v2",
+      model_name: "market_no_vig",
+      dataset_path: "backend/data/processed/tennis_winner_dataset_v2.csv",
+      status: "completed",
+      train_start: "2024-01-01",
+      train_end: "2024-12-31",
+      test_start: "2025-01-01",
+      test_end: "2025-03-31",
+      train_rows: 1200,
+      test_rows: 300,
+      feature_set: [],
+      metrics: {
+        official_benchmark: {
+          accuracy: 0.58,
+          log_loss: 0.68,
+          brier_score: 0.24,
+          roi: 0.01,
+          yield: 0.01,
+          max_drawdown: 1.8,
+          clv_pct: null
+        }
+      },
+      market_benchmark: { market_accuracy: 0.58 },
+      coverage: {
+        train_rows: 1200,
+        test_rows: 300,
+        official_benchmark_sample: {
+          rows_total_test: 300,
+          rows_common_official: 300,
+          rows_excluded_for_common_sample: 0,
+          sample_mismatch_detected: false,
+          missing_rows_by_contender: {}
+        }
+      },
+      leakage_flags: [],
+      skip_reason: null
+    },
+    {
+      id: 104,
+      run_id: 11,
+      fold_index: 1,
+      model_version: "v3",
+      model_name: "elo",
+      dataset_path: "backend/data/processed/tennis_winner_dataset_v3.csv",
+      status: "completed",
+      train_start: "2024-01-01",
+      train_end: "2025-03-31",
+      test_start: "2025-04-01",
+      test_end: "2025-06-30",
+      train_rows: 1500,
+      test_rows: 320,
+      feature_set: [],
+      metrics: {
+        official_benchmark: {
+          accuracy: 0.55,
+          log_loss: 0.7,
+          brier_score: 0.26,
+          roi: -0.02,
+          yield: -0.02,
+          max_drawdown: 2.3,
+          clv_pct: null
+        }
+      },
+      market_benchmark: null,
+      coverage: {
+        train_rows: 1500,
+        test_rows: 320,
+        official_benchmark_sample: {
+          rows_total_test: 320,
+          rows_common_official: 290,
+          rows_excluded_for_common_sample: 30,
+          sample_mismatch_detected: true,
+          missing_rows_by_contender: { atp_ranking: 30 }
+        }
+      },
       leakage_flags: [],
       skip_reason: null
     },
@@ -827,7 +999,7 @@ export const walkForwardRun = {
       run_id: 11,
       fold_index: 1,
       model_version: "v2",
-      model_name: "logistic_regression",
+      model_name: "random_forest",
       dataset_path: "backend/data/processed/tennis_winner_dataset_v2.csv",
       status: "skipped_insufficient_data",
       train_start: "2024-01-01",
@@ -839,7 +1011,17 @@ export const walkForwardRun = {
       feature_set: ["surface", "rank_diff"],
       metrics: null,
       market_benchmark: null,
-      coverage: { train_rows: 40, test_rows: 10 },
+      coverage: {
+        train_rows: 40,
+        test_rows: 10,
+        official_benchmark_sample: {
+          rows_total_test: 10,
+          rows_common_official: 0,
+          rows_excluded_for_common_sample: 10,
+          sample_mismatch_detected: true,
+          missing_rows_by_contender: { market_no_vig: 10 }
+        }
+      },
       leakage_flags: [],
       skip_reason: "Dati insufficienti: train=40 (min 200), test=10 (min 50)."
     }
@@ -865,7 +1047,7 @@ export const walkForwardRuns = {
       duration_seconds: walkForwardRun.duration_seconds,
       created_at: walkForwardRun.created_at,
       created_by: walkForwardRun.created_by,
-      folds_completed: 1,
+      folds_completed: 3,
       folds_skipped: 1,
       folds_errors: 0,
       leakage_flags_total: 0
@@ -1007,4 +1189,103 @@ export const calibrationRuns = {
       leakage_flags_total: 0
     }
   ]
+};
+
+const probabilityBandBucket = {
+  key: "p_05_0.50_0.60",
+  label: "50% – 60%",
+  bin_start: 0.5,
+  bin_end: 0.6,
+  predictions_total: 42,
+  closed: 42,
+  void: 0,
+  open: 0,
+  won: 24,
+  lost: 18,
+  hit_rate_pct: 57.14,
+  mean_predicted_pct: 55.2,
+  mean_observed_pct: 57.14,
+  calibration_gap_pct: 1.94,
+  avg_odds: 1.92,
+  avg_edge_pct: 4.5,
+  stake_total: 42,
+  stake_settled: 42,
+  profit: 3.6,
+  roi_pct: 8.57,
+  yield_pct: 8.57,
+  hit_rate_ci_lower_pct: 42.1,
+  hit_rate_ci_upper_pct: 70.2,
+  insufficient_sample: false
+};
+
+export const probabilityBandAnalysis = {
+  source: "live" as const,
+  band_dimension: "probability" as const,
+  probability_kind: "raw" as const,
+  n_bins: 10,
+  min_bin_samples: 30,
+  model_version: null,
+  model_name: null,
+  from_date: "2026-01-01",
+  to_date: "2026-07-28",
+  event_date_from: null,
+  event_date_to: null,
+  predictions_total: 42,
+  closed: 42,
+  void: 0,
+  open: 0,
+  won: 24,
+  lost: 18,
+  bands: [probabilityBandBucket],
+  comparison: {},
+  by_fold: [],
+  by_period: [],
+  notes: ["Live: ledger PublishedPrediction con settlement a lettura (non backtest ML)."]
+};
+
+export const segmentRoiBucket = {
+  key: "Hard",
+  label: "Hard",
+  predictions_total: 42,
+  closed: 42,
+  void: 0,
+  open: 0,
+  won: 24,
+  lost: 18,
+  hit_rate_pct: 57.14,
+  avg_odds: 1.95,
+  avg_edge_pct: 6.2,
+  stake_total: 42,
+  stake_settled: 42,
+  profit: 3.5,
+  roi_pct: 8.33,
+  yield_pct: 8.33,
+  max_drawdown: 2.0,
+  hit_rate_ci_lower_pct: 42.1,
+  hit_rate_ci_upper_pct: 70.2,
+  roi_ci_lower_pct: -2.5,
+  roi_ci_upper_pct: 18.5,
+  insufficient_sample: false
+};
+
+export const segmentRoiAnalysis = {
+  source: "live" as const,
+  segment_dimension: "surface" as const,
+  min_segment_samples: 30,
+  model_version: null,
+  model_name: null,
+  from_date: "2026-01-01",
+  to_date: "2026-07-28",
+  event_date_from: null,
+  event_date_to: null,
+  predictions_total: 42,
+  closed: 42,
+  void: 0,
+  open: 0,
+  won: 24,
+  lost: 18,
+  segments: [segmentRoiBucket],
+  by_fold: [],
+  by_period: [],
+  notes: ["Live: ledger PublishedPrediction con settlement a lettura (non backtest ML)."]
 };

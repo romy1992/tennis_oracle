@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
+from statistics import median
 from typing import Literal
 
 from sqlalchemy import func, select
@@ -39,6 +40,7 @@ from backend.src.app.services.match_lifecycle import (
 )
 from backend.src.entity.fixture import Fixture
 from backend.src.entity.next_fixture import NextFixture
+from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
 from backend.src.entity.published_prediction import PublishedPrediction
 from backend.src.entity.tournaments import Tournament
 
@@ -82,8 +84,21 @@ class _SettledTip:
     stake_settled: float
     surface: str | None
     lifecycle: str
+    clv: "_TipClv"
     sort_date: date
     sort_ts: datetime
+
+
+@dataclass(frozen=True)
+class _TipClv:
+    publication_odds: float | None = None
+    publication_bookmaker: str | None = None
+    closing_odds: float | None = None
+    closing_bookmaker: str | None = None
+    no_vig_publication_prob: float | None = None
+    no_vig_closing_prob: float | None = None
+    clv_pct: float | None = None
+    clv_prob_delta_pct: float | None = None
 
 
 def _normalize_name(value: str | None) -> str:
@@ -298,6 +313,27 @@ def _load_published_rows(
     return rows
 
 
+def _load_odds_snapshots(
+    db: Session, event_keys: list[int]
+) -> dict[int, list[PrematchOddsSnapshot]]:
+    if not event_keys:
+        return {}
+    rows = list(
+        db.scalars(
+            select(PrematchOddsSnapshot).where(
+                PrematchOddsSnapshot.event_key.in_(event_keys),
+                PrematchOddsSnapshot.snapshot_type.in_(
+                    ("opening", "observed", "publication", "closing")
+                ),
+            )
+        ).all()
+    )
+    grouped: dict[int, list[PrematchOddsSnapshot]] = defaultdict(list)
+    for row in rows:
+        grouped[int(row.event_key)].append(row)
+    return grouped
+
+
 def _normalize_odds_band(odds_band: str | None) -> OddsBand | None:
     if odds_band is None:
         return None
@@ -362,6 +398,7 @@ def settle_published_tips(
         latest_only=latest_only,
     )
     contexts = _load_match_contexts(db, [row.event_key for row in rows])
+    snapshots = _load_odds_snapshots(db, [row.event_key for row in rows])
     settled = [
         _settle_tip(
             row,
@@ -374,6 +411,7 @@ def settle_published_tips(
                 surface=None,
                 event_date=row.event_date,
             ),
+            snapshots=snapshots.get(int(row.event_key), []),
         )
         for row in rows
     ]
@@ -421,6 +459,15 @@ def settled_tip_to_read(item: _SettledTip, *, is_latest: bool) -> PublishedSettl
         odds=tip.odds,
         void_odds=tip.void_odds,
         edge=tip.edge,
+        publication_odds=item.clv.publication_odds,
+        publication_bookmaker=item.clv.publication_bookmaker,
+        closing_odds=item.clv.closing_odds,
+        closing_bookmaker=item.clv.closing_bookmaker,
+        no_vig_publication_prob=round_metric(item.clv.no_vig_publication_prob, 6),
+        no_vig_closing_prob=round_metric(item.clv.no_vig_closing_prob, 6),
+        clv_pct=round_metric(item.clv.clv_pct, 4),
+        clv_prob_delta_pct=round_metric(item.clv.clv_prob_delta_pct, 4),
+        clv_available=item.clv.clv_pct is not None,
         unit_stake=tip.unit_stake,
         published_at=tip.published_at,
         publication_source=tip.publication_source,
@@ -484,7 +531,134 @@ def list_settled_published_tips(
     return items
 
 
-def _settle_tip(tip: PublishedPrediction, context: _MatchContext) -> _SettledTip:
+def _no_vig_probability(
+    *,
+    event_snapshots: list[PrematchOddsSnapshot],
+    snapshot_type: str,
+    bookmaker: str,
+    selection: str,
+    counterpart_selection: str | None,
+) -> float | None:
+    if not counterpart_selection:
+        return None
+    same_market = [
+        row
+        for row in event_snapshots
+        if row.snapshot_type == snapshot_type and row.bookmaker == bookmaker
+    ]
+    selected = next((row for row in same_market if row.selection == selection), None)
+    opposite = next(
+        (row for row in same_market if row.selection == counterpart_selection), None
+    )
+    if selected is None or opposite is None:
+        return None
+    inv_selected = 1.0 / float(selected.odds)
+    inv_opposite = 1.0 / float(opposite.odds)
+    denom = inv_selected + inv_opposite
+    if denom <= 0:
+        return None
+    return inv_selected / denom
+
+
+def _resolve_clv(
+    tip: PublishedPrediction,
+    context: _MatchContext,
+    *,
+    event_snapshots: list[PrematchOddsSnapshot],
+) -> _TipClv:
+    selection = tip.selection
+    same_selection = [row for row in event_snapshots if row.selection == selection]
+    publication_rows = [row for row in same_selection if row.snapshot_type == "publication"]
+    closing_rows = [row for row in same_selection if row.snapshot_type == "closing"]
+
+    publication_row: PrematchOddsSnapshot | None = None
+    if publication_rows:
+        publication_row = min(
+            publication_rows,
+            key=lambda row: abs((row.captured_at - tip.published_at).total_seconds()),
+        )
+
+    publication_odds = (
+        float(publication_row.odds)
+        if publication_row is not None
+        else (float(tip.odds) if tip.odds is not None else None)
+    )
+    publication_bookmaker = publication_row.bookmaker if publication_row is not None else None
+
+    closing_row: PrematchOddsSnapshot | None = None
+    if publication_bookmaker:
+        same_bookmaker = [row for row in closing_rows if row.bookmaker == publication_bookmaker]
+        if same_bookmaker:
+            closing_row = max(
+                same_bookmaker, key=lambda row: (row.captured_at, row.id or 0)
+            )
+    if closing_row is None and closing_rows:
+        latest_ts = max(row.captured_at for row in closing_rows)
+        latest_rows = [row for row in closing_rows if row.captured_at == latest_ts]
+        median_odds = median(float(row.odds) for row in latest_rows)
+        closing_row = min(
+            latest_rows,
+            key=lambda row: (abs(float(row.odds) - median_odds), row.bookmaker),
+        )
+
+    closing_odds = float(closing_row.odds) if closing_row is not None else None
+    closing_bookmaker = closing_row.bookmaker if closing_row is not None else None
+
+    counterpart_selection = None
+    if context.player_1_name and context.player_2_name:
+        selected_key = selection.strip().lower()
+        p1 = context.player_1_name.strip().lower()
+        p2 = context.player_2_name.strip().lower()
+        if selected_key == p1:
+            counterpart_selection = context.player_2_name
+        elif selected_key == p2:
+            counterpart_selection = context.player_1_name
+
+    no_vig_publication = None
+    if publication_row is not None:
+        no_vig_publication = _no_vig_probability(
+            event_snapshots=event_snapshots,
+            snapshot_type="publication",
+            bookmaker=publication_row.bookmaker,
+            selection=selection,
+            counterpart_selection=counterpart_selection,
+        )
+    no_vig_closing = None
+    if closing_row is not None:
+        no_vig_closing = _no_vig_probability(
+            event_snapshots=event_snapshots,
+            snapshot_type="closing",
+            bookmaker=closing_row.bookmaker,
+            selection=selection,
+            counterpart_selection=counterpart_selection,
+        )
+
+    clv_pct = None
+    if publication_odds is not None and closing_odds is not None and closing_odds > 0:
+        clv_pct = ((publication_odds / closing_odds) - 1.0) * 100.0
+
+    clv_prob_delta_pct = None
+    if no_vig_publication is not None and no_vig_closing is not None:
+        clv_prob_delta_pct = (no_vig_closing - no_vig_publication) * 100.0
+
+    return _TipClv(
+        publication_odds=publication_odds,
+        publication_bookmaker=publication_bookmaker,
+        closing_odds=closing_odds,
+        closing_bookmaker=closing_bookmaker,
+        no_vig_publication_prob=no_vig_publication,
+        no_vig_closing_prob=no_vig_closing,
+        clv_pct=clv_pct,
+        clv_prob_delta_pct=clv_prob_delta_pct,
+    )
+
+
+def _settle_tip(
+    tip: PublishedPrediction,
+    context: _MatchContext,
+    *,
+    snapshots: list[PrematchOddsSnapshot],
+) -> _SettledTip:
     player_1 = tip.player_1_name or context.player_1_name
     player_2 = tip.player_2_name or context.player_2_name
     predicted = selection_to_predicted_winner(tip.selection, player_1, player_2)
@@ -496,6 +670,7 @@ def _settle_tip(tip: PublishedPrediction, context: _MatchContext) -> _SettledTip
         stake_units=float(tip.unit_stake),
     )
     sort_date = tip.event_date or context.event_date or tip.published_at.date()
+    clv = _resolve_clv(tip, context, event_snapshots=snapshots)
     return _SettledTip(
         tip=tip,
         outcome=settlement.outcome,
@@ -503,6 +678,7 @@ def _settle_tip(tip: PublishedPrediction, context: _MatchContext) -> _SettledTip
         stake_settled=float(settlement.stake_units),
         surface=context.surface,
         lifecycle=context.lifecycle,
+        clv=clv,
         sort_date=sort_date,
         sort_ts=tip.published_at,
     )
@@ -518,6 +694,15 @@ def _aggregate(tips: list[_SettledTip], *, key: str, label: str) -> PublishedLiv
     stake_settled = sum(tip.stake_settled for tip in tips)
     profit = sum(tip.profit for tip in tips)
     odds_values = [float(tip.tip.odds) for tip in tips if tip.tip.odds is not None]
+    clv_values = [tip.clv.clv_pct for tip in tips if tip.clv.clv_pct is not None]
+    clv_prob_deltas = [
+        tip.clv.clv_prob_delta_pct
+        for tip in tips
+        if tip.clv.clv_prob_delta_pct is not None
+    ]
+    clv_count = len(clv_values)
+    clv_missing = max(len(tips) - clv_count, 0)
+    clv_positive = sum(1 for value in clv_values if value > 0)
     return PublishedLiveStatsBucket(
         key=key,
         label=label,
@@ -534,6 +719,17 @@ def _aggregate(tips: list[_SettledTip], *, key: str, label: str) -> PublishedLiv
         roi_pct=round_metric(roi_pct(profit, stake_settled), 4),
         yield_pct=round_metric(yield_pct(profit, stake_settled), 4),
         avg_odds=round_metric(average(odds_values), 4),
+        clv_count=clv_count,
+        clv_missing=clv_missing,
+        clv_coverage_pct=round_metric(
+            (clv_count / len(tips) * 100.0) if tips else None, 4
+        ),
+        clv_avg_pct=round_metric(average(clv_values), 4),
+        clv_median_pct=round_metric(median(clv_values) if clv_values else None, 4),
+        clv_positive_pct=round_metric(
+            (clv_positive / clv_count * 100.0) if clv_count else None, 4
+        ),
+        clv_avg_prob_delta_pct=round_metric(average(clv_prob_deltas), 4),
     )
 
 
@@ -629,6 +825,13 @@ def compute_published_live_stats(
         max_drawdown=round(drawdown, 6),
         max_winning_streak=max_win,
         max_losing_streak=max_loss,
+        clv_count=summary_bucket.clv_count,
+        clv_missing=summary_bucket.clv_missing,
+        clv_coverage_pct=summary_bucket.clv_coverage_pct,
+        clv_avg_pct=summary_bucket.clv_avg_pct,
+        clv_median_pct=summary_bucket.clv_median_pct,
+        clv_positive_pct=summary_bucket.clv_positive_pct,
+        clv_avg_prob_delta_pct=summary_bucket.clv_avg_prob_delta_pct,
         by_model=_group_buckets(
             settled,
             key_fn=lambda tip: f"{tip.tip.model_version}|{tip.tip.model_name}",

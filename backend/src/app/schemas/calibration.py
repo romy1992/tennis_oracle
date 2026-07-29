@@ -10,7 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 CalibrationMethod = Literal["raw", "platt", "isotonic"]
 CalibrationRunStatus = Literal[
-    "pending", "running", "completed", "completed_with_errors", "failed"
+    "pending",
+    "running",
+    "completed",
+    "completed_with_errors",
+    "failed",
+    "cancelled",
 ]
 
 
@@ -65,6 +70,11 @@ class CalibrationRunListItem(BaseModel):
     versions_requested: str
     walk_forward_run_id: int | None = None
     origin: str
+    current_phase: str | None = None
+    progress_pct: float | None = None
+    progress_current: int | None = None
+    progress_total: int | None = None
+    cancel_requested: bool = False
     started_at: datetime | None = None
     finished_at: datetime | None = None
     duration_seconds: float | None = None
@@ -96,6 +106,11 @@ class CalibrationRunRead(BaseModel):
     methods_requested: str
     versions_requested: str
     origin: str
+    current_phase: str | None = None
+    progress_pct: float | None = None
+    progress_current: int | None = None
+    progress_total: int | None = None
+    cancel_requested: bool = False
     started_at: datetime | None = None
     finished_at: datetime | None = None
     duration_seconds: float | None = None
@@ -121,4 +136,10 @@ class CalibrationTriggerRequest(CalibrationConfigSchema):
 class CalibrationTriggerResponse(BaseModel):
     run: CalibrationRunRead
     started: bool
+    message: str
+
+
+class CalibrationCancelResponse(BaseModel):
+    run_id: int
+    status: CalibrationRunStatus | str
     message: str

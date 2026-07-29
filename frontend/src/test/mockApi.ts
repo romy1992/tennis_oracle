@@ -21,7 +21,9 @@ import {
   walkForwardRun,
   walkForwardRuns,
   calibrationRun,
-  calibrationRuns
+  calibrationRuns,
+  probabilityBandAnalysis,
+  segmentRoiAnalysis
 } from "./fixtures";
 
 export type ApiMocks = Record<string, Mock>;
@@ -72,6 +74,8 @@ export function stubDefaultApi(apiMocks: {
   getLatestCalibrationRun?: Mock;
   getCalibrationRun?: Mock;
   startCalibrationRun?: Mock;
+  getProbabilityBandAnalysis?: Mock;
+  getSegmentRoiAnalysis?: Mock;
 }) {
   apiMocks.getSession.mockResolvedValue({
     id: 1,
@@ -175,4 +179,6 @@ export function stubDefaultApi(apiMocks: {
     started: true,
     message: "Calibrazione avviata in background."
   });
+  apiMocks.getProbabilityBandAnalysis?.mockResolvedValue(probabilityBandAnalysis);
+  apiMocks.getSegmentRoiAnalysis?.mockResolvedValue(segmentRoiAnalysis);
 }

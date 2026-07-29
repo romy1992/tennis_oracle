@@ -84,7 +84,11 @@ describe("WalkForwardPage", () => {
     pending.resolve(walkForwardRuns);
     expect(await screen.findByText(/Validazione walk-forward/i)).toBeInTheDocument();
     expect(screen.getAllByText(/logistic_regression/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Saltato \(dati insufficienti\)/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/market_no_vig/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Aggregato benchmark ufficiali/i)).toBeInTheDocument();
+    expect(screen.getByText(/Pagina versione:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Pagina giorno test:/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader", { name: /Brier/i }).length).toBeGreaterThan(0);
   });
 
   it("shows failed run error prominently", async () => {
@@ -130,5 +134,15 @@ describe("WalkForwardPage", () => {
 
     await user.click(screen.getByRole("button", { name: /Avvia walk-forward/i }));
     expect(apiMocks.startWalkForwardRun).toHaveBeenCalled();
+  });
+
+  it("filters by contender and shows sample mismatch warning", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<WalkForwardPage />);
+    expect(await screen.findByText(/Validazione walk-forward/i)).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText(/Contender/i), "elo");
+    expect(screen.getByText(/Confronto ufficiale calcolato su campione comune/i)).toBeInTheDocument();
+    expect(screen.getByText(/Warning/i)).toBeInTheDocument();
   });
 });

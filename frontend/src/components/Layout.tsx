@@ -18,6 +18,7 @@ const navSections: Array<{
     label: "LIVE",
     items: [
       { to: "/published-predictions", label: "Storico pubblicazioni" },
+      { to: "/public-model-registry", label: "Registro modello pubblico" },
       { to: "/published-live-stats", label: "Statistiche live" },
       { to: "/telegram-bot", label: "Bot Telegram" },
       { to: "/telegram-users", label: "Utenti beta Telegram" },
@@ -32,7 +33,9 @@ const navSections: Array<{
       { to: "/prediction-stats", label: "Statistiche previsioni" },
       { to: "/betting-slip-model-stats", label: "Statistiche schedine" },
       { to: "/walk-forward", label: "Walk-forward" },
-      { to: "/calibration", label: "Calibrazione" }
+      { to: "/calibration", label: "Calibrazione" },
+      { to: "/probability-bands", label: "Fasce probabilità" },
+      { to: "/segment-roi", label: "ROI per segmento" }
     ]
   }
 ];

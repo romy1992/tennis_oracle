@@ -7,12 +7,14 @@ from backend.src.app.api.deps import require_admin
 from backend.src.app.core.config import get_settings
 from backend.src.app.db.session import get_db
 from backend.src.app.schemas.walk_forward import (
+    WalkForwardCancelResponse,
     WalkForwardRunListResponse,
     WalkForwardRunRead,
     WalkForwardTriggerRequest,
     WalkForwardTriggerResponse,
 )
 from backend.src.app.services.walk_forward import (
+    cancel_walk_forward_run,
     get_latest_walk_forward_run,
     get_walk_forward_run,
     list_walk_forward_runs,
@@ -80,3 +82,13 @@ def read_run(run_id: int, db: Session = Depends(get_db)) -> WalkForwardRunRead:
     if row is None:
         raise HTTPException(status_code=404, detail="Run non trovata")
     return run_to_read(row)
+
+
+@router.post("/runs/{run_id}/cancel", response_model=WalkForwardCancelResponse)
+def cancel_run(run_id: int, db: Session = Depends(get_db)) -> WalkForwardCancelResponse:
+    ok, message = cancel_walk_forward_run(db, run_id)
+    if not ok:
+        raise HTTPException(status_code=409, detail=message)
+    row = get_walk_forward_run(db, run_id)
+    assert row is not None
+    return WalkForwardCancelResponse(run_id=row.id, status=row.status, message=message)

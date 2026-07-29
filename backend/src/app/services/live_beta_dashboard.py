@@ -136,7 +136,7 @@ def _publication_health(
     tips_total: int,
     pipeline: LiveBetaPipelineStatus,
 ) -> LiveBetaPublicationHealth:
-    public = resolve_public_model_config()
+    public = resolve_public_model_config(db=db)
     latest = pipeline.latest_run
     live_from_run = _parse_live_publication_from_run(
         get_latest_run(db) if latest is not None else None
@@ -178,8 +178,8 @@ def _publication_health(
         elif public.status == "incomplete":
             reason = "public_model_unconfigured"
             message = (
-                "Pubblicazione live abilitata ma PUBLIC_MODEL_VERSION / "
-                "PUBLIC_MODEL_NAME non sono configurati. Nessun fallback automatico."
+                "Pubblicazione live abilitata ma nessun modello attivo nel registro ML-07 "
+                "e PUBLIC_MODEL_* non configurati. Nessun fallback automatico."
             )
         elif public.status == "invalid":
             reason = "public_model_invalid"

@@ -222,6 +222,7 @@ class WalkForwardTemporalTest(unittest.TestCase):
             self.assertTrue(result.summary["holdout_metrics_unchanged"])
             self.assertTrue(result.summary["public_model_unchanged"])
             self.assertFalse(result.summary["official_metrics_shuffled"])
+            self.assertIn("official_contenders", result.summary)
 
     def test_insufficient_data_marks_skipped_fold(self):
         dataframe = _synthetic_dataset(n_days=120, matches_per_day=1)
@@ -249,6 +250,59 @@ class WalkForwardTemporalTest(unittest.TestCase):
             )
             self.assertTrue(result.folds)
             self.assertTrue(all(fold.status == "skipped_insufficient_data" for fold in result.folds))
+
+    def test_official_benchmarks_use_common_sample_and_are_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            processed = tmp_path / "processed"
+            reports = tmp_path / "reports"
+            processed.mkdir()
+            reports.mkdir()
+            dataset = _synthetic_dataset(n_days=220, matches_per_day=2)
+            dataset.to_csv(processed / "tennis_winner_dataset_v2.csv", index=False)
+
+            config = WalkForwardConfig(
+                mode="expanding",
+                initial_train_days=90,
+                test_days=30,
+                step_days=30,
+                min_train_rows=40,
+                min_test_rows=10,
+                random_state=42,
+            )
+            result = run_walk_forward_for_version(
+                "v2",
+                config,
+                processed_dir=processed,
+                reports_dir=reports,
+                model_names=("logistic_regression", "random_forest"),
+            )
+            completed = [item for item in result.folds if item.status == "completed"]
+            all_names = {item.model_name for item in result.folds}
+            benchmark_names = {
+                "market_favorite",
+                "market_no_vig",
+                "atp_ranking",
+                "elo",
+            }
+            self.assertTrue(benchmark_names.issubset(all_names))
+            self.assertIn("official_benchmarks", result.aggregate_metrics)
+
+            logistic_outcomes = [item for item in completed if item.model_name == "logistic_regression"]
+            self.assertTrue(logistic_outcomes)
+            sample_meta = logistic_outcomes[0].coverage.get("official_benchmark_sample")
+            assert isinstance(sample_meta, dict)
+            self.assertIn("sample_mismatch_detected", sample_meta)
+
+            benchmark_outcomes = [item for item in result.folds if item.model_name == "market_no_vig"]
+            self.assertTrue(benchmark_outcomes)
+            if benchmark_outcomes[0].status == "completed":
+                official_payload = benchmark_outcomes[0].metrics.get("official_benchmark")
+                assert isinstance(official_payload, dict)
+                self.assertIn("brier_score", official_payload)
+                self.assertIn("max_drawdown", official_payload)
+            else:
+                self.assertIsNotNone(benchmark_outcomes[0].skip_reason)
 
 
 if __name__ == "__main__":

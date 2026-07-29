@@ -58,6 +58,8 @@ describe("PublishedLiveStatsPage", () => {
     expect(screen.getByText(String(publishedLiveStats.predictions_total))).toBeInTheDocument();
     expect(screen.getAllByText("Hit rate").length).toBeGreaterThan(0);
     expect(screen.getByText("Max drawdown")).toBeInTheDocument();
+    expect(screen.getAllByText("CLV medio").length).toBeGreaterThan(0);
+    expect(screen.getByText("CLV positivo")).toBeInTheDocument();
     expect(screen.getByText("Per modello")).toBeInTheDocument();
   });
 });

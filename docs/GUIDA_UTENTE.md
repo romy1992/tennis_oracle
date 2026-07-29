@@ -3,6 +3,7 @@
 Questa guida spiega **a cosa serve** il progetto e **come usarlo**, senza entrare nei dettagli del codice.
 
 Per la documentazione tecnica (classi, metodi, API, ML) vedi [README.md](../README.md).  
+Per la **guida operativa pagina per pagina** della dashboard web vedi [GUIDA_DASHBOARD.md](GUIDA_DASHBOARD.md).  
 Per lo scheduling giornaliero vedi [SCHEDULING.md](SCHEDULING.md).
 
 ---
@@ -43,8 +44,10 @@ Nel menu laterale trovi:
 | **Consiglio schedina** | Fino a 9 schedine per giorno a difficoltà crescente: 3 solo Play, 3 Play+Borderline, 3 miste |
 | **Statistiche schedine** | Confronto risultati delle schedine tra modelli/versioni |
 | **Statistiche previsioni** | Accuratezza e metriche delle previsioni operative nel tempo (non il registro pubblicazioni) |
-| **Walk-forward** | Validazione temporale multi-periodo (expanding/rolling) su tutti i modelli/versioni: fold, metriche, copertura, fold saltati e possibili segnali di leakage. Separata dalle metriche live; non cambia il modello pubblico |
-| **Calibrazione** | Verifica se le probabilità del modello corrispondono alle frequenze osservate (reliability curve, ECE/MCE, Brier, log loss). Confronto grezzo vs Platt scaling vs isotonic regression su dati out-of-sample del walk-forward. Non attiva automaticamente la calibrazione sulle previsioni live |
+| **Walk-forward** | Validazione temporale multi-periodo (expanding/rolling) su tutti i modelli/versioni: fold, metriche, copertura, fold saltati e possibili segnali di leakage. Include benchmark ufficiali confrontabili (favorito mercato, mercato no-vig, ranking ATP, Elo, logistic regression, random forest) su stesso campione e stesse regole; se i campioni non coincidono la pagina mostra warning espliciti con dettaglio righe escluse. La tabella fold è paginata per **versione** e per **giorno test** per rendere leggibili run lunghe. Durante l'esecuzione compare una barra di avanzamento con fase corrente e pulsante **Annulla**; run interrotte da restart del backend vengono chiuse automaticamente all'avvio. Separata dalle metriche live; non cambia il modello pubblico |
+| **Calibrazione** | Verifica se le probabilità del modello corrispondono alle frequenze osservate (reliability curve, ECE/MCE, Brier, log loss). Confronto grezzo vs Platt scaling vs isotonic regression su dati out-of-sample del walk-forward. Barra di avanzamento e **Annulla** come per walk-forward. Non attiva automaticamente la calibrazione sulle previsioni live |
+| **Fasce probabilità** | Analisi per fasce di probabilità o edge: hit rate, gap di calibrazione, quota/edge medi, profitto, ROI/yield e intervallo di confidenza. Scegli sorgente **Live** (tip pubblicati), **Walk-forward** o **Backtest** (dati OOS offline). Filtri per modello, versione, periodo; confronto probabilità grezza vs calibrata; le fasce con pochi pronostici sono evidenziate |
+| **ROI per segmento** | Prestazioni per segmento (superficie, torneo, circuito, livello, turno, favorito/sfavorito, fascia quota, bookmaker, modello, versione, periodo): hit rate, ROI, yield, drawdown e intervalli di confidenza. Sorgente Live, Walk-forward o Backtest; soglia minima campione configurabile; segmenti con pochi pronostici evidenziati |
 | **Storico pubblicazioni** | Registro immutabile dei pronostici pubblicati (versione, hash, fonte); dopo l’inizio partita non si modifica, le correzioni creano una nuova versione |
 | **Statistiche live** | Performance dei tip pubblicati: hit rate, stake, profitto, ROI/yield, drawdown, serie e distribuzioni. Solo registro immutabile; non confondere con training o backtest |
 | **Report aggiornamento** | Esito dell’ultima run “Aggiorna tutto”: errori, warning, fasi e combo modello |
@@ -54,6 +57,8 @@ Nel menu laterale trovi:
 | **Report settimanale beta** | Solo admin: snapshot KPI della settimana (utenti, retention, comandi, tip live, ROI/drawdown, errori pipeline, notifiche fallite, feedback) con confronto rispetto alla settimana precedente; generazione manuale o job del lunedì |
 
 In alto nella sidebar c’è anche il controllo **Aggiornamento globale**: importa partite, genera previsioni per tutti i modelli disponibili e aggiorna le schedine. Se compaiono errori (es. “4 errori”), il conteggio è cliccabile e apre **Report aggiornamento**.
+
+> **Approfondimento UI**: filtri, colonne, metriche, esempi d’uso e errori comuni per ogni voce di menu sono in [GUIDA_DASHBOARD.md](GUIDA_DASHBOARD.md).
 
 ### Come scegliere modello e versione
 
@@ -70,6 +75,8 @@ In sintesi:
 Nota: il job giornaliero da riga di comando, se non specifichi altrimenti, usa ancora **v2**. L’**aggiornamento globale** dalla UI aggiorna invece tutte le combo modello presenti su disco.
 
 ### Margine di sicurezza e stati valore
+
+Guida pagina **Partite** (filtri, colonne, import): [GUIDA_DASHBOARD.md](GUIDA_DASHBOARD.md).
 
 In alto su **Partite** e **Consiglio schedina** trovi il **margine di sicurezza** (default **2%**, editabile). Vale per tutte le partite della pagina. Se lo porti a **0%**, solo le BORDERLINE diventano PLAY; le NO BET restano tali (quota di mercato sotto void).
 
@@ -103,6 +110,8 @@ La **quota void** (break-even del modello) non cambia con lo stato partita: è s
 
 ### Statistiche live (registro pubblicazioni)
 
+Guida dettagliata (filtri, distribuzioni, interpretazione ROI): [GUIDA_DASHBOARD.md](GUIDA_DASHBOARD.md) (sezione *Statistiche live*).
+
 La pagina **Statistiche live** misura solo i tip salvati nello storico pubblicazioni (non le previsioni operative, non le schedine, non i report di training).
 
 La **Dashboard beta live** riunisce in un’unica vista lo stato della pipeline, i tip di oggi, aperti/chiusi, gli stessi KPI live (incluso drawdown), l’uso del bot, gli errori recenti e indicatori di completezza dati. Se il registro è vuoto, mostra una diagnosi operativa (pubblicazione disabilitata, modello pubblico non configurato, pipeline mai eseguita, nessuna giocata qualificata, errori di pubblicazione). Nel menu e in pagina le aree **LIVE** e **BACKTEST** restano distinte.
@@ -115,6 +124,8 @@ In sintesi:
 - **Hit rate** = prese / (prese + perse); i void non entrano
 - **Stake totale** = somma degli stake pubblicati; il ROI usa solo lo stake delle scommesse chiuse
 - **ROI e yield** (in %) sono uguali: profitto / stake chiuso
+- **CLV (Closing Line Value)** confronta quota presa e quota di chiusura: positivo = hai preso una quota migliore del closing, negativo = peggiore
+- quando mancano le quote closing, il CLV del singolo tip resta vuoto e viene mostrata la copertura CLV aggregata
 - **Max drawdown** e **serie +/-** seguono l’ordine cronologico dei tip chiusi
 
 Regole sulle schedine:
@@ -127,6 +138,8 @@ Regole sulle schedine:
 - le partite annullate o non disputate **non** contano come perse nelle singole né nelle schedine
 
 ### Consiglio schedine (difficoltà)
+
+Guida dettagliata (calendario, profili, colonne pick, rigenerazione): [GUIDA_DASHBOARD.md](GUIDA_DASHBOARD.md) (sezione *Consiglio schedina*).
 
 Alla generazione/rigenerazione compaiono tipicamente **9 schedine**:
 
@@ -298,6 +311,7 @@ No. Per l’uso quotidiano basta l’interfaccia web e, se vuoi, il bot Telegram
 
 | Documento | Contenuto |
 |-----------|-----------|
+| [GUIDA_DASHBOARD.md](GUIDA_DASHBOARD.md) | Dashboard web: ogni pagina (filtri, metriche, esempi, limiti) |
 | [README.md](../README.md) | Architettura, classi, metodi, API, pipeline ML |
 | [SCHEDULING.md](SCHEDULING.md) | Cron / Task Scheduler / sync cloud |
 | [BACKUP_DR.md](BACKUP_DR.md) | Backup e ripristino database (operazioni di emergenza, non dalla UI) |

@@ -1,7 +1,9 @@
 """Centralized live publication of official PLAY tips into PublishedPrediction.
 
-Temporary public-model selection via env (until ML-07). Does not create a second
-prediction system: reuses ``build_candidate_pool`` criteria and ``publish_prediction``.
+Uses the ML-07 public model registry when a DB session is available; falls back to
+``PUBLIC_MODEL_*`` env only when no active registry entry exists (legacy bootstrap).
+Does not create a second prediction system: reuses ``build_candidate_pool`` criteria
+and ``publish_prediction``.
 """
 
 from __future__ import annotations
@@ -36,8 +38,11 @@ UNIT_STAKE = 1.0
 # Do not invent a real bookmaker name.
 PUBLICATION_BOOKMAKER = "publication"
 
-ALLOWED_PUBLIC_MODEL_VERSIONS = frozenset({"v1", "v2", "v3"})
-ALLOWED_PUBLIC_MODEL_NAMES = frozenset({"logistic_regression", "random_forest"})
+from backend.src.app.services.public_model_registry import (  # noqa: E402
+    ALLOWED_PUBLIC_MODEL_NAMES,
+    ALLOWED_PUBLIC_MODEL_VERSIONS,
+    resolve_public_model_from_registry,
+)
 
 PublicConfigStatus = Literal[
     "ready",
@@ -45,6 +50,25 @@ PublicConfigStatus = Literal[
     "incomplete",
     "invalid",
 ]
+
+PublicConfigSource = Literal["registry", "env"]
+
+
+@dataclass(frozen=True)
+class PublicModelPublicationConfig:
+    """Resolved public-model config for live publication."""
+
+    enabled: bool
+    model_version: str | None
+    model_name: str | None
+    status: PublicConfigStatus
+    source: PublicConfigSource | None = None
+    warning: str | None = None
+
+    @property
+    def is_ready(self) -> bool:
+        return self.status == "ready" and self.enabled
+
 
 ExclusionReason = Literal[
     "not_play",
@@ -54,21 +78,6 @@ ExclusionReason = Literal[
     "match_started",
     "publish_error",
 ]
-
-
-@dataclass(frozen=True)
-class PublicModelPublicationConfig:
-    """Resolved temporary public-model config (ML-07 placeholder)."""
-
-    enabled: bool
-    model_version: str | None
-    model_name: str | None
-    status: PublicConfigStatus
-    warning: str | None = None
-
-    @property
-    def is_ready(self) -> bool:
-        return self.status == "ready" and self.enabled
 
 
 @dataclass
@@ -111,12 +120,25 @@ class LivePublicationReport:
 
 def resolve_public_model_config(
     settings: Settings | None = None,
+    db: Session | None = None,
 ) -> PublicModelPublicationConfig:
-    """Validate LIVE_PUBLICATION_* / PUBLIC_MODEL_* without silent fallbacks."""
+    """Resolve public model from registry (preferred) or legacy env vars."""
     cfg = settings or get_settings()
     enabled = bool(cfg.live_publication_enabled)
-    version = (cfg.public_model_version or "").strip() or None
-    name = (cfg.public_model_name or "").strip() or None
+
+    registry_combo = resolve_public_model_from_registry(db)
+    source: PublicConfigSource | None = None
+    version: str | None = None
+    name: str | None = None
+
+    if registry_combo is not None:
+        version, name = registry_combo
+        source = "registry"
+    else:
+        version = (cfg.public_model_version or "").strip() or None
+        name = (cfg.public_model_name or "").strip() or None
+        if version is not None and name is not None:
+            source = "env"
 
     if not enabled:
         return PublicModelPublicationConfig(
@@ -124,6 +146,7 @@ def resolve_public_model_config(
             model_version=version,
             model_name=name,
             status="disabled",
+            source=source,
             warning=(
                 "Live publication disabled (LIVE_PUBLICATION_ENABLED=false). "
                 "Pipeline continues without writing PublishedPrediction."
@@ -131,15 +154,20 @@ def resolve_public_model_config(
         )
 
     if version is None or name is None:
+        detail = (
+            "Live publication enabled but nessun modello attivo nel registro ML-07 "
+            "e PUBLIC_MODEL_VERSION / PUBLIC_MODEL_NAME non configurati."
+            if source is None
+            else "Live publication enabled but PUBLIC_MODEL_VERSION and/or "
+            "PUBLIC_MODEL_NAME are missing. No tips published; no fallback."
+        )
         return PublicModelPublicationConfig(
             enabled=True,
             model_version=version,
             model_name=name,
             status="incomplete",
-            warning=(
-                "Live publication enabled but PUBLIC_MODEL_VERSION and/or "
-                "PUBLIC_MODEL_NAME are missing. No tips published; no fallback."
-            ),
+            source=source,
+            warning=detail,
         )
 
     if version not in ALLOWED_PUBLIC_MODEL_VERSIONS or name not in ALLOWED_PUBLIC_MODEL_NAMES:
@@ -148,6 +176,7 @@ def resolve_public_model_config(
             model_version=version,
             model_name=name,
             status="invalid",
+            source=source,
             warning=(
                 f"Invalid public model config {version}/{name}. "
                 f"Allowed versions={sorted(ALLOWED_PUBLIC_MODEL_VERSIONS)}, "
@@ -160,6 +189,7 @@ def resolve_public_model_config(
         model_version=version,
         model_name=name,
         status="ready",
+        source=source,
         warning=None,
     )
 
@@ -313,7 +343,7 @@ def publish_official_plays_for_day(
 
     When config is not ready, returns a report with warning and creates nothing.
     """
-    public = resolve_public_model_config(settings)
+    public = resolve_public_model_config(settings, db=db)
     report = LivePublicationReport(
         config_status=public.status,
         config_warning=public.warning,
@@ -457,8 +487,12 @@ def publish_official_plays_for_day(
     return report
 
 
-def is_public_combination(model_version: str, model_name: str) -> bool:
-    public = resolve_public_model_config()
+def is_public_combination(
+    model_version: str,
+    model_name: str,
+    db: Session | None = None,
+) -> bool:
+    public = resolve_public_model_config(db=db)
     return (
         public.is_ready
         and public.model_version == model_version

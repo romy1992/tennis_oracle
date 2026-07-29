@@ -163,6 +163,11 @@ class BackendApiClient:
         )
         return payload if isinstance(payload, dict) else {}
 
+    async def active_public_model(self) -> dict[str, Any]:
+        """ML-07 registry: the single active public model for bot/live publication."""
+        payload = await self._get("/public-model-registry/active", {})
+        return payload if isinstance(payload, dict) else {}
+
     async def model_names_for_version(
         self,
         *,

@@ -50,10 +50,20 @@ import type {
   WalkForwardRunListResponse,
   WalkForwardTriggerRequest,
   WalkForwardTriggerResponse,
+  WalkForwardCancelResponse,
   CalibrationRun,
   CalibrationRunListResponse,
   CalibrationTriggerRequest,
-  CalibrationTriggerResponse
+  CalibrationTriggerResponse,
+  CalibrationCancelResponse,
+  ProbabilityBandAnalysis,
+  ProbabilityBandAnalysisParams,
+  SegmentRoiAnalysis,
+  SegmentRoiAnalysisParams,
+  PublicModelRegistryListResponse,
+  PublicModelRegistryCandidateCreate,
+  PublicModelRegistryActionResponse,
+  PublicModelRegistryStatus
 } from "../types/api";
 import { getStoredToken } from "../auth/session";
 
@@ -279,11 +289,30 @@ export const apiClient = {
     request<WalkForwardRun>(`/api/walk-forward/runs/${runId}`),
   startWalkForwardRun: (payload: WalkForwardTriggerRequest = {}) =>
     post<WalkForwardTriggerResponse>("/api/walk-forward/runs", payload),
+  cancelWalkForwardRun: (runId: number) =>
+    post<WalkForwardCancelResponse>(`/api/walk-forward/runs/${runId}/cancel`),
   getCalibrationRuns: (params: { limit?: number; offset?: number } = {}) =>
     request<CalibrationRunListResponse>(withQuery("/api/calibration", params)),
   getLatestCalibrationRun: () => request<CalibrationRun>("/api/calibration/latest"),
   getCalibrationRun: (runId: number) =>
     request<CalibrationRun>(`/api/calibration/runs/${runId}`),
   startCalibrationRun: (payload: CalibrationTriggerRequest = {}) =>
-    post<CalibrationTriggerResponse>("/api/calibration/runs", payload)
+    post<CalibrationTriggerResponse>("/api/calibration/runs", payload),
+  cancelCalibrationRun: (runId: number) =>
+    post<CalibrationCancelResponse>(`/api/calibration/runs/${runId}/cancel`),
+  getProbabilityBandAnalysis: (params: ProbabilityBandAnalysisParams) =>
+    request<ProbabilityBandAnalysis>(withQuery("/api/probability-bands", params)),
+  getSegmentRoiAnalysis: (params: SegmentRoiAnalysisParams) =>
+    request<SegmentRoiAnalysis>(withQuery("/api/segment-roi", params)),
+  getPublicModelRegistry: (params: { status?: PublicModelRegistryStatus; limit?: number; offset?: number } = {}) =>
+    request<PublicModelRegistryListResponse>(withQuery("/api/public-model-registry", params)),
+  createPublicModelCandidate: (payload: PublicModelRegistryCandidateCreate) =>
+    post<PublicModelRegistryListResponse["items"][number]>("/api/public-model-registry/candidates", payload),
+  activatePublicModelEntry: (entryId: number, motivation: string) =>
+    post<PublicModelRegistryActionResponse>(
+      `/api/public-model-registry/entries/${entryId}/activate`,
+      { motivation }
+    ),
+  rollbackPublicModel: (motivation: string) =>
+    post<PublicModelRegistryActionResponse>("/api/public-model-registry/rollback", { motivation })
 };

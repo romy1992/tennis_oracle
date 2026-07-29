@@ -24,6 +24,9 @@ import { TelegramUsersPage } from "./pages/TelegramUsersPage";
 import { WeeklyBetaReportPage } from "./pages/WeeklyBetaReportPage";
 import { WalkForwardPage } from "./pages/WalkForwardPage";
 import { CalibrationPage } from "./pages/CalibrationPage";
+import { PublicModelRegistryPage } from "./pages/PublicModelRegistryPage";
+import { ProbabilityBandsPage } from "./pages/ProbabilityBandsPage";
+import { SegmentRoiPage } from "./pages/SegmentRoiPage";
 
 function AuthenticatedShell() {
   return (
@@ -51,13 +54,16 @@ export const appRoutes: RouteObject[] = [
           { path: "betting-slip-model-stats", element: <BettingSlipModelStatsPage /> },
           { path: "global-update-report", element: <GlobalUpdateReportPage /> },
           { path: "published-predictions", element: <PublishedPredictionsPage /> },
+          { path: "public-model-registry", element: <PublicModelRegistryPage /> },
           { path: "published-live-stats", element: <PublishedLiveStatsPage /> },
           { path: "telegram-bot", element: <TelegramBotPage /> },
           { path: "telegram-users", element: <TelegramUsersPage /> },
           { path: "telegram-feedback", element: <TelegramFeedbackPage /> },
           { path: "weekly-beta-report", element: <WeeklyBetaReportPage /> },
           { path: "walk-forward", element: <WalkForwardPage /> },
-          { path: "calibration", element: <CalibrationPage /> }
+          { path: "calibration", element: <CalibrationPage /> },
+          { path: "probability-bands", element: <ProbabilityBandsPage /> },
+          { path: "segment-roi", element: <SegmentRoiPage /> }
         ]
       }
     ]
