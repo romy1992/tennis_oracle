@@ -63,7 +63,13 @@ import type {
   PublicModelRegistryListResponse,
   PublicModelRegistryCandidateCreate,
   PublicModelRegistryActionResponse,
-  PublicModelRegistryStatus
+  PublicModelRegistryStatus,
+  PaymentCheckoutRequest,
+  PaymentCheckoutResponse,
+  SubscriptionDashboardSummaryResponse,
+  SubscriptionDashboardUserListResponse,
+  SubscriptionDashboardEventListResponse,
+  SubscriptionDashboardManualActionResponse
 } from "../types/api";
 import { getStoredToken } from "../auth/session";
 
@@ -157,6 +163,28 @@ async function patch<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+function parseContentDispositionFilename(value: string | null): string | null {
+  if (!value) return null;
+  const match = /filename="?([^";]+)"?/i.exec(value);
+  if (!match) return null;
+  return match[1] ?? null;
+}
+
+async function getFile(path: string): Promise<{ blob: Blob; filename: string | null }> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "GET",
+    headers: authHeaders()
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  const filename = parseContentDispositionFilename(response.headers.get("Content-Disposition"));
+  return {
+    blob: await response.blob(),
+    filename
+  };
+}
+
 export type LoginResponse = {
   access_token: string;
   token_type: string;
@@ -179,6 +207,71 @@ export const apiClient = {
     }),
   getSession: () => request<AdminSessionResponse>("/api/auth/me"),
   logout: () => post<{ ok: boolean; message: string }>("/api/auth/logout"),
+  createPaymentCheckout: (payload: PaymentCheckoutRequest) =>
+    post<PaymentCheckoutResponse>("/api/payments/checkout", payload),
+  getSubscriptionsDashboardSummary: (params: { months?: number } = {}) =>
+    request<SubscriptionDashboardSummaryResponse>(
+      withQuery("/api/subscriptions/dashboard/summary", params)
+    ),
+  getSubscriptionsDashboardUsers: (
+    params: {
+      q?: string;
+      plan_code?: string;
+      status?: string;
+      payment_failed?: boolean;
+      trialing_only?: boolean;
+      expiring_within_days?: number;
+      cancel_at_period_end?: boolean;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ) =>
+    request<SubscriptionDashboardUserListResponse>(
+      withQuery("/api/subscriptions/dashboard/users", params)
+    ),
+  getSubscriptionsDashboardEvents: (
+    params: {
+      q?: string;
+      source?: "payment" | "admin_action";
+      event_type?: string;
+      user_id?: number;
+      subscription_id?: number;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ) =>
+    request<SubscriptionDashboardEventListResponse>(
+      withQuery("/api/subscriptions/dashboard/events", params)
+    ),
+  suspendDashboardSubscription: (subscriptionId: number, reason?: string) =>
+    post<SubscriptionDashboardManualActionResponse>(
+      `/api/subscriptions/dashboard/subscriptions/${subscriptionId}/suspend`,
+      { reason }
+    ),
+  resumeDashboardSubscription: (subscriptionId: number) =>
+    post<SubscriptionDashboardManualActionResponse>(
+      `/api/subscriptions/dashboard/subscriptions/${subscriptionId}/resume`,
+      {}
+    ),
+  cancelDashboardSubscription: (
+    subscriptionId: number,
+    payload: { immediate?: boolean; reason?: string } = {}
+  ) =>
+    post<SubscriptionDashboardManualActionResponse>(
+      `/api/subscriptions/dashboard/subscriptions/${subscriptionId}/cancel`,
+      payload
+    ),
+  exportSubscriptionsDashboardCsv: (
+    params: {
+      q?: string;
+      plan_code?: string;
+      status?: string;
+      payment_failed?: boolean;
+      trialing_only?: boolean;
+      expiring_within_days?: number;
+      cancel_at_period_end?: boolean;
+    } = {}
+  ) => getFile(withQuery("/api/subscriptions/dashboard/export.csv", params)),
   getNextFixturesPredictions: (params: PredictionQueryParams = {}) =>
     request<FixturesWithPredictionsPage>(
       withQuery("/api/next-fixtures/predictions", params)

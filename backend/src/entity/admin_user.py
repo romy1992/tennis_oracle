@@ -1,6 +1,7 @@
 """Administrative users for dashboard and privileged API access."""
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy.orm import relationship
 
 from backend.src.entity.base import Base
 
@@ -16,6 +17,11 @@ class AdminUser(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
+    audit_logs = relationship(
+        "AdminAuditLog",
+        back_populates="admin_user",
+        order_by="AdminAuditLog.created_at",
+    )
 
     def to_dict(self):
         return {

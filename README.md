@@ -89,8 +89,9 @@ python -m venv .venv
 pip install -r requirements.txt          # solo runtime
 # oppure, per sviluppo/test:
 pip install -r requirements-dev.txt      # runtime + pytest
-cp properties/config.env.example properties/config.env   # se usi gli import API
-# configura anche backend/.env (non committare segreti)
+cp .env.example .env
+cp properties/config.env.example properties/config.env
+# segreti in backend/.env; config.env solo fallback non sensibile
 alembic upgrade head
 uvicorn src.app.main:app --reload
 ```
@@ -113,6 +114,18 @@ SERVICE_API_KEY=
 # Optional previous key during rotation; clear after bot uses the new key.
 SERVICE_API_KEY_PREVIOUS=
 ALLOW_UNAUTHENTICATED_SERVICE_READS=true
+
+# Payments (provider abstraction + Stripe adapter)
+PAYMENTS_PROVIDER=stripe
+PAYMENTS_MODE=sandbox
+PAYMENTS_SUCCESS_URL=http://localhost:5173/payments/success
+PAYMENTS_CANCEL_URL=http://localhost:5173/payments/cancel
+PAYMENTS_IDEMPOTENCY_BUCKET_SECONDS=900
+STRIPE_SECRET_KEY=sk_test_change_me
+STRIPE_WEBHOOK_SECRET=whsec_change_me
+STRIPE_PRICE_MONTHLY=price_change_me_monthly
+STRIPE_PRICE_YEARLY=price_change_me_yearly
+STRIPE_WEBHOOK_TOLERANCE_SECONDS=300
 ```
 
 Rate limiting (contatori in PostgreSQL, condivisi tra repliche API e bot):
@@ -135,11 +148,11 @@ RATE_LIMIT_TELEGRAM_EXPENSIVE=10
 - Superato il limite: HTTP **429** con header `Retry-After`
 - Bot Telegram: limite per `telegram_user_id` (più stretto su `/schedine`, `/partite`, `/statistiche`)
 
-All’avvio, se la tabella `admin_user` è vuota e sono impostati `ADMIN_USERNAME` / `ADMIN_PASSWORD`, viene creato il primo admin (password con bcrypt). Non inserire segreti reali nel repo: usa `backend/properties/config.env.example` come modello.
+All’avvio, se la tabella `admin_user` è vuota e sono impostati `ADMIN_USERNAME` / `ADMIN_PASSWORD`, viene creato il primo admin (password con bcrypt). Non inserire segreti reali nel repo: usa `backend/.env.example` come modello.
 
-Per gli import API tennis: `backend/properties/config.env` con `API_TENNIS_KEY`, `API_TENNIS_BASE` e opzionalmente `API_TENNIS_TIMEOUT` (secondi, default 30; vedi `config.env.example`). I log applicativi oscurano automaticamente chiavi e credenziali nelle URL/query.
+Per gli import API tennis: metti `API_TENNIS_KEY` in `backend/.env`; in `backend/properties/config.env` lascia `API_TENNIS_BASE` e opzionalmente `API_TENNIS_TIMEOUT` (secondi, default 30). I log applicativi oscurano automaticamente chiavi e credenziali nelle URL/query.
 
-Bot Telegram (opzionale), stessi file `.env` / `config.env`:
+Bot Telegram (opzionale): segreti in `backend/.env` (con fallback non sensibile da `config.env`):
 
 ```env
 TELEGRAM_BOT_TOKEN=
@@ -151,6 +164,7 @@ TELEGRAM_MODEL_NAMES=logistic_regression,random_forest
 TELEGRAM_DEFAULT_STAKE=10
 TELEGRAM_SLIP_COUNT=9
 TELEGRAM_MIN_EDGE_PERCENT=2.0
+TELEGRAM_PREMIUM_UPGRADE_URL=
 TELEGRAM_FEEDBACK_URL=
 ```
 
@@ -313,6 +327,15 @@ Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, met
 | POST | `/api/telegram/users/{telegram_user_id}/activate` | `telegram_users.activate_user` | admin | Attiva accesso |
 | POST | `/api/telegram/users/{telegram_user_id}/suspend` | `telegram_users.suspend_user` | admin | Sospende accesso |
 | POST | `/api/telegram/users/{telegram_user_id}/block` | `telegram_users.block_user` | admin | Blocca accesso |
+| POST | `/api/payments/checkout` | `payments.create_checkout_session` | admin o service | Crea checkout provider idempotente (mensile/annuale) associato a utente Telegram |
+| POST | `/api/payments/webhook/stripe` | `payments.stripe_webhook` | firma Stripe | Webhook Stripe con verifica firma, dedup/idempotenza (`provider_event_id`) e gestione eventi: checkout completato, subscription aggiornata/cancellata, rinnovo riuscito, pagamento fallito, rimborso, contestazione |
+| GET | `/api/subscriptions/dashboard/summary` | `subscription_dashboard.read_dashboard_summary` | admin | KPI abbonamenti: Free/Pro/Founder, attivi/prova, scadenze, entrate mensili, conversione Free→Pro, churn |
+| GET | `/api/subscriptions/dashboard/users` | `subscription_dashboard.read_dashboard_users` | admin | Ricerca/filtri utenti + stato abbonamento + segnali pagamento fallito |
+| GET | `/api/subscriptions/dashboard/events` | `subscription_dashboard.read_dashboard_events` | admin | Storico eventi unificato (payment + azioni manuali admin) |
+| GET | `/api/subscriptions/dashboard/export.csv` | `subscription_dashboard.export_dashboard_csv` | admin | Export CSV filtrato della vista utenti abbonamenti |
+| POST | `/api/subscriptions/dashboard/subscriptions/{subscription_id}/suspend` | `subscription_dashboard.suspend_dashboard_subscription` | admin | Sospensione manuale con audit log admin |
+| POST | `/api/subscriptions/dashboard/subscriptions/{subscription_id}/resume` | `subscription_dashboard.resume_dashboard_subscription` | admin | Riattivazione manuale con audit log admin |
+| POST | `/api/subscriptions/dashboard/subscriptions/{subscription_id}/cancel` | `subscription_dashboard.cancel_dashboard_subscription` | admin | Cancellazione manuale (immediata o a fine periodo) con audit log admin |
 | GET | `/api/telegram/feedback` | `telegram_feedback.search_telegram_feedback` | admin | Inbox feedback bot |
 | GET | `/api/telegram/feedback/{feedback_id}` | `telegram_feedback.read_telegram_feedback` | admin | Dettaglio feedback |
 | PATCH | `/api/telegram/feedback/{feedback_id}` | `telegram_feedback.patch_telegram_feedback_status` | admin | Aggiorna stato (`new`/`reviewing`/`resolved`/`rejected`) |
@@ -430,6 +453,7 @@ Modulo `backend/src/entity/` (home canonica delle tabelle operative). `app/model
 | `TelegramFeedback` | Feedback in-bot (`telegram_feedback`; migrazione `0019`; categoria, rating 1–5, messaggio, stati `new`/`reviewing`/`resolved`/`rejected`) |
 | `WeeklyBetaReport` | Snapshot report settimanale beta (`weekly_beta_report`; migrazione `0020`; payload KPI + stato invio Telegram admin) |
 | `TelegramNotificationDelivery` | Ledger consegna push (`telegram_notification_delivery`; migrazione `0018`; dedupe per utente/kind/giorno) |
+| `User` / `Plan` / `Subscription` / `Entitlement` / `PaymentEvent` / `AccessLog` | Dominio abbonamenti e permessi data-driven (`app_user`, `plan`, `subscription`, `entitlement`, `payment_event`, `access_log`; migrazione `0025`) |
 | `PublishedPrediction` | Registro immutabile pronostici pubblicati (`published_prediction`; migrazione `0013`; versioni via `publication_id` + `content_version`) |
 | `PrematchOddsSnapshot` | Storico append-only quote pre-match per bookmaker/selezione (`prematch_odds_snapshot`; migrazione `0014`; tipi `opening`/`observed`/`publication`/`closing`) |
 | `AdminUser` | Account amministratore (`admin_user`; migrazione `0011`; solo hash password) |
@@ -684,9 +708,47 @@ Registro utenti beta Telegram (whitelist). Non sostituisce `TelegramBotEvent` (a
 | `list_telegram_users` | Ricerca/filtri admin |
 | `activate_telegram_user` / `suspend_telegram_user` / `block_telegram_user` | Transizioni stato |
 
-Schema: `app/schemas/telegram_users.py`. Route admin: `app/api/routes/telegram_users.py`. Gate bot: `app/telegram/access.require_beta_access`.
+Schema: `app/schemas/telegram_users.py`. Route admin: `app/api/routes/telegram_users.py`. Gate bot: `app/telegram/access.require_command_access`.
 
 Settings: `telegram_whitelist_enabled` (default true), `telegram_terms_required` (default false), `telegram_terms_version`.
+
+#### `app/services/subscriptions.py`
+
+Dominio abbonamenti con piani `free`/`pro`/`founder`, lifecycle e controllo entitlement data-driven (usabile dai gate Telegram senza hardcode dei permessi nel codice handler).
+
+| Funzione | Ruolo |
+|----------|-------|
+| `seed_default_plans` | Seed/refresh catalogo piani + matrice entitlement |
+| `get_or_create_user` | Upsert utente dominio abbonamenti (`app_user`) |
+| `create_subscription` / `renew_subscription` | Avvio/rinnovo periodo (trial, scadenza, payment events) |
+| `cancel_subscription` / `suspend_subscription` / `resume_subscription` | Cancellazione (immediata/fine periodo) e sospensione |
+| `expire_due_subscriptions` | Transizione automatica a `expired` su `expires_at` |
+| `check_user_entitlement` / `check_telegram_entitlement_safe` | Decisione accesso + audit `access_log` (anche con diniego forzato dal gate Telegram) |
+
+Schema: `app/schemas/subscriptions.py`.
+
+#### `app/services/telegram_command_authorization.py`
+
+Servizio centralizzato di autorizzazione comandi bot con policy `free`/`premium` (data-driven).
+
+| Funzione | Ruolo |
+|----------|-------|
+| `command_policy` | Risolve la policy comando (`help`/`notifiche`/`feedback` free, `partite`/`schedine`/`statistiche` premium) |
+| `authorize_telegram_command_safe` | Verifica in un solo punto: utente Telegram, stato account, piano, stato abbonamento, trial, entitlement richiesto, scadenza |
+| `authorize_telegram_command_by_key_safe` | Helper per decorator bot |
+
+Dinieghi premium (`missing_entitlement`, trial/scadenza) mostrano messaggio upgrade centralizzato; accessi concessi/negati vengono auditati su `access_log`.
+
+#### `app/services/payment_provider.py` + `app/services/payments.py`
+
+Integrazione pagamenti provider-agnostic con prima implementazione Stripe, senza storage dati carta.
+
+| Funzione | Ruolo |
+|----------|-------|
+| `PaymentProvider` | Interfaccia astratta (`create_customer`, `create_checkout_session`, `parse_webhook`) |
+| `StripePaymentProvider` | Adapter Stripe con API key env, sandbox/live guard, idempotency key, verifica firma webhook |
+| `create_checkout_session_for_telegram_user` | Crea customer/provider mapping + checkout session idempotente con `success_url` / `cancel_url` |
+| `process_stripe_webhook` | Verifica firma Stripe (`Stripe-Signature` + tolleranza timestamp), dedup concorrente su `provider_event_id`, persiste payload minimo e processa in transazione eventi `checkout.session.completed`, `customer.subscription.updated`, `invoice.payment_succeeded`, `invoice.payment_failed`, `customer.subscription.deleted`, `charge.refunded`, `charge.dispute.*` |
 
 #### `app/services/telegram_feedback.py`
 
@@ -943,6 +1005,7 @@ Wrapper di compatibilità: delega a `run_global_update` (tutte le combo abilitat
 | `/telegram-bot` | `TelegramBotPage` |
 | `/telegram-users` | `TelegramUsersPage` |
 | `/telegram-feedback` | `TelegramFeedbackPage` |
+| `/subscriptions-dashboard` | `SubscriptionsDashboardPage` |
 | `/weekly-beta-report` | `WeeklyBetaReportPage` |
 | `/public-model-registry` | `PublicModelRegistryPage` |
 | `/walk-forward` | `WalkForwardPage` |
@@ -969,6 +1032,7 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 | `TelegramBotPage` | Analytics admin bot: KPI, filtri data/action/user, breakdown per giorno, storico eventi |
 | `TelegramUsersPage` | Gestione utenti beta: ricerca, invito, attiva/sospendi/blocca, termini e origine invito |
 | `TelegramFeedbackPage` | Inbox feedback bot: filtri stato/categoria, messaggio, transizioni `new`/`reviewing`/`resolved`/`rejected` |
+| `SubscriptionsDashboardPage` | Dashboard abbonamenti: KPI Free/Pro/Founder, conversione/churn, filtri utenti, timeline eventi, azioni manuali e export CSV |
 | `WeeklyBetaReportPage` | Report settimanale beta salvati: KPI utenti/retention/comandi/tip/ROI/pipeline/notifiche/feedback + WoW; generazione manuale |
 | `PublicModelRegistryPage` | Registro ML-07: candidati, attivazione, rollback, artefatti e metriche approvazione |
 | `WalkForwardPage` | Validazione walk-forward: fold, metriche, copertura, fold saltati e flag leakage; avvio manuale, barra avanzamento e annullamento (non aggiorna modello pubblico) |
@@ -1074,20 +1138,26 @@ Modulo `app/telegram/`.
 
 | Modulo | Ruolo |
 |--------|-------|
-| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, `telegram_service_api_key` (S2S, allineata a `SERVICE_API_KEY`), model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 9), `telegram_min_edge_percent` (default 2.0), whitelist/termini (`telegram_whitelist_enabled`, `telegram_terms_required`, `telegram_terms_version`), `telegram_feedback_url` (link pubblico opzionale in footer) |
+| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, `telegram_service_api_key` (S2S, allineata a `SERVICE_API_KEY`), model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 9), `telegram_min_edge_percent` (default 2.0), whitelist/termini (`telegram_whitelist_enabled`, `telegram_terms_required`, `telegram_terms_version`), `telegram_premium_upgrade_url`, `telegram_feedback_url` (link pubblici opzionali) |
 | `client.BackendApiClient` | Chiama le stesse API FastAPI (`/betting-slips/daily`, `/betting-slips/stats/by-model`, `/predictions/stats/summary`, `/models-versions/results`, `/next-fixtures/predictions`, `/single-match-value`, …) |
 | `bot.build_application` / `main` | Polling + handler comandi |
 | `rate_limit.rate_limited` | Limite comandi per `telegram_user_id` (DB condiviso; messaggio IT se superato) |
-| `access.require_beta_access` | Gate centralizzato whitelist + termini su comandi privilegiati |
+| `access.require_command_access` | Decorator centralizzato che applica policy free/premium e delega l'autorizzazione al service layer |
 | `tracking.tracked` / `track_callback_query` | Persistenza accessi/click in `telegram_bot_event` (non blocca il bot se il DB fallisce) |
 | `fixture_value.enrich_fixture_value` | Void/valore su `/partite` (SMVA o fallback da probabilità modello) |
 | `messages` / `dates` / `images` / `slips_compare` / `public_labels` | Formattazione risposte, date Roma, PNG, confronto multi-serie, etichette pubbliche (accuratezza) |
 
-Service condivisi: `app/services/telegram_analytics.py`, `app/services/telegram_users.py`, `app/services/telegram_feedback.py`, `app/services/telegram_notifications.py` (vedi §4.4).
+Service condivisi: `app/services/telegram_analytics.py`, `app/services/telegram_users.py`, `app/services/telegram_command_authorization.py`, `app/services/telegram_feedback.py`, `app/services/telegram_notifications.py` (vedi §4.4).
 
-**Comandi attivi:** `/start`, `/help`, `/accetta_condizioni`, `/notifiche`, `/feedback`, `/annulla` (solo durante feedback), `/schedine`, `/partite`, `/statistiche`.
+**Comandi attivi:** `/start`, `/help`, `/accetta_condizioni`, `/notifiche`, `/feedback`, `/annulla` (solo durante feedback), `/piano`, `/abbonati`, `/gestisci_abbonamento`, `/schedine`, `/partite`, `/statistiche`.
 
-`/start` registra (o aggiorna) l’utente in `telegram_user` con `telegram_user_id`, `chat_id`, username, nome, primo/ultimo accesso, stato, origine invito (payload deep-link), preferenze notifiche e stato termini, poi mostra menu inline (Partite / Schedine / Statistiche / Aiuto). `/help` è una guida sintetica con la stessa tastiera. `/notifiche` mostra o aggiorna le preferenze push (master, pronostici, risultati, giorno vuoto). `/feedback` avvia una conversazione a step (categoria → valutazione 1–5 → messaggio) con annullo via `/annulla` o pulsante; salva solo il submit finale in `telegram_feedback` (stato iniziale `new`). Con whitelist attiva (default) i nuovi utenti restano `invited` finché un admin non li attiva dalla pagina **Utenti beta Telegram**. `/schedine`, `/partite`, `/statistiche` (e i relativi pulsanti menu) richiedono accesso centralizzato (`active` + termini se `TELEGRAM_TERMS_REQUIRED=true`); `/feedback` resta disponibile senza gate beta (utile anche per segnalazioni di accesso).
+`/start` registra (o aggiorna) l’utente in `telegram_user` con `telegram_user_id`, `chat_id`, username, nome, primo/ultimo accesso, stato, origine invito (payload deep-link), preferenze notifiche e stato termini, poi mostra menu inline (Partite / Schedine / Statistiche / Aiuto). `/help` resta una guida sintetica con la stessa tastiera. `/notifiche` mostra o aggiorna le preferenze push (master, pronostici, risultati, giorno vuoto). `/feedback` avvia una conversazione a step (categoria → valutazione 1–5 → messaggio) con annullo via `/annulla` o pulsante; salva solo il submit finale in `telegram_feedback` (stato iniziale `new`). Con whitelist attiva (default) i nuovi utenti restano `invited` finché un admin non li attiva dalla pagina **Utenti beta Telegram**. Il gate centralizzato classifica i comandi in `free` e `premium` (`help`/`notifiche`/`feedback`/`piano`/`abbonati`/`gestisci_abbonamento` free, `schedine`/`partite`/`statistiche` premium): per ogni richiesta verifica utente esistente, stato, piano, stato abbonamento, periodo di prova, entitlement richiesto e scadenza. In caso di diniego premium mostra messaggio upgrade unico (opzionale link `TELEGRAM_PREMIUM_UPGRADE_URL`) senza duplicazioni nei singoli handler.
+
+Comandi abbonamento:
+
+- `/piano` mostra piano attuale, stato (`trialing`/`active`/`suspended`/`expired`/`canceled`), fine prova, rinnovo/scadenza e cancellazione programmata (se presente), senza esporre identificativi tecnici.
+- `/abbonati` genera un link checkout Stripe per il piano Pro (mensile/annuale) con validita limitata dalla sessione provider.
+- `/gestisci_abbonamento` genera un link al portale cliente Stripe (short-lived, TTL configurabile) per metodo di pagamento, rinnovo e annullamento; in caso di pagamento fallito/sospensione guida al recupero.
 
 Push automatiche (job dedicato, default disabilitato): pronostici del giorno, riepilogo risultati, giorno senza partite; dedupe/retry/ledger in `telegram_notification_delivery`. Alert admin pipeline fallita restano su `OPS_ALERTS_*` / `TELEGRAM_ADMIN_CHAT_ID`.
 
@@ -1110,11 +1180,11 @@ python -m src.app.telegram.bot
 
 ## 9. Schema dati
 
-Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `telegram_user` (utenti beta / whitelist; migrazione `0017`, prefs/`chat_id` in `0018`), `telegram_notification_delivery` (ledger push; migrazione `0018`), `telegram_feedback` (feedback in-bot; migrazione `0019`), `weekly_beta_report` (report settimanale beta; migrazione `0020`), `walk_forward_run` / `walk_forward_fold` (validazione temporale walk-forward; migrazione `0021`), `calibration_run` / `calibration_result` (analisi calibrazione OOS; migrazione `0022`), `public_model_registry_entry` (registro modello pubblico ML-07; migrazione `0024`), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`).
+Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `telegram_user` (utenti beta / whitelist; migrazione `0017`, prefs/`chat_id` in `0018`), `telegram_notification_delivery` (ledger push; migrazione `0018`), `telegram_feedback` (feedback in-bot; migrazione `0019`), `weekly_beta_report` (report settimanale beta; migrazione `0020`), `walk_forward_run` / `walk_forward_fold` (validazione temporale walk-forward; migrazione `0021`), `calibration_run` / `calibration_result` (analisi calibrazione OOS; migrazione `0022`), `public_model_registry_entry` (registro modello pubblico ML-07; migrazione `0024`), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`), dominio abbonamenti (`app_user`, `plan`, `entitlement`, `subscription`, `payment_event`, `access_log`; migrazione `0025`, audit accessi bot free/premium incluso), mapping pagamenti provider (`payment_customer`, `payment_checkout_session`; migrazione `0026`), audit operazioni manuali admin (`admin_audit_log`; migrazione `0027`).
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
 
-Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report` → `0021_walk_forward` → `0022_calibration` → `0023_background_job_progress`.
+Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report` → `0021_walk_forward` → `0022_calibration` → `0023_background_job_progress` → `0024_public_model_registry` → `0025_subscriptions_domain` → `0026_payment_checkout_providers` → `0027_admin_audit_log`.
 
 ```bash
 cd backend

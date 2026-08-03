@@ -18,9 +18,8 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from backend.src.app.core.config import get_settings
+from backend.src.app.core.env_files import load_backend_env_files
 from backend.src.app.observability.alerts import send_admin_alert
 from backend.src.app.observability.context import ensure_correlation_id
 from backend.src.app.observability.setup import setup_observability
@@ -33,10 +32,7 @@ from backend.src.service.postgres_backup import (
     result_to_dict,
 )
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../../properties/config.env")
-ROOT_ENV = os.path.join(os.path.dirname(__file__), "../../../.env")
-load_dotenv(dotenv_path=CONFIG_PATH)
-load_dotenv(dotenv_path=ROOT_ENV)
+load_backend_env_files(override=False)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:

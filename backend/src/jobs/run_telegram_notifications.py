@@ -15,9 +15,8 @@ import os
 import sys
 from datetime import date
 
-from dotenv import load_dotenv
-
 from backend.src.app.core.config import get_settings
+from backend.src.app.core.env_files import load_backend_env_files
 from backend.src.app.db.session import SessionLocal
 from backend.src.app.observability.context import ensure_correlation_id
 from backend.src.app.observability.setup import setup_observability
@@ -27,8 +26,7 @@ from backend.src.app.services.telegram_notifications import (
     run_daily_telegram_notifications,
 )
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../../properties/config.env")
-load_dotenv(dotenv_path=CONFIG_PATH)
+load_backend_env_files(override=False)
 
 
 def _parse_kinds(raw: str | None) -> list[NotificationKind]:

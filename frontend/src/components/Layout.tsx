@@ -20,6 +20,7 @@ const navSections: Array<{
       { to: "/published-predictions", label: "Storico pubblicazioni" },
       { to: "/public-model-registry", label: "Registro modello pubblico" },
       { to: "/published-live-stats", label: "Statistiche live" },
+      { to: "/subscriptions-dashboard", label: "Dashboard abbonamenti" },
       { to: "/telegram-bot", label: "Bot Telegram" },
       { to: "/telegram-users", label: "Utenti beta Telegram" },
       { to: "/telegram-feedback", label: "Feedback Telegram" },

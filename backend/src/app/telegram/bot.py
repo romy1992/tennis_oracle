@@ -19,6 +19,27 @@ from backend.src.app.services.telegram_feedback import (
     TelegramFeedbackError,
     create_telegram_feedback_safe,
 )
+from backend.src.app.services.telegram_command_authorization import (
+    COMMAND_ABBONATI,
+    COMMAND_FEEDBACK,
+    COMMAND_GESTISCI_ABBONAMENTO,
+    COMMAND_HELP,
+    COMMAND_NOTIFICHE,
+    COMMAND_PARTITE,
+    COMMAND_PIANO,
+    COMMAND_SCHEDINE,
+    COMMAND_STATISTICHE,
+)
+from backend.src.app.services.payments import (
+    PaymentServiceError,
+    create_checkout_session_for_telegram_user_safe,
+    create_customer_portal_session_for_telegram_user_safe,
+)
+from backend.src.app.services.subscriptions import (
+    PLAN_FOUNDER,
+    PLAN_PRO,
+    get_telegram_subscription_snapshot_safe,
+)
 from backend.src.app.services.telegram_users import (
     TelegramUserError,
     accept_telegram_terms_safe,
@@ -30,7 +51,7 @@ from backend.src.app.services.telegram_users import (
 )
 from backend.src.app.schemas.telegram_users import TelegramNotificationPreferencesUpdate
 
-from .access import require_beta_access
+from .access import require_command_access
 from .client import BackendApiClient, BackendApiError
 from .config import TelegramSettings, get_telegram_settings
 from .dates import parse_date_or_offset, prediction_window, today_rome
@@ -63,10 +84,12 @@ from .messages import (
     format_fixtures_intro,
     format_fixtures_photo_caption,
     format_help_text,
+    format_datetime_rome,
     format_notification_preferences,
     format_player_search,
     format_predictions_day,
     format_predictions_summary,
+    format_subscription_overview,
     format_user_error,
     split_message,
 )
@@ -76,7 +99,6 @@ from .public_labels import (
     build_public_labels,
     build_stats_series,
 )
-from .slips_compare import select_distinct_fixture_models, select_distinct_model_payloads
 from .rate_limit import rate_limited
 from .tracking import track_callback_query, tracked
 
@@ -203,6 +225,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @rate_limited()
 @tracked(action="/help", event_type="command")
+@require_command_access(command_key=COMMAND_HELP)
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = _settings(context)
     await _reply(
@@ -248,8 +271,33 @@ def _parse_bool_flag(raw: str) -> bool | None:
     return None
 
 
+def _parse_billing_cycle(args: list[str]) -> str | None:
+    if not args:
+        return "monthly"
+    raw = args[0].strip().lower()
+    if raw in {"monthly", "mensile", "mese"}:
+        return "monthly"
+    if raw in {"yearly", "annuale", "anno"}:
+        return "yearly"
+    return None
+
+
+def _billing_cycle_label(billing_cycle: str) -> str:
+    if billing_cycle == "yearly":
+        return "annuale"
+    return "mensile"
+
+
+def _format_link_expiry(value) -> str | None:
+    label = format_datetime_rome(value)
+    if not label:
+        return None
+    return f"Valido fino al: {label} (ora italiana)"
+
+
 @rate_limited()
 @tracked(action="/notifiche", event_type="command")
+@require_command_access(command_key=COMMAND_NOTIFICHE)
 async def notifiche(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show or update push notification preferences."""
     user = update.effective_user
@@ -313,6 +361,195 @@ async def notifiche(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update, format_notification_preferences(updated))
 
 
+@rate_limited()
+@tracked(action="/piano", event_type="command")
+@require_command_access(command_key=COMMAND_PIANO)
+async def piano(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+        await _reply(update, format_user_error("Utente Telegram non disponibile."))
+        return
+
+    settings = _settings(context)
+    snapshot = get_telegram_subscription_snapshot_safe(telegram_user_id=user.id)
+    if not snapshot.available:
+        await _reply(
+            update,
+            format_user_error("Stato abbonamento temporaneamente non disponibile. Riprova tra poco."),
+        )
+        return
+
+    message = format_subscription_overview(
+        plan_name=snapshot.plan_name,
+        subscription_status=snapshot.subscription_status,
+        trial_ends_at=snapshot.trial_ends_at,
+        expires_at=snapshot.expires_at,
+        auto_renew=snapshot.auto_renew,
+        cancel_at_period_end=snapshot.cancel_at_period_end,
+        payment_failed=snapshot.payment_failed,
+        feedback_url=settings.telegram_feedback_url,
+    )
+
+    status = (snapshot.subscription_status or "").strip().lower()
+    plan_code = (snapshot.plan_code or "").strip().lower()
+    hints: list[str] = []
+    if plan_code in {PLAN_PRO, PLAN_FOUNDER} and status in {"trialing", "active", "suspended"}:
+        hints.append("Gestione rinnovo e fatturazione: /gestisci_abbonamento")
+    else:
+        hints.append("Per attivare il premium: /abbonati mensile oppure /abbonati annuale")
+
+    if hints:
+        message = f"{message}\n\n" + "\n".join(hints)
+    await _reply(update, message, reply_markup=main_menu_keyboard())
+
+
+@rate_limited()
+@tracked(action="/abbonati", event_type="command")
+@require_command_access(command_key=COMMAND_ABBONATI)
+async def abbonati(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+        await _reply(update, format_user_error("Utente Telegram non disponibile."))
+        return
+
+    billing_cycle = _parse_billing_cycle([a for a in (context.args or []) if a.strip()])
+    if billing_cycle is None:
+        await _reply(
+            update,
+            "Uso: /abbonati [mensile|annuale]",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    snapshot = get_telegram_subscription_snapshot_safe(telegram_user_id=user.id)
+    status = (snapshot.subscription_status or "").strip().lower()
+    plan_code = (snapshot.plan_code or "").strip().lower()
+    if plan_code == PLAN_FOUNDER and status in {"active", "trialing"}:
+        await _reply(
+            update,
+            "Hai gia un piano Founder con accesso premium attivo. "
+            "Per la fatturazione usa /gestisci_abbonamento.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    if plan_code == PLAN_PRO and status in {"active", "trialing"} and not snapshot.cancel_at_period_end and not snapshot.payment_failed:
+        await _reply(
+            update,
+            "Hai gia un piano premium attivo. Per rinnovo, metodo di pagamento o annullamento usa /gestisci_abbonamento.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    try:
+        checkout = create_checkout_session_for_telegram_user_safe(
+            telegram_user_id=user.id,
+            username=user.username,
+            plan_code=PLAN_PRO,
+            billing_cycle=billing_cycle,
+            success_url=None,
+            cancel_url=None,
+            idempotency_key=None,
+        )
+    except PaymentServiceError as exc:
+        logger.warning(
+            "Telegram checkout creation failed user_id=%s status=%s",
+            user.id,
+            exc.status_code,
+        )
+        await _reply(
+            update,
+            format_user_error(
+                "Checkout temporaneamente non disponibile. Riprova tra poco oppure contatta il supporto."
+            ),
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    lines = [
+        f"Checkout pronto per piano Pro ({_billing_cycle_label(billing_cycle)}).",
+    ]
+    expiry = _format_link_expiry(checkout.expires_at)
+    if expiry:
+        lines.append(expiry)
+    lines.append(
+        "Se il pagamento non va a buon fine, puoi riprovare con /abbonati "
+        "o usare /gestisci_abbonamento."
+    )
+
+    await _reply(
+        update,
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Apri checkout", url=checkout.checkout_url)]]
+        ),
+    )
+
+
+@rate_limited()
+@tracked(action="/gestisci_abbonamento", event_type="command")
+@require_command_access(command_key=COMMAND_GESTISCI_ABBONAMENTO)
+async def gestisci_abbonamento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None:
+        await _reply(update, format_user_error("Utente Telegram non disponibile."))
+        return
+
+    snapshot = get_telegram_subscription_snapshot_safe(telegram_user_id=user.id)
+    try:
+        portal = create_customer_portal_session_for_telegram_user_safe(
+            telegram_user_id=user.id,
+            username=user.username,
+            return_url=None,
+            idempotency_key=None,
+        )
+    except PaymentServiceError as exc:
+        logger.warning(
+            "Telegram customer portal creation failed user_id=%s status=%s",
+            user.id,
+            exc.status_code,
+        )
+        fallback_message = (
+            "Non trovo un abbonamento gestibile da portale. "
+            "Per attivare il premium usa /abbonati."
+        )
+        if exc.status_code >= 500:
+            fallback_message = (
+                "Portale abbonamento temporaneamente non disponibile. "
+                "Riprova tra poco."
+            )
+        await _reply(
+            update,
+            format_user_error(fallback_message),
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    lines = [
+        "Apri il portale abbonamento per rinnovo, metodo di pagamento e annullamento.",
+    ]
+    expiry = _format_link_expiry(portal.expires_at)
+    if expiry:
+        lines.append(expiry)
+
+    status = (snapshot.subscription_status or "").strip().lower()
+    plan_expiry = format_datetime_rome(snapshot.expires_at)
+    if snapshot.cancel_at_period_end and plan_expiry:
+        lines.append(f"Cancellazione programmata al: {plan_expiry} (ora italiana)")
+    elif status == "expired":
+        lines.append("Il tuo abbonamento risulta scaduto: dal portale puoi riattivarlo.")
+    elif snapshot.payment_failed or status == "suspended":
+        lines.append("Pagamento non riuscito o abbonamento sospeso: aggiorna il metodo di pagamento dal portale.")
+
+    await _reply(
+        update,
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Apri portale abbonamento", url=portal.portal_url)]]
+        ),
+    )
+
+
 def feedback_category_keyboard() -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     items = list(FEEDBACK_CATEGORY_LABELS.items())
@@ -354,6 +591,10 @@ def _clear_feedback_draft(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @rate_limited()
 @tracked(action="/feedback", event_type="command")
+@require_command_access(
+    command_key=COMMAND_FEEDBACK,
+    denied_return=ConversationHandler.END,
+)
 async def feedback_start(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -607,21 +848,21 @@ async def ten_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @rate_limited(expensive=True)
 @tracked(action="/schedine", event_type="command")
-@require_beta_access()
+@require_command_access(command_key=COMMAND_SCHEDINE)
 async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _run_with_loading(update, LOADING_SCHEDINE, _schedine_body, context)
 
 
 @rate_limited(expensive=True)
 @tracked(action="/partite", event_type="command")
-@require_beta_access()
+@require_command_access(command_key=COMMAND_PARTITE)
 async def partite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _run_with_loading(update, LOADING_PARTITE, _partite_body, context)
 
 
 @rate_limited(expensive=True)
 @tracked(action="/statistiche", event_type="command")
-@require_beta_access()
+@require_command_access(command_key=COMMAND_STATISTICHE)
 async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _run_with_loading(update, LOADING_STATISTICHE, _statistiche_body, context)
 
@@ -1123,6 +1364,9 @@ def build_application(settings: TelegramSettings | None = None) -> Application:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("accetta_condizioni", accetta_condizioni))
     application.add_handler(CommandHandler("notifiche", notifiche))
+    application.add_handler(CommandHandler("piano", piano))
+    application.add_handler(CommandHandler("abbonati", abbonati))
+    application.add_handler(CommandHandler("gestisci_abbonamento", gestisci_abbonamento))
     # ConversationHandler must be registered before the catch-all message handler.
     application.add_handler(build_feedback_conversation())
     application.add_handler(CommandHandler("schedine", schedine))

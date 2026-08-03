@@ -23,6 +23,9 @@ Usa i pulsanti qui sotto oppure i comandi:
 /partite — partite di oggi
 /schedine — schedine di oggi
 /statistiche — andamento
+/piano — stato abbonamento
+/abbonati — attiva il piano premium
+/gestisci_abbonamento — rinnovo e fatturazione
 /notifiche — preferenze push
 /feedback — invia un feedback
 
@@ -34,6 +37,9 @@ HELP_TEXT = """Guida rapida
 /partite — partite e pronostici di oggi (con indicazione di valore)
 /schedine — schedine proposte di oggi
 /statistiche — andamento storico (partite e schedine)
+/piano — mostra piano, prova, rinnovo o scadenza
+/abbonati — genera link checkout per piano premium
+/gestisci_abbonamento — apre il portale cliente per rinnovo/fatturazione
 /notifiche — attiva, disattiva e preferenze push
 /feedback — invia un feedback (categoria, valutazione, messaggio)
 /annulla — annulla il feedback in corso
@@ -47,6 +53,14 @@ ACCOUNT_STATUS_LABELS = {
     "invited": "In lista di attesa",
     "suspended": "Sospeso",
     "blocked": "Bloccato",
+}
+
+SUBSCRIPTION_STATUS_LABELS = {
+    "trialing": "In prova",
+    "active": "Attivo",
+    "suspended": "Sospeso",
+    "canceled": "Cancellato",
+    "expired": "Scaduto",
 }
 
 FEEDBACK_CATEGORY_LABELS = {
@@ -183,6 +197,67 @@ def account_status_label(status: str | None) -> str:
     if not status:
         return "n.d."
     return ACCOUNT_STATUS_LABELS.get(status, status)
+
+
+def subscription_status_label(status: str | None) -> str:
+    if not status:
+        return "n.d."
+    return SUBSCRIPTION_STATUS_LABELS.get(status, status)
+
+
+def format_datetime_rome(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    dt = value
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    local = dt.astimezone(ROME_TZ)
+    return local.strftime("%d/%m/%Y %H:%M")
+
+
+def format_subscription_overview(
+    *,
+    plan_name: str | None,
+    subscription_status: str | None,
+    trial_ends_at: datetime | None,
+    expires_at: datetime | None,
+    auto_renew: bool,
+    cancel_at_period_end: bool,
+    payment_failed: bool,
+    feedback_url: str | None = None,
+) -> str:
+    plan_label = (plan_name or "Free").strip() or "Free"
+    status = (subscription_status or "").strip().lower()
+    lines = [
+        f"Piano attuale: {plan_label}",
+        f"Stato abbonamento: {subscription_status_label(subscription_status)}",
+    ]
+
+    trial_line = format_datetime_rome(trial_ends_at)
+    expiry_line = format_datetime_rome(expires_at)
+    if status == "trialing" and trial_line:
+        lines.append(f"Periodo di prova fino al: {trial_line} (ora italiana)")
+
+    if cancel_at_period_end and expiry_line:
+        lines.append(f"Cancellazione programmata al: {expiry_line} (ora italiana)")
+    elif auto_renew and expiry_line and status in {"active", "trialing"}:
+        lines.append(f"Prossimo rinnovo stimato: {expiry_line} (ora italiana)")
+    elif expiry_line:
+        lines.append(f"Scadenza: {expiry_line} (ora italiana)")
+
+    if payment_failed:
+        lines.append(
+            "Pagamento non riuscito rilevato. Usa /gestisci_abbonamento per aggiornare la fatturazione."
+        )
+
+    if status in {"expired", "canceled"}:
+        lines.append("Per riattivare il premium usa /abbonati.")
+
+    return append_message_footer(
+        "\n".join(lines),
+        feedback_url=feedback_url,
+        include_disclaimer=False,
+    )
 
 
 def format_last_updated(value: Any) -> str | None:

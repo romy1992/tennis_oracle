@@ -8,6 +8,7 @@ from backend.src.app.api.routes import (
     imports,
     live_beta_dashboard,
     ops,
+    payments,
     predictions,
     prematch_odds_snapshots,
     probability_bands,
@@ -15,6 +16,7 @@ from backend.src.app.api.routes import (
     published_predictions,
     segment_roi,
     single_match_value,
+    subscription_dashboard,
     telegram,
     telegram_feedback,
     telegram_users,
@@ -35,6 +37,7 @@ api_router.include_router(global_update.results_router)
 api_router.include_router(telegram.router)
 api_router.include_router(telegram_users.router)
 api_router.include_router(telegram_feedback.router)
+api_router.include_router(payments.router)
 api_router.include_router(published_predictions.router)
 api_router.include_router(prematch_odds_snapshots.router)
 api_router.include_router(live_beta_dashboard.router)
@@ -45,3 +48,4 @@ api_router.include_router(public_model_registry.router)
 api_router.include_router(probability_bands.router)
 api_router.include_router(segment_roi.router)
 api_router.include_router(ops.router)
+api_router.include_router(subscription_dashboard.router)

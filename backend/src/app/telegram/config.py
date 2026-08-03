@@ -1,10 +1,8 @@
 from functools import lru_cache
-from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
-BACKEND_DIR = Path(__file__).resolve().parents[3]
+from backend.src.app.core.env_files import BACKEND_CONFIG_ENV_FILE, BACKEND_ENV_FILE
 
 
 class TelegramSettings(BaseSettings):
@@ -25,11 +23,15 @@ class TelegramSettings(BaseSettings):
     telegram_whitelist_enabled: bool = True
     telegram_terms_required: bool = False
     telegram_terms_version: str = "1"
+    telegram_premium_upgrade_url: str | None = None
     # Optional public feedback / report URL shown in bot footers (no secrets).
     telegram_feedback_url: str | None = None
 
     model_config = SettingsConfigDict(
-        env_file=BACKEND_DIR / ".env",
+        env_file=(
+            BACKEND_CONFIG_ENV_FILE,
+            BACKEND_ENV_FILE,
+        ),
         env_file_encoding="utf-8",
         extra="ignore",
     )

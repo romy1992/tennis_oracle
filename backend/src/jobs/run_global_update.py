@@ -22,9 +22,8 @@ import logging
 import os
 import sys
 
-from dotenv import load_dotenv
-
 from backend.src.app.core.config import get_settings
+from backend.src.app.core.env_files import load_backend_env_files
 from backend.src.app.db.session import SessionLocal
 from backend.src.app.observability.context import ensure_correlation_id
 from backend.src.app.observability.setup import setup_observability
@@ -35,8 +34,7 @@ from backend.src.app.services.global_update import (
     start_global_update,
 )
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../../properties/config.env")
-load_dotenv(dotenv_path=CONFIG_PATH)
+load_backend_env_files(override=False)
 
 setup_observability(get_settings())
 ensure_correlation_id(f"job-global-update-{os.getpid()}")

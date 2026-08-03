@@ -21,9 +21,10 @@ x-backend-env: &backend-db-env
 x-backend-env-files: &backend-env-files
   - path: .env
     required: false
-  - path: backend/.env
-    required: false
   - path: backend/properties/config.env
+    required: false
+  # backend/.env must be last so its secret/runtime values win over fallback config.env.
+  - path: backend/.env
     required: false
 
 x-backend-credential-mounts: &backend-credential-mounts
