@@ -23,7 +23,10 @@ import {
   calibrationRun,
   calibrationRuns,
   probabilityBandAnalysis,
-  segmentRoiAnalysis
+  segmentRoiAnalysis,
+  subscriptionDashboardSummary,
+  subscriptionDashboardUsers,
+  subscriptionDashboardEvents
 } from "./fixtures";
 
 export type ApiMocks = Record<string, Mock>;
@@ -76,6 +79,13 @@ export function stubDefaultApi(apiMocks: {
   startCalibrationRun?: Mock;
   getProbabilityBandAnalysis?: Mock;
   getSegmentRoiAnalysis?: Mock;
+  getSubscriptionsDashboardSummary?: Mock;
+  getSubscriptionsDashboardUsers?: Mock;
+  getSubscriptionsDashboardEvents?: Mock;
+  suspendDashboardSubscription?: Mock;
+  resumeDashboardSubscription?: Mock;
+  cancelDashboardSubscription?: Mock;
+  exportSubscriptionsDashboardCsv?: Mock;
 }) {
   apiMocks.getSession.mockResolvedValue({
     id: 1,
@@ -181,4 +191,83 @@ export function stubDefaultApi(apiMocks: {
   });
   apiMocks.getProbabilityBandAnalysis?.mockResolvedValue(probabilityBandAnalysis);
   apiMocks.getSegmentRoiAnalysis?.mockResolvedValue(segmentRoiAnalysis);
+  apiMocks.getSubscriptionsDashboardSummary?.mockResolvedValue(subscriptionDashboardSummary);
+  apiMocks.getSubscriptionsDashboardUsers?.mockResolvedValue(subscriptionDashboardUsers);
+  apiMocks.getSubscriptionsDashboardEvents?.mockResolvedValue(subscriptionDashboardEvents);
+  apiMocks.suspendDashboardSubscription?.mockResolvedValue({
+    message: "Abbonamento sospeso.",
+    subscription: {
+      id: 501,
+      user_id: 101,
+      plan_id: 2,
+      status: "suspended",
+      started_at: "2026-07-01T00:00:00",
+      current_period_start_at: "2026-08-01T00:00:00",
+      current_period_end_at: "2026-08-31T00:00:00",
+      trial_started_at: null,
+      trial_ends_at: null,
+      renewed_at: null,
+      expires_at: "2026-08-31T00:00:00",
+      auto_renew: false,
+      cancel_at_period_end: false,
+      canceled_at: null,
+      cancellation_reason: null,
+      suspended_at: "2026-08-02T09:00:00",
+      suspension_reason: "manual_review",
+      created_at: "2026-07-01T00:00:00",
+      updated_at: "2026-08-02T09:00:00"
+    }
+  });
+  apiMocks.resumeDashboardSubscription?.mockResolvedValue({
+    message: "Abbonamento riattivato.",
+    subscription: {
+      id: 501,
+      user_id: 101,
+      plan_id: 2,
+      status: "active",
+      started_at: "2026-07-01T00:00:00",
+      current_period_start_at: "2026-08-01T00:00:00",
+      current_period_end_at: "2026-08-31T00:00:00",
+      trial_started_at: null,
+      trial_ends_at: null,
+      renewed_at: null,
+      expires_at: "2026-08-31T00:00:00",
+      auto_renew: true,
+      cancel_at_period_end: false,
+      canceled_at: null,
+      cancellation_reason: null,
+      suspended_at: null,
+      suspension_reason: null,
+      created_at: "2026-07-01T00:00:00",
+      updated_at: "2026-08-02T09:05:00"
+    }
+  });
+  apiMocks.cancelDashboardSubscription?.mockResolvedValue({
+    message: "Abbonamento cancellato.",
+    subscription: {
+      id: 501,
+      user_id: 101,
+      plan_id: 2,
+      status: "canceled",
+      started_at: "2026-07-01T00:00:00",
+      current_period_start_at: "2026-08-01T00:00:00",
+      current_period_end_at: "2026-08-02T09:10:00",
+      trial_started_at: null,
+      trial_ends_at: null,
+      renewed_at: null,
+      expires_at: "2026-08-02T09:10:00",
+      auto_renew: false,
+      cancel_at_period_end: false,
+      canceled_at: "2026-08-02T09:10:00",
+      cancellation_reason: "manual_cancel",
+      suspended_at: null,
+      suspension_reason: null,
+      created_at: "2026-07-01T00:00:00",
+      updated_at: "2026-08-02T09:10:00"
+    }
+  });
+  apiMocks.exportSubscriptionsDashboardCsv?.mockResolvedValue({
+    blob: new Blob(["user_id,username\n101,pro_user\n"], { type: "text/csv" }),
+    filename: "subscriptions_dashboard_test.csv"
+  });
 }

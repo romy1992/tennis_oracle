@@ -16,9 +16,8 @@ import logging
 import os
 import sys
 
-from dotenv import load_dotenv
-
 from backend.src.app.core.config import get_settings
+from backend.src.app.core.env_files import load_backend_env_files
 from backend.src.app.db.session import SessionLocal
 from backend.src.app.ml.training.calibration import (
     CalibrationConfig,
@@ -32,8 +31,7 @@ from backend.src.app.observability.setup import setup_observability
 from backend.src.app.schemas.calibration import CalibrationTriggerRequest
 from backend.src.app.services.calibration import run_to_read, start_calibration_run
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../../properties/config.env")
-load_dotenv(dotenv_path=CONFIG_PATH)
+load_backend_env_files(override=False)
 
 
 def main(argv: list[str] | None = None) -> int:

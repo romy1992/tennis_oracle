@@ -16,9 +16,8 @@ import logging
 import os
 import sys
 
-from dotenv import load_dotenv
-
 from backend.src.app.core.config import get_settings
+from backend.src.app.core.env_files import load_backend_env_files
 from backend.src.app.db.session import SessionLocal
 from backend.src.app.ml.training.walk_forward import (
     WalkForwardConfig,
@@ -34,8 +33,7 @@ from backend.src.app.services.walk_forward import (
     start_walk_forward_run,
 )
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../../properties/config.env")
-load_dotenv(dotenv_path=CONFIG_PATH)
+load_backend_env_files(override=False)
 
 
 def main(argv: list[str] | None = None) -> int:

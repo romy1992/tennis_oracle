@@ -248,9 +248,17 @@ cd backend
 python -m src.app.telegram.bot
 ```
 
-Comandi attivi: `/start`, `/help`, `/accetta_condizioni`, `/notifiche`, `/feedback`, `/schedine`, `/partite`, `/statistiche`.
+Comandi attivi: `/start`, `/help`, `/accetta_condizioni`, `/notifiche`, `/feedback`, `/piano`, `/abbonati`, `/gestisci_abbonamento`, `/schedine`, `/partite`, `/statistiche`.
 
-Al primo `/start` l’utente viene registrato (con `chat_id` per eventuali notifiche push) e riceve un **menu a pulsanti** (Partite, Schedine, Statistiche, Aiuto). Con whitelist attiva (default) resta in attesa finché un admin non lo **attiva** dalla pagina **Utenti beta Telegram**. Se sono richieste le condizioni d’uso, l’utente deve inviare `/accetta_condizioni` prima di usare `/schedine`, `/partite` e `/statistiche`.
+Al primo `/start` l’utente viene registrato (con `chat_id` per eventuali notifiche push) e riceve un **menu a pulsanti** (Partite, Schedine, Statistiche, Aiuto). Con whitelist attiva (default) resta in attesa finché un admin non lo **attiva** dalla pagina **Utenti beta Telegram**. Se sono richieste le condizioni d’uso, l’utente deve inviare `/accetta_condizioni` prima di usare i comandi autorizzati. Il controllo accessi del bot e centralizzato: per ogni comando con gate verifica utente, stato account, piano, abbonamento attivo (inclusi prova/scadenza) ed entitlement.
+
+I comandi sono classificati in `free` e `premium`: `/help`, `/notifiche`, `/feedback`, `/piano`, `/abbonati` e `/gestisci_abbonamento` sono free (sempre soggetti allo stato account), mentre `/schedine`, `/partite` e `/statistiche` sono premium. Se il piano non include un comando premium (o prova/abbonamento non e attivo), il bot risponde con un messaggio unico di upgrade.
+
+Con `/piano` vedi piano corrente, stato (attivo/in prova/sospeso/scaduto), fine prova, rinnovo o scadenza e cancellazione programmata (se presente), senza identificativi tecnici.
+
+Con `/abbonati` il bot prepara un link checkout per il piano Pro (`mensile` o `annuale`), valido per una finestra temporale limitata.
+
+Con `/gestisci_abbonamento` il bot prepara un link al portale cliente per rinnovo, metodo di pagamento e annullamento. Se un pagamento fallisce o il piano viene sospeso/scaduto, il comando mostra il percorso di recupero.
 
 Con `/notifiche` puoi vedere e cambiare le preferenze push (master on/off, pronostici del giorno, riepilogo risultati, giorno senza partite). Le notifiche automatiche partono solo se l’admin ha abilitato il job e l’account è attivo (non sospeso/bloccato).
 

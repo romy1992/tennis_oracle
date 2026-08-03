@@ -17,7 +17,10 @@ import type {
   PublishedLiveStatsSummary,
   LiveBetaDashboardResponse,
   PublishedSettledTip,
-  WeeklyBetaReport
+  WeeklyBetaReport,
+  SubscriptionDashboardSummaryResponse,
+  SubscriptionDashboardUserListResponse,
+  SubscriptionDashboardEventListResponse
 } from "../types/api";
 
 export const TODAY = "2026-07-21";
@@ -1289,3 +1292,119 @@ export const segmentRoiAnalysis = {
   by_period: [],
   notes: ["Live: ledger PublishedPrediction con settlement a lettura (non backtest ML)."]
 };
+
+export const subscriptionDashboardSummary: SubscriptionDashboardSummaryResponse = {
+  generated_at: `${TODAY}T12:00:00Z`,
+  overview: {
+    users_free: 12,
+    users_pro: 7,
+    users_founder: 2,
+    active_subscriptions: 16,
+    trialing_subscriptions: 3,
+    expiring_within_7_days: 2,
+    expiring_within_30_days: 4,
+    canceled_subscriptions: 5,
+    canceled_last_30_days: 2,
+    payment_failed_last_30_days: 1,
+    monthly_revenue_cents: 15400,
+    free_to_pro_users: 4,
+    free_user_base: 12,
+    free_to_pro_conversion_pct: 33.33,
+    churned_last_30_days: 2,
+    active_base_last_30_days: 14,
+    churn_pct_last_30_days: 14.29
+  },
+  monthly_revenue: [
+    { month: "2026-03", revenue_cents: 7600 },
+    { month: "2026-04", revenue_cents: 9200 },
+    { month: "2026-05", revenue_cents: 8800 },
+    { month: "2026-06", revenue_cents: 10300 },
+    { month: "2026-07", revenue_cents: 12100 },
+    { month: "2026-08", revenue_cents: 15400 }
+  ]
+};
+
+export const subscriptionDashboardUsers: SubscriptionDashboardUserListResponse = {
+  total: 2,
+  limit: 50,
+  offset: 0,
+  items: [
+    {
+      user_id: 101,
+      telegram_user_id: 900101,
+      external_ref: null,
+      username: "pro_user",
+      plan_code: "pro",
+      plan_name: "Pro",
+      subscription_id: 501,
+      subscription_status: "active",
+      started_at: `${TODAY}T08:00:00Z`,
+      trial_ends_at: null,
+      expires_at: `${TODAY}T23:59:00Z`,
+      cancel_at_period_end: false,
+      canceled_at: null,
+      auto_renew: true,
+      payment_failed: true,
+      last_payment_status: "failed",
+      last_payment_event_at: `${TODAY}T11:00:00Z`
+    },
+    {
+      user_id: 102,
+      telegram_user_id: 900102,
+      external_ref: null,
+      username: "founder_user",
+      plan_code: "founder",
+      plan_name: "Founder",
+      subscription_id: 502,
+      subscription_status: "active",
+      started_at: `${TODAY}T07:00:00Z`,
+      trial_ends_at: null,
+      expires_at: null,
+      cancel_at_period_end: false,
+      canceled_at: null,
+      auto_renew: false,
+      payment_failed: false,
+      last_payment_status: "succeeded",
+      last_payment_event_at: `${TODAY}T10:30:00Z`
+    }
+  ]
+};
+
+export const subscriptionDashboardEvents: SubscriptionDashboardEventListResponse = {
+  total: 2,
+  limit: 50,
+  offset: 0,
+  items: [
+    {
+      source: "payment",
+      event_id: "payment:1001",
+      occurred_at: `${TODAY}T11:00:00Z`,
+      event_type: "invoice_payment_failed",
+      status: "failed",
+      user_id: 101,
+      subscription_id: 501,
+      plan_code: "pro",
+      amount_cents: 1900,
+      currency: "EUR",
+      admin_username: null,
+      description: "provider=stripe event=evt_test_failed",
+      context_json: "{}"
+    },
+    {
+      source: "admin_action",
+      event_id: "admin:1002",
+      occurred_at: `${TODAY}T10:00:00Z`,
+      event_type: "subscription_suspend",
+      status: "suspended",
+      user_id: 101,
+      subscription_id: 501,
+      plan_code: "pro",
+      amount_cents: null,
+      currency: null,
+      admin_username: "admin",
+      description: "Manual suspension from admin dashboard",
+      context_json: '{"reason":"manual_review"}'
+    }
+  ]
+};
+

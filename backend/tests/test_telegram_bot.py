@@ -18,8 +18,10 @@ from backend.src.app.telegram.messages import (
     format_fixtures_empty,
     format_fixtures_intro,
     format_help_text,
+    format_datetime_rome,
     format_last_updated,
     format_predictions_day,
+    format_subscription_overview,
     format_user_error,
     format_welcome_text,
     predicted_winner_name,
@@ -359,6 +361,39 @@ class TelegramFormattingTest(unittest.TestCase):
         self.assertNotIn("logistic_regression", text)
         self.assertNotIn("random_forest", text)
 
+    def test_format_subscription_overview_trial_and_renewal(self):
+        text = format_subscription_overview(
+            plan_name="Pro",
+            subscription_status="trialing",
+            trial_ends_at=datetime(2026, 8, 10, 18, 30, tzinfo=timezone.utc),
+            expires_at=datetime(2026, 9, 2, 9, 0, tzinfo=timezone.utc),
+            auto_renew=True,
+            cancel_at_period_end=False,
+            payment_failed=False,
+            feedback_url="https://example.com/feedback",
+        )
+
+        self.assertIn("Piano attuale: Pro", text)
+        self.assertIn("Stato abbonamento: In prova", text)
+        self.assertIn("Periodo di prova fino al:", text)
+        self.assertIn("Prossimo rinnovo stimato:", text)
+        self.assertIn("Feedback / segnalazioni: https://example.com/feedback", text)
+        self.assertNotIn(DISCLAIMER, text)
+
+    def test_format_subscription_overview_handles_payment_failed_and_cancel(self):
+        text = format_subscription_overview(
+            plan_name="Pro",
+            subscription_status="suspended",
+            trial_ends_at=None,
+            expires_at=datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc),
+            auto_renew=False,
+            cancel_at_period_end=True,
+            payment_failed=True,
+        )
+        self.assertIn("Stato abbonamento: Sospeso", text)
+        self.assertIn("Cancellazione programmata al:", text)
+        self.assertIn("Pagamento non riuscito rilevato", text)
+
     def test_select_distinct_model_payloads_keeps_one_when_equal(self):
         shared_slips = [
             {
@@ -422,12 +457,16 @@ class TelegramBotUxTest(unittest.TestCase):
         self.assertIn("/partite", help_text)
         self.assertIn("/schedine", help_text)
         self.assertIn("/statistiche", help_text)
+        self.assertIn("/piano", help_text)
+        self.assertIn("/abbonati", help_text)
+        self.assertIn("/gestisci_abbonamento", help_text)
         self.assertIn("/feedback", help_text)
         self.assertIn("/annulla", help_text)
         self.assertIn("pulsanti", help_text.lower())
         self.assertIn(DISCLAIMER, help_text)
         self.assertIn("Feedback / segnalazioni:", help_text)
         self.assertIn("/partite", welcome)
+        self.assertIn("/piano", welcome)
         self.assertIn("/feedback", welcome)
         self.assertNotIn("logistic_regression", help_text)
         self.assertNotIn("random_forest", welcome)
@@ -439,6 +478,12 @@ class TelegramBotUxTest(unittest.TestCase):
         assert line is not None
         self.assertTrue(line.startswith("Ultimo aggiornamento:"))
         self.assertIn("ora italiana", line)
+
+    def test_format_datetime_rome_without_prefix(self):
+        line = format_datetime_rome(datetime(2026, 7, 4, 10, 15, tzinfo=timezone.utc))
+        self.assertIsNotNone(line)
+        assert line is not None
+        self.assertRegex(line, r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}")
 
     def test_format_user_error_is_uniform(self):
         message = format_user_error("Backend non disponibile.")

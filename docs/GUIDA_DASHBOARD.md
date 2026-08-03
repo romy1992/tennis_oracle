@@ -413,6 +413,72 @@ Uso pratico:
 
 ---
 
+## Dashboard abbonamenti — `/subscriptions-dashboard`
+
+### A cosa serve
+
+Vista amministrativa dedicata al ciclo abbonamenti: utenti `Free`/`Pro`/`Founder`, stato sottoscrizioni (`active`/`trialing`/`suspended`/`canceled`/`expired`), scadenze, pagamenti falliti, entrate mensili, conversione Free→Pro, churn, storico eventi ed export CSV.
+
+### Quando aprirla
+
+- Controllo giornaliero salute abbonamenti e trend revenue.
+- Triage rapido utenti con pagamento fallito o in scadenza.
+- Audit operazioni manuali (sospensioni, riattivazioni, cancellazioni).
+
+### Cosa NON fa / con cosa non confonderla
+
+- Non sostituisce la gestione analytics del bot Telegram.
+- Non modifica automaticamente piani o prezzi: le azioni manuali sono esplicite per singolo abbonamento.
+- L’export CSV rispecchia i filtri correnti della tabella utenti.
+
+### Filtri e controlli
+
+| Controllo | Cosa fa | Nota |
+|-----------|---------|------|
+| Ricerca | Filtra per username / external ref / telegram id | Testo libero |
+| Piano | Free, Pro, Founder | “Tutti” di default |
+| Stato | trialing/active/suspended/canceled/expired | Per lifecycle |
+| Pagamento fallito | Solo con/solo senza fallimenti | Utile per recovery billing |
+| Scadenza entro X giorni | Filtra utenti prossimi alla scadenza | Es. 7 o 30 |
+| Cancellazione a fine periodo | Sì/No | Cross-check con churn |
+| Solo in prova | Mostra solo trialing | Funnel conversione |
+| Esporta CSV | Scarica la lista filtrata | Operazione auditata |
+
+### Metriche e colonne principali
+
+| Nome | Significato | Come interpretarlo |
+|------|-------------|-------------------|
+| Utenti Free / Pro / Founder | Distribuzione base utenti | Mix commerciale corrente |
+| Abbonamenti attivi / in prova | Carico attuale pagante e trial | Monitora saturazione trial |
+| Scadenze <= 30g | Utenti a rischio uscita breve | Azioni proattive retention |
+| Pagamenti falliti (30g) | Eventi billing failed recenti | Priorità operativa |
+| Entrate mese | Ricavi del mese corrente (eventi succeeded) | Confronta trend mensile |
+| Conversione Free->Pro | Utenti passati da Free a Pro / base Free | Efficienza funnel |
+| Churn (30g) | Utenti terminati / base attiva 30g fa | Stabilità base pagante |
+| Storico eventi | Timeline unificata payment + azioni admin | Audit e diagnosi |
+
+### Azioni manuali
+
+- **Sospendi**: blocca accesso mantenendo tracciamento motivazione.
+- **Riattiva**: ripristina stato attivo/trialing se coerente con scadenza.
+- **Cancella**: termina manualmente l’abbonamento (operazione confermata UI).
+
+Ogni azione manuale viene registrata in audit (`admin_audit_log`) con admin, target e contesto.
+
+### Esempio pratico
+
+1. Filtro `Pagamenti falliti = Solo con fallimenti`.
+2. Esamina utenti in `Pro` con scadenza ravvicinata.
+3. Se necessario sospendi/riattiva manualmente dal tabellone.
+4. Esporta CSV per condivisione con team supporto/finance.
+
+### Limiti noti
+
+- KPI conversion/churn sono calcolati su logica applicativa e dipendono dalla qualità storica degli eventi.
+- In ambienti molto grandi conviene usare filtri prima dell’export CSV.
+
+---
+
 ## Bot Telegram — `/telegram-bot`
 
 ### A cosa serve

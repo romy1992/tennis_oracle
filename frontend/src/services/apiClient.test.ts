@@ -100,4 +100,74 @@ describe("apiClient", () => {
     expect(parsed.searchParams.get("status")).toBe("upcoming");
     expect(parsed.searchParams.get("limit")).toBe("50");
   });
+
+  it("posts payment checkout payload", async () => {
+    storeSession("abc.token", futureExpiresAt());
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          provider: "stripe",
+          mode: "sandbox",
+          idempotency_key: "idem-payment-0001",
+          checkout_url: "https://checkout.stripe.test/idem-payment-0001",
+          session_id: "cs_test_123",
+          customer_id: "cus_test_123",
+          plan_code: "pro",
+          billing_cycle: "monthly",
+          expires_at: null,
+          reused: false
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    await apiClient.createPaymentCheckout({
+      telegram_user_id: 123,
+      username: "alice",
+      plan_code: "pro",
+      billing_cycle: "monthly",
+      idempotency_key: "idem-payment-0001"
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/api/payments/checkout");
+    expect(init?.method).toBe("POST");
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer abc.token");
+    expect(init?.body).toBe(
+      JSON.stringify({
+        telegram_user_id: 123,
+        username: "alice",
+        plan_code: "pro",
+        billing_cycle: "monthly",
+        idempotency_key: "idem-payment-0001"
+      })
+    );
+  });
+
+  it("downloads subscriptions dashboard CSV", async () => {
+    storeSession("abc.token", futureExpiresAt());
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response("user_id,username\n1,alice\n", {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv",
+          "Content-Disposition": "attachment; filename=\"subscriptions_dashboard.csv\""
+        }
+      })
+    );
+
+    const file = await apiClient.exportSubscriptionsDashboardCsv({ plan_code: "pro" });
+
+    expect(file.filename).toBe("subscriptions_dashboard.csv");
+    expect(await file.blob.text()).toContain("user_id,username");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/api/subscriptions/dashboard/export.csv");
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer abc.token");
+  });
 });

@@ -1,10 +1,9 @@
 from functools import lru_cache
-from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from backend.src.app.core.env_files import BACKEND_CONFIG_ENV_FILE, BACKEND_ENV_FILE
 
-ROOT_DIR = Path(__file__).resolve().parents[3]
 
 # Test / runtime override (middleware and non-DI callers honour this).
 _settings_override: "Settings | None" = None
@@ -48,6 +47,22 @@ class Settings(BaseSettings):
     # When SERVICE_API_KEY is empty, allow anonymous reads on bot-shared endpoints.
     allow_unauthenticated_service_reads: bool = True
 
+    # Payments provider integration (provider-agnostic service layer + Stripe adapter).
+    payments_provider: str | None = None
+    payments_mode: str = "sandbox"  # sandbox | live
+    payments_success_url: str | None = None
+    payments_cancel_url: str | None = None
+    payments_portal_return_url: str | None = None
+    payments_portal_link_ttl_seconds: int = 1800
+    payments_idempotency_bucket_seconds: int = 900
+    stripe_api_base: str = "https://api.stripe.com/v1"
+    stripe_request_timeout_seconds: float = 20.0
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    stripe_price_monthly: str | None = None
+    stripe_price_yearly: str | None = None
+    stripe_webhook_tolerance_seconds: int = 300
+
     # Rate limiting (PostgreSQL-backed; shared across API replicas + Telegram bot).
     rate_limit_enabled: bool = True
     rate_limit_window_seconds: int = 60
@@ -71,6 +86,8 @@ class Settings(BaseSettings):
     # When true, users must accept terms (version below) before privileged commands.
     telegram_terms_required: bool = False
     telegram_terms_version: str = "1"
+    # Optional public URL shown in premium-denied bot replies.
+    telegram_premium_upgrade_url: str | None = None
 
     # Outbound Telegram user notifications (job run_telegram_notifications).
     # Admin pipeline alerts use OPS_ALERTS_* separately.
@@ -137,8 +154,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_file=(
-            ROOT_DIR / "properties" / "config.env",
-            ROOT_DIR / ".env",
+            BACKEND_CONFIG_ENV_FILE,
+            BACKEND_ENV_FILE,
         ),
         env_file_encoding="utf-8",
         extra="ignore",

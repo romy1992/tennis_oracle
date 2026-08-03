@@ -20,16 +20,14 @@ import os
 import sys
 from typing import Iterable, Optional
 
-from dotenv import load_dotenv
-
+from backend.src.app.core.env_files import load_backend_env_files
 from backend.src.app.ml.model_versioning import ModelVersion
 from backend.src.jobs.run_global_update import run_job
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../../properties/config.env")
-load_dotenv(dotenv_path=CONFIG_PATH)
+load_backend_env_files(override=False)
 
 DEFAULT_SYNC_TABLES = ("fixture", "next_fixture", "match_prediction")
 

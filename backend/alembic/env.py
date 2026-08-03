@@ -7,7 +7,6 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
-from dotenv import load_dotenv
 
 # Alembic is run from backend/; add repo root so `backend.*` imports resolve.
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -38,15 +37,22 @@ from backend.src.app.db.base import (  # noqa: E402
     RankingSnapshot,
     RateLimitBucket,
     Standing,
+    AccessLog,
+    Entitlement,
+    PaymentEvent,
+    Plan,
+    Subscription,
     TelegramBotEvent,
     TelegramFeedback,
     TelegramNotificationDelivery,
     TelegramUser,
     Tournament,
+    User,
     WeeklyBetaReport,
     WalkForwardFold,
     WalkForwardRun,
 )
+from backend.src.app.core.env_files import load_backend_env_files  # noqa: E402
 
 _ = (
     AdminUser,
@@ -64,6 +70,12 @@ _ = (
     GlobalUpdateRunItem,
     Standing,
     Player,
+    User,
+    Plan,
+    Subscription,
+    Entitlement,
+    PaymentEvent,
+    AccessLog,
     TelegramBotEvent,
     TelegramFeedback,
     TelegramNotificationDelivery,
@@ -89,11 +101,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-ROOT_DIR = BACKEND_DIR
+# Keep backend/.env as primary source of secrets; config.env is fallback only.
 # Do not override Compose/container DATABASE_URL (host.docker.internal / db).
-# Files may still say localhost for host-side tooling.
-load_dotenv(dotenv_path=ROOT_DIR / ".env", override=False)
-load_dotenv(dotenv_path=ROOT_DIR / "properties" / "config.env", override=False)
+load_backend_env_files(override=False)
 
 database_url = os.getenv("DATABASE_URL") or os.getenv("DATABASE_SOURCE_URL")
 if database_url:

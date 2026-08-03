@@ -17,7 +17,7 @@ Stack containerizzato per **sviluppo locale** e **produzione**. Le immagini non 
 
 **Database di default:** PostgreSQL **sul PC** (`host.docker.internal:5432`), lo stesso di `backend/.env` (`tennis_db`).  
 **db-1** (servizio Compose `db`) resta definito ma **spento** (profilo `embedded-db`); il volume `postgres_data` non viene cancellato.  
-Credenziali: bind-mount di `backend/.env` e `backend/properties/config.env`. Artefatti ML sul host: `MODELS_HOST_PATH` (`.pkl` produzione, **read-only** in container), `PROCESSED_HOST_PATH` (dataset CSV per walk-forward/training, read-only), `REPORTS_HOST_PATH` (metriche JSON **e pickle calibratori ML-02** sotto `calibration/artifacts/`, scrivibile).
+Segreti runtime: `backend/.env` (modello `backend/.env.example`). `backend/properties/config.env` resta fallback non sensibile; entrambi vengono bind-mountati. Artefatti ML sul host: `MODELS_HOST_PATH` (`.pkl` produzione, **read-only** in container), `PROCESSED_HOST_PATH` (dataset CSV per walk-forward/training, read-only), `REPORTS_HOST_PATH` (metriche JSON **e pickle calibratori ML-02** sotto `calibration/artifacts/`, scrivibile).
 
 ---
 
@@ -36,7 +36,8 @@ Credenziali: bind-mount di `backend/.env` e `backend/properties/config.env`. Art
 ```bash
 cp .env.example .env
 # DATABASE_URL punta a host.docker.internal (non localhost, non db)
-# Credenziali app: backend/.env e backend/properties/config.env
+# Segreti app: backend/.env (parti da backend/.env.example)
+# config.env contiene solo fallback non sensibile
 # Non committare secret
 ```
 
@@ -190,7 +191,7 @@ docker compose --profile bot up -d --force-recreate bot   # se usi il bot
 
 | Cosa cambi | Azione |
 |------------|--------|
-| `backend/.env` / `backend/properties/config.env` | `docker compose up -d --force-recreate api` (+ bot se attivo) |
+| `backend/.env` / `backend/properties/config.env` | `docker compose up -d --force-recreate api` (+ bot se attivo); `backend/.env` ha precedenza |
 | Solo modelli `.pkl` sotto `MODELS_HOST_PATH` | nessuna (già montati in sola lettura) |
 | Dataset CSV sotto `PROCESSED_HOST_PATH` / report sotto `REPORTS_HOST_PATH` | nessuna (già montati; recreate `api` se hai appena aggiunto i volume) |
 | Solo documentazione | nessuna |

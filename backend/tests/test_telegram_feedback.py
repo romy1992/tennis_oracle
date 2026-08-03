@@ -190,10 +190,16 @@ class TelegramFeedbackBotHandlersTest(unittest.IsolatedAsyncioTestCase):
         context.user_data = {}
         context.args = []
 
-        with patch(
-            "backend.src.app.telegram.bot._reply",
-            new_callable=AsyncMock,
-        ) as reply:
+        with (
+            patch(
+                "backend.src.app.telegram.bot._reply",
+                new_callable=AsyncMock,
+            ) as reply,
+            patch(
+                "backend.src.app.telegram.access.authorize_telegram_command_safe",
+                return_value=MagicMock(allowed=True, message=None),
+            ),
+        ):
             state = await feedback_start(update, context)
             self.assertEqual(state, FEEDBACK_CATEGORY)
             self.assertIn(FEEDBACK_USER_DATA_KEY, context.user_data)

@@ -1,7 +1,7 @@
 """
 Migrazione dati da un PostgreSQL sorgente (es. locale) a uno destinazione (es. cloud agent).
 
-Configurazione (properties/config.env o variabili d'ambiente):
+Configurazione (backend/.env primario, properties/config.env fallback, o env):
   DATABASE_SOURCE_URL  - DB di origine (es. il tuo PC)
   DATABASE_TARGET_URL  - DB di destinazione (es. server agent)
 
@@ -14,7 +14,6 @@ import logging
 import os
 from typing import Iterable, Optional
 
-from dotenv import load_dotenv
 from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
@@ -30,6 +29,7 @@ from backend.src.entity import (
     Tournament,
 )
 from backend.src.entity.base import Base
+from backend.src.app.core.env_files import load_backend_env_files
 from backend.src.utility.sensitive_data import sanitize_url
 
 _ = (Event, Tournament, Fixture, NextFixture, MatchPrediction, Standing, Player)
@@ -37,9 +37,7 @@ _ = (Event, Tournament, Fixture, NextFixture, MatchPrediction, Standing, Player)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = os.path.join(
-    os.path.dirname(__file__), "../../properties/config.env"
-)
+load_backend_env_files(override=False)
 
 DEFAULT_SOURCE_URL = "postgresql://postgres:postgres@localhost:5432/tennis_db"
 DEFAULT_TARGET_URL = "postgresql://postgres:postgres@localhost:5432/tennis_db"
@@ -81,7 +79,6 @@ class DatabaseMigrator:
         upsert: bool = False,
         tables: Optional[Iterable[str]] = None,
     ):
-        load_dotenv(dotenv_path=CONFIG_PATH)
         self.source_url = source_url or os.getenv(
             "DATABASE_SOURCE_URL", DEFAULT_SOURCE_URL
         )

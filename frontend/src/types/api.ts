@@ -1846,3 +1846,141 @@ export type PublicModelRegistryActionResponse = {
   previous_active: PublicModelRegistryEntry | null;
   message: string;
 };
+
+export type PaymentBillingCycle = "monthly" | "yearly";
+
+export type PaymentCheckoutRequest = {
+  telegram_user_id: number;
+  username?: string | null;
+  plan_code?: string;
+  billing_cycle: PaymentBillingCycle;
+  success_url?: string;
+  cancel_url?: string;
+  idempotency_key: string;
+};
+
+export type PaymentCheckoutResponse = {
+  provider: string;
+  mode: string;
+  idempotency_key: string;
+  checkout_url: string;
+  session_id: string;
+  customer_id: string;
+  plan_code: string;
+  billing_cycle: PaymentBillingCycle | string;
+  expires_at: string | null;
+  reused: boolean;
+};
+
+export type SubscriptionPlanCode = "free" | "pro" | "founder";
+
+export type SubscriptionDashboardOverview = {
+  users_free: number;
+  users_pro: number;
+  users_founder: number;
+  active_subscriptions: number;
+  trialing_subscriptions: number;
+  expiring_within_7_days: number;
+  expiring_within_30_days: number;
+  canceled_subscriptions: number;
+  canceled_last_30_days: number;
+  payment_failed_last_30_days: number;
+  monthly_revenue_cents: number;
+  free_to_pro_users: number;
+  free_user_base: number;
+  free_to_pro_conversion_pct: number | null;
+  churned_last_30_days: number;
+  active_base_last_30_days: number;
+  churn_pct_last_30_days: number | null;
+};
+
+export type SubscriptionDashboardRevenuePoint = {
+  month: string;
+  revenue_cents: number;
+};
+
+export type SubscriptionDashboardSummaryResponse = {
+  generated_at: string;
+  overview: SubscriptionDashboardOverview;
+  monthly_revenue: SubscriptionDashboardRevenuePoint[];
+};
+
+export type SubscriptionDashboardUserRow = {
+  user_id: number;
+  telegram_user_id: number | null;
+  external_ref: string | null;
+  username: string | null;
+  plan_code: SubscriptionPlanCode | string | null;
+  plan_name: string | null;
+  subscription_id: number | null;
+  subscription_status: string | null;
+  started_at: string | null;
+  trial_ends_at: string | null;
+  expires_at: string | null;
+  cancel_at_period_end: boolean;
+  canceled_at: string | null;
+  auto_renew: boolean;
+  payment_failed: boolean;
+  last_payment_status: string | null;
+  last_payment_event_at: string | null;
+};
+
+export type SubscriptionDashboardUserListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: SubscriptionDashboardUserRow[];
+};
+
+export type SubscriptionDashboardEventSource = "payment" | "admin_action";
+
+export type SubscriptionDashboardEventRow = {
+  source: SubscriptionDashboardEventSource;
+  event_id: string;
+  occurred_at: string;
+  event_type: string;
+  status: string | null;
+  user_id: number | null;
+  subscription_id: number | null;
+  plan_code: string | null;
+  amount_cents: number | null;
+  currency: string | null;
+  admin_username: string | null;
+  description: string | null;
+  context_json: string | null;
+};
+
+export type SubscriptionDashboardEventListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: SubscriptionDashboardEventRow[];
+};
+
+export type SubscriptionDashboardSubscriptionRead = {
+  id: number;
+  user_id: number;
+  plan_id: number;
+  status: string;
+  started_at: string;
+  current_period_start_at: string | null;
+  current_period_end_at: string | null;
+  trial_started_at: string | null;
+  trial_ends_at: string | null;
+  renewed_at: string | null;
+  expires_at: string | null;
+  auto_renew: boolean;
+  cancel_at_period_end: boolean;
+  canceled_at: string | null;
+  cancellation_reason: string | null;
+  suspended_at: string | null;
+  suspension_reason: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SubscriptionDashboardManualActionResponse = {
+  message: string;
+  subscription: SubscriptionDashboardSubscriptionRead;
+};
+

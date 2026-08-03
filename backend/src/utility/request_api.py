@@ -7,9 +7,9 @@ import os
 from typing import Any
 
 import requests
-from dotenv import load_dotenv
 from requests import exceptions as requests_exc
 
+from backend.src.app.core.env_files import load_backend_env_files
 from backend.src.utility.sensitive_data import (
     sanitize_payload,
     sanitize_text,
@@ -18,7 +18,7 @@ from backend.src.utility.sensitive_data import (
 
 logger = logging.getLogger(__name__)
 
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../../properties/config.env"))
+load_backend_env_files(override=False)
 API_KEY = os.getenv("API_TENNIS_KEY")
 BASE_URL = os.getenv("API_TENNIS_BASE")
 

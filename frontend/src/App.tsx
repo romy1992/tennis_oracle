@@ -27,6 +27,7 @@ import { CalibrationPage } from "./pages/CalibrationPage";
 import { PublicModelRegistryPage } from "./pages/PublicModelRegistryPage";
 import { ProbabilityBandsPage } from "./pages/ProbabilityBandsPage";
 import { SegmentRoiPage } from "./pages/SegmentRoiPage";
+import { SubscriptionsDashboardPage } from "./pages/SubscriptionsDashboardPage";
 
 function AuthenticatedShell() {
   return (
@@ -63,7 +64,8 @@ export const appRoutes: RouteObject[] = [
           { path: "walk-forward", element: <WalkForwardPage /> },
           { path: "calibration", element: <CalibrationPage /> },
           { path: "probability-bands", element: <ProbabilityBandsPage /> },
-          { path: "segment-roi", element: <SegmentRoiPage /> }
+          { path: "segment-roi", element: <SegmentRoiPage /> },
+          { path: "subscriptions-dashboard", element: <SubscriptionsDashboardPage /> }
         ]
       }
     ]
