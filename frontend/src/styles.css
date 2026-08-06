@@ -80,6 +80,53 @@ a {
   text-transform: uppercase;
 }
 
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nav-group-toggle {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  color: #d7deea;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  justify-content: space-between;
+  line-height: 1.35;
+  padding: 12px 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.nav-group-toggle:hover,
+.nav-group-toggle.active-parent {
+  background: #24304a;
+  color: #ffffff;
+}
+
+.nav-group-caret {
+  color: #8d99ad;
+  font-size: 12px;
+}
+
+.nav-group-items {
+  border-left: 2px solid #24304a;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 14px;
+  padding-left: 8px;
+}
+
+.nav-group-items a {
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
 .sidebar-auth {
   display: grid;
   gap: 10px;

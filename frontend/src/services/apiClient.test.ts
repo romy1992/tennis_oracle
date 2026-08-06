@@ -170,4 +170,37 @@ describe("apiClient", () => {
     expect(String(url)).toContain("/api/subscriptions/dashboard/export.csv");
     expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer abc.token");
   });
+
+  it("updates subscriptions dashboard feature flag", async () => {
+    storeSession("abc.token", futureExpiresAt());
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          key: "telegram.subscriptions_enabled",
+          enabled: false,
+          description: "Mostra comandi e testi abbonamenti nel bot Telegram.",
+          updated_at: "2026-08-06T12:00:00",
+          updated_by: "admin"
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    const updated = await apiClient.updateSubscriptionsDashboardFeatureFlag(
+      "telegram.subscriptions_enabled",
+      { enabled: false }
+    );
+
+    expect(updated.enabled).toBe(false);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain(
+      "/api/subscriptions/dashboard/feature-flags/telegram.subscriptions_enabled"
+    );
+    expect(init?.method).toBe("PATCH");
+    expect(init?.body).toBe(JSON.stringify({ enabled: false }));
+  });
 });

@@ -62,6 +62,8 @@ const apiMocks = vi.hoisted(() => ({
   getSubscriptionsDashboardSummary: vi.fn(),
   getSubscriptionsDashboardUsers: vi.fn(),
   getSubscriptionsDashboardEvents: vi.fn(),
+  getSubscriptionsDashboardFeatureFlags: vi.fn(),
+  updateSubscriptionsDashboardFeatureFlag: vi.fn(),
   suspendDashboardSubscription: vi.fn(),
   resumeDashboardSubscription: vi.fn(),
   cancelDashboardSubscription: vi.fn(),

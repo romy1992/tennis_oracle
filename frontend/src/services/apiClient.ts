@@ -66,6 +66,8 @@ import type {
   PublicModelRegistryStatus,
   PaymentCheckoutRequest,
   PaymentCheckoutResponse,
+  FeatureFlagListResponse,
+  FeatureFlagRead,
   SubscriptionDashboardSummaryResponse,
   SubscriptionDashboardUserListResponse,
   SubscriptionDashboardEventListResponse,
@@ -212,6 +214,16 @@ export const apiClient = {
   getSubscriptionsDashboardSummary: (params: { months?: number } = {}) =>
     request<SubscriptionDashboardSummaryResponse>(
       withQuery("/api/subscriptions/dashboard/summary", params)
+    ),
+  getSubscriptionsDashboardFeatureFlags: () =>
+    request<FeatureFlagListResponse>("/api/subscriptions/dashboard/feature-flags"),
+  updateSubscriptionsDashboardFeatureFlag: (
+    featureKey: string,
+    payload: { enabled: boolean }
+  ) =>
+    patch<FeatureFlagRead>(
+      `/api/subscriptions/dashboard/feature-flags/${encodeURIComponent(featureKey)}`,
+      payload
     ),
   getSubscriptionsDashboardUsers: (
     params: {

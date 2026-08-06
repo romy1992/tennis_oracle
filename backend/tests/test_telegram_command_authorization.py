@@ -94,6 +94,10 @@ class TelegramCommandAuthorizationServiceTest(unittest.TestCase):
 
         with (
             patch(
+                "backend.src.app.services.telegram_command_authorization.is_feature_enabled_safe",
+                return_value=True,
+            ),
+            patch(
                 "backend.src.app.services.telegram_command_authorization.check_telegram_access_safe",
                 return_value=TelegramUserAccessResult(
                     allowed=True,
@@ -118,6 +122,174 @@ class TelegramCommandAuthorizationServiceTest(unittest.TestCase):
         self.assertFalse(result.allowed)
         self.assertIn("piano premium", (result.message or "").lower())
         self.assertIn("https://example.com/upgrade", result.message or "")
+
+    def test_subscription_commands_are_disabled_by_feature_flag(self):
+        with (
+            patch(
+                "backend.src.app.services.telegram_command_authorization.is_feature_enabled_safe",
+                return_value=False,
+            ),
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_access_safe"
+            ) as gate_mock,
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_entitlement_safe"
+            ) as entitlement_mock,
+        ):
+            result = authorize_telegram_command_safe(
+                telegram_user_id=77,
+                policy=command_policy(COMMAND_ABBONATI),
+                resource="abbonati",
+            )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, "feature_disabled")
+        self.assertEqual(result.message, "Comando non disponibile al momento.")
+        gate_mock.assert_not_called()
+        entitlement_mock.assert_not_called()
+
+    def test_premium_command_feature_check_is_fail_closed(self):
+        policy = command_policy(COMMAND_PARTITE)
+        calls: list[tuple[str, bool]] = []
+
+        def _feature_enabled(*, key: str, default_enabled: bool = True) -> bool:
+            calls.append((key, default_enabled))
+            if key == "telegram.authorizations_enabled":
+                return True
+            return False
+
+        with (
+            patch(
+                "backend.src.app.services.telegram_command_authorization.is_feature_enabled_safe",
+                side_effect=_feature_enabled,
+            ),
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_access_safe"
+            ) as gate_mock,
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_entitlement_safe"
+            ) as entitlement_mock,
+        ):
+            result = authorize_telegram_command_safe(
+                telegram_user_id=77,
+                policy=policy,
+                resource="partite",
+            )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, "feature_disabled")
+        self.assertEqual(result.message, "Comando non disponibile al momento.")
+        self.assertIn((policy.feature_flag_key or "", False), calls)
+        gate_mock.assert_not_called()
+        entitlement_mock.assert_not_called()
+
+    def test_premium_command_unlocks_when_subscriptions_disabled(self):
+        """Piano abbonamenti OFF -> /partite, /schedine, /statistiche si sbloccano."""
+
+        def _feature_enabled(*, key: str, default_enabled: bool = True) -> bool:
+            if key == "telegram.subscriptions_enabled":
+                return False
+            return True
+
+        with (
+            patch(
+                "backend.src.app.services.telegram_command_authorization.is_feature_enabled_safe",
+                side_effect=_feature_enabled,
+            ),
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_access_safe",
+                return_value=TelegramUserAccessResult(
+                    allowed=True,
+                    status="active",
+                    reason=None,
+                    terms_required=False,
+                    terms_accepted=True,
+                    user=None,
+                ),
+            ),
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_entitlement_safe",
+                return_value=_decision(allowed=False, reason="missing_entitlement", plan_code="free"),
+            ),
+        ):
+            result = authorize_telegram_command_safe(
+                telegram_user_id=77,
+                policy=command_policy(COMMAND_PARTITE),
+                resource="partite",
+            )
+
+        self.assertTrue(result.allowed)
+        self.assertIsNone(result.message)
+        self.assertEqual(result.reason, "subscriptions_disabled_bypass")
+
+    def test_premium_bypass_does_not_hide_real_entitlement_errors(self):
+        """Il bypass da subscriptions OFF non deve nascondere errori tecnici reali."""
+
+        def _feature_enabled(*, key: str, default_enabled: bool = True) -> bool:
+            if key == "telegram.subscriptions_enabled":
+                return False
+            return True
+
+        with (
+            patch(
+                "backend.src.app.services.telegram_command_authorization.is_feature_enabled_safe",
+                side_effect=_feature_enabled,
+            ),
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_access_safe",
+                return_value=TelegramUserAccessResult(
+                    allowed=True,
+                    status="active",
+                    reason=None,
+                    terms_required=False,
+                    terms_accepted=True,
+                    user=None,
+                ),
+            ),
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_entitlement_safe",
+                return_value=_decision(allowed=False, reason="entitlement_check_error", plan_code=None),
+            ),
+        ):
+            result = authorize_telegram_command_safe(
+                telegram_user_id=77,
+                policy=command_policy(COMMAND_PARTITE),
+                resource="partite",
+            )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, "entitlement_check_error")
+
+    def test_free_command_is_unaffected_by_premium_bypass(self):
+        """/piano resta legato al proprio feature flag (subscriptions), non al bypass premium."""
+
+        def _feature_enabled(*, key: str, default_enabled: bool = True) -> bool:
+            if key == "telegram.subscriptions_enabled":
+                return False
+            return True
+
+        with (
+            patch(
+                "backend.src.app.services.telegram_command_authorization.is_feature_enabled_safe",
+                side_effect=_feature_enabled,
+            ),
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_access_safe"
+            ) as gate_mock,
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_entitlement_safe"
+            ) as entitlement_mock,
+        ):
+            result = authorize_telegram_command_safe(
+                telegram_user_id=77,
+                policy=command_policy(COMMAND_PIANO),
+                resource="piano",
+            )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, "feature_disabled")
+        gate_mock.assert_not_called()
+        entitlement_mock.assert_not_called()
 
 
 class TelegramCommandAccessDecoratorTest(unittest.IsolatedAsyncioTestCase):
@@ -194,6 +366,10 @@ class TelegramCommandAccessDecoratorTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+
 
 
 

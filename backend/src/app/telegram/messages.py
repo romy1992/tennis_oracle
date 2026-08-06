@@ -17,36 +17,102 @@ LOADING_PARTITE = "Caricamento partite in corso…"
 LOADING_SCHEDINE = "Caricamento schedine in corso…"
 LOADING_STATISTICHE = "Caricamento statistiche in corso…"
 
-WELCOME_TEXT = """Ciao! Sono il bot di tennis_oracle.
+def build_welcome_text(
+    *,
+    include_fixtures: bool = True,
+    include_slips: bool = True,
+    include_statistics: bool = True,
+    include_subscription_commands: bool = True,
+    include_notifications: bool = True,
+    include_feedback: bool = True,
+    include_terms: bool = True,
+) -> str:
+    lines = [
+        "Ciao! Sono il bot di tennis_oracle.",
+        "",
+        "Usa i pulsanti qui sotto oppure i comandi:",
+    ]
 
-Usa i pulsanti qui sotto oppure i comandi:
-/partite — partite di oggi
-/schedine — schedine di oggi
-/statistiche — andamento
-/piano — stato abbonamento
-/abbonati — attiva il piano premium
-/gestisci_abbonamento — rinnovo e fatturazione
-/notifiche — preferenze push
-/feedback — invia un feedback
+    if include_fixtures:
+        lines.append("/partite - partite di oggi")
+    if include_slips:
+        lines.append("/schedine - schedine di oggi")
+    if include_statistics:
+        lines.append("/statistiche - andamento")
 
-/help — guida rapida
-/accetta_condizioni — condizioni d'uso (se richieste)"""
+    if include_subscription_commands:
+        lines.extend(
+            [
+                "/piano - stato abbonamento",
+                "/abbonati - attiva il piano premium",
+                "/gestisci_abbonamento - rinnovo e fatturazione",
+            ]
+        )
 
-HELP_TEXT = """Guida rapida
+    if include_notifications:
+        lines.append("/notifiche - preferenze push")
+    if include_feedback:
+        lines.append("/feedback - invia un feedback")
 
-/partite — partite e pronostici di oggi (con indicazione di valore)
-/schedine — schedine proposte di oggi
-/statistiche — andamento storico (partite e schedine)
-/piano — mostra piano, prova, rinnovo o scadenza
-/abbonati — genera link checkout per piano premium
-/gestisci_abbonamento — apre il portale cliente per rinnovo/fatturazione
-/notifiche — attiva, disattiva e preferenze push
-/feedback — invia un feedback (categoria, valutazione, messaggio)
-/annulla — annulla il feedback in corso
+    lines.extend(["", "/help - guida rapida"])
+    if include_terms:
+        lines.append("/accetta_condizioni - condizioni d'uso (se richieste)")
+    return "\n".join(lines)
 
-Puoi anche usare i pulsanti del menu iniziale (/start).
 
-Se non ci sono partite o schedine, riprova più tardi dopo l'aggiornamento giornaliero."""
+def build_help_text(
+    *,
+    include_fixtures: bool = True,
+    include_slips: bool = True,
+    include_statistics: bool = True,
+    include_subscription_commands: bool = True,
+    include_notifications: bool = True,
+    include_feedback: bool = True,
+) -> str:
+    lines = [
+        "Guida rapida",
+        "",
+    ]
+
+    if include_fixtures:
+        lines.append("/partite - partite e pronostici di oggi (con indicazione di valore)")
+    if include_slips:
+        lines.append("/schedine - schedine proposte di oggi")
+    if include_statistics:
+        lines.append("/statistiche - andamento storico (partite e schedine)")
+
+    if include_subscription_commands:
+        lines.extend(
+            [
+                "/piano - mostra piano, prova, rinnovo o scadenza",
+                "/abbonati - genera link checkout per piano premium",
+                "/gestisci_abbonamento - apre il portale cliente per rinnovo/fatturazione",
+            ]
+        )
+
+    if include_notifications:
+        lines.append("/notifiche - attiva, disattiva e preferenze push")
+    if include_feedback:
+        lines.extend(
+            [
+                "/feedback - invia un feedback (categoria, valutazione, messaggio)",
+                "/annulla - annulla il feedback in corso",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "Puoi anche usare i pulsanti del menu iniziale (/start).",
+            "",
+            "Se non ci sono partite o schedine, riprova più tardi dopo l'aggiornamento giornaliero.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+WELCOME_TEXT = build_welcome_text()
+HELP_TEXT = build_help_text()
 
 ACCOUNT_STATUS_LABELS = {
     "active": "Attivo",
@@ -224,6 +290,7 @@ def format_subscription_overview(
     auto_renew: bool,
     cancel_at_period_end: bool,
     payment_failed: bool,
+    include_subscription_commands: bool = True,
     feedback_url: str | None = None,
 ) -> str:
     plan_label = (plan_name or "Free").strip() or "Free"
@@ -246,12 +313,18 @@ def format_subscription_overview(
         lines.append(f"Scadenza: {expiry_line} (ora italiana)")
 
     if payment_failed:
-        lines.append(
-            "Pagamento non riuscito rilevato. Usa /gestisci_abbonamento per aggiornare la fatturazione."
-        )
+        if include_subscription_commands:
+            lines.append(
+                "Pagamento non riuscito rilevato. Usa /gestisci_abbonamento per aggiornare la fatturazione."
+            )
+        else:
+            lines.append("Pagamento non riuscito rilevato. Contatta il supporto.")
 
     if status in {"expired", "canceled"}:
-        lines.append("Per riattivare il premium usa /abbonati.")
+        if include_subscription_commands:
+            lines.append("Per riattivare il premium usa /abbonati.")
+        else:
+            lines.append("Per riattivare il premium contatta il supporto.")
 
     return append_message_footer(
         "\n".join(lines),
@@ -320,12 +393,52 @@ def append_message_footer(
     return "\n\n".join(parts)
 
 
-def format_help_text(*, feedback_url: str | None = None) -> str:
-    return append_message_footer(HELP_TEXT, feedback_url=feedback_url)
+def format_help_text(
+    *,
+    feedback_url: str | None = None,
+    include_fixtures: bool = True,
+    include_slips: bool = True,
+    include_statistics: bool = True,
+    include_subscription_commands: bool = True,
+    include_notifications: bool = True,
+    include_feedback: bool = True,
+) -> str:
+    return append_message_footer(
+        build_help_text(
+            include_fixtures=include_fixtures,
+            include_slips=include_slips,
+            include_statistics=include_statistics,
+            include_subscription_commands=include_subscription_commands,
+            include_notifications=include_notifications,
+            include_feedback=include_feedback,
+        ),
+        feedback_url=feedback_url,
+    )
 
 
-def format_welcome_text(*, feedback_url: str | None = None) -> str:
-    return append_message_footer(WELCOME_TEXT, feedback_url=feedback_url)
+def format_welcome_text(
+    *,
+    feedback_url: str | None = None,
+    include_fixtures: bool = True,
+    include_slips: bool = True,
+    include_statistics: bool = True,
+    include_subscription_commands: bool = True,
+    include_notifications: bool = True,
+    include_feedback: bool = True,
+    include_terms: bool = True,
+) -> str:
+    return append_message_footer(
+        build_welcome_text(
+            include_fixtures=include_fixtures,
+            include_slips=include_slips,
+            include_statistics=include_statistics,
+            include_subscription_commands=include_subscription_commands,
+            include_notifications=include_notifications,
+            include_feedback=include_feedback,
+            include_terms=include_terms,
+        ),
+        feedback_url=feedback_url,
+    )
 
 
 def predicted_winner_name(item: dict[str, Any]) -> str | None:

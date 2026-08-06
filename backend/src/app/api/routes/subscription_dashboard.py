@@ -18,6 +18,16 @@ from backend.src.app.schemas.subscription_dashboard import (
     SubscriptionDashboardSuspendRequest,
     SubscriptionDashboardUserListResponse,
 )
+from backend.src.app.schemas.feature_flags import (
+    FeatureFlagListResponse,
+    FeatureFlagRead,
+    FeatureFlagUpdateRequest,
+)
+from backend.src.app.services.feature_flags import (
+    FeatureFlagError,
+    list_feature_flags,
+    set_feature_flag,
+)
 from backend.src.app.services.subscription_dashboard import (
     cancel_subscription_as_admin,
     ensure_subscription_exists,
@@ -43,6 +53,10 @@ def _raise_domain(exc: SubscriptionError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
+def _raise_feature_domain(exc: FeatureFlagError) -> None:
+    raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
 @router.get("/summary", response_model=SubscriptionDashboardSummaryResponse)
 def read_dashboard_summary(
     months: int = Query(default=6, ge=1, le=24),
@@ -52,6 +66,57 @@ def read_dashboard_summary(
         return get_subscription_dashboard_summary(db, months=months)
     except SubscriptionError as exc:
         _raise_domain(exc)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database not available.") from exc
+
+
+@router.get("/feature-flags", response_model=FeatureFlagListResponse)
+def read_dashboard_feature_flags(
+    db: Session = Depends(get_db),
+) -> FeatureFlagListResponse:
+    try:
+        return FeatureFlagListResponse(items=list_feature_flags(db))
+    except FeatureFlagError as exc:
+        _raise_feature_domain(exc)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database not available.") from exc
+
+
+@router.patch("/feature-flags/{feature_key}", response_model=FeatureFlagRead)
+def update_dashboard_feature_flag(
+    feature_key: str,
+    payload: FeatureFlagUpdateRequest,
+    admin: AdminUser = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> FeatureFlagRead:
+    try:
+        updated = set_feature_flag(
+            db,
+            key=feature_key,
+            enabled=payload.enabled,
+            updated_by=admin.username,
+            commit=False,
+        )
+        log_admin_action(
+            db,
+            admin=admin,
+            action="feature_flag_update",
+            target_type="feature_flag",
+            target_id=updated.key,
+            description=(
+                f"{updated.key} impostata a {'ON' if updated.enabled else 'OFF'}"
+            ),
+            context={
+                "feature_key": updated.key,
+                "enabled": bool(updated.enabled),
+                "updated_by": admin.username,
+            },
+            commit=False,
+        )
+        db.commit()
+        return updated
+    except FeatureFlagError as exc:
+        _raise_feature_domain(exc)
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=503, detail="Database not available.") from exc
 

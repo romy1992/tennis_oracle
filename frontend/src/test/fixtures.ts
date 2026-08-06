@@ -18,6 +18,7 @@ import type {
   LiveBetaDashboardResponse,
   PublishedSettledTip,
   WeeklyBetaReport,
+  FeatureFlagListResponse,
   SubscriptionDashboardSummaryResponse,
   SubscriptionDashboardUserListResponse,
   SubscriptionDashboardEventListResponse
@@ -1404,6 +1405,60 @@ export const subscriptionDashboardEvents: SubscriptionDashboardEventListResponse
       admin_username: "admin",
       description: "Manual suspension from admin dashboard",
       context_json: '{"reason":"manual_review"}'
+    }
+  ]
+};
+
+export const featureFlagsList: FeatureFlagListResponse = {
+  items: [
+    {
+      key: "telegram.subscriptions_enabled",
+      enabled: true,
+      description: "Mostra comandi e testi abbonamenti nel bot Telegram.",
+      updated_at: `${TODAY}T12:00:00Z`,
+      updated_by: "admin"
+    },
+    {
+      key: "telegram.statistics_enabled",
+      enabled: true,
+      description: "Mostra il comando /statistiche nel bot Telegram.",
+      updated_at: `${TODAY}T12:00:00Z`,
+      updated_by: "admin"
+    },
+    {
+      key: "telegram.notifications_enabled",
+      enabled: true,
+      description: "Mostra il comando /notifiche nel bot Telegram.",
+      updated_at: `${TODAY}T12:00:00Z`,
+      updated_by: "admin"
+    },
+    {
+      key: "telegram.authorizations_enabled",
+      enabled: true,
+      description: "Applica il gate whitelist/admin prima dei comandi Telegram.",
+      updated_at: `${TODAY}T12:00:00Z`,
+      updated_by: "admin"
+    },
+    {
+      key: "telegram.fixtures_enabled",
+      enabled: true,
+      description: "Mostra il comando /partite nel bot Telegram.",
+      updated_at: `${TODAY}T12:00:00Z`,
+      updated_by: "admin"
+    },
+    {
+      key: "telegram.slips_enabled",
+      enabled: true,
+      description: "Mostra il comando /schedine nel bot Telegram.",
+      updated_at: `${TODAY}T12:00:00Z`,
+      updated_by: "admin"
+    },
+    {
+      key: "telegram.feedback_enabled",
+      enabled: true,
+      description: "Mostra il comando /feedback nel bot Telegram.",
+      updated_at: `${TODAY}T12:00:00Z`,
+      updated_by: "admin"
     }
   ]
 };
