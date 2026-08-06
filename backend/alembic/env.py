@@ -21,6 +21,7 @@ from backend.src.app.db.base import (  # noqa: E402
     BettingSlipDay,
     BettingSlipPick,
     Event,
+    FeatureFlag,
     FeatureSnapshot,
     Fixture,
     GlobalUpdateRun,
@@ -57,6 +58,7 @@ from backend.src.app.core.env_files import load_backend_env_files  # noqa: E402
 _ = (
     AdminUser,
     Event,
+    FeatureFlag,
     Tournament,
     Fixture,
     NextFixture,

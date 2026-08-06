@@ -9,6 +9,7 @@ from backend.src.entity.admin_audit_log import AdminAuditLog
 from backend.src.entity.betting_slip import BettingSlip, BettingSlipDay, BettingSlipPick
 from backend.src.entity.event import Event
 from backend.src.entity.fixture import Fixture
+from backend.src.entity.feature_flag import FeatureFlag
 from backend.src.entity.global_update_run import GlobalUpdateRun, GlobalUpdateRunItem
 from backend.src.entity.match_prediction import MatchPrediction
 from backend.src.entity.next_fixture import NextFixture
@@ -44,6 +45,7 @@ __all__ = [
     "Event",
     "Tournament",
     "Fixture",
+    "FeatureFlag",
     "NextFixture",
     "MatchPrediction",
     "PrematchOddsSnapshot",

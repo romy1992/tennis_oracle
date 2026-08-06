@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { TelegramBotPage } from "./TelegramBotPage";
 import { ApiError } from "../services/apiClient";
@@ -34,6 +35,8 @@ const apiMocks = vi.hoisted(() => ({
   getDailyPredictionStats: vi.fn(),
   getTelegramBotStats: vi.fn(),
   getTelegramBotEvents: vi.fn(),
+  getSubscriptionsDashboardFeatureFlags: vi.fn(),
+  updateSubscriptionsDashboardFeatureFlag: vi.fn(),
   getPublishedPredictions: vi.fn(),
   getPublishedPredictionVersions: vi.fn(),
   getPublishedLiveStats: vi.fn()
@@ -71,9 +74,24 @@ describe("TelegramBotPage", () => {
     expect(await screen.findByRole("heading", { name: "Bot Telegram" })).toBeInTheDocument();
     expect(screen.getByText("Eventi totali")).toBeInTheDocument();
     expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Toggle comandi bot" })).toBeInTheDocument();
+    expect(screen.getByText("7 flag")).toBeInTheDocument();
+    expect(screen.getByText("Partite (/partite)")).toBeInTheDocument();
+    expect(screen.getByText("Abbonamenti (/piano, /abbonati, /gestisci_abbonamento)")).toBeInTheDocument();
+    expect(screen.getByText(/Nasconde i comandi abbonamento e SBLOCCA/)).toBeInTheDocument();
     expect(screen.getByLabelText("Comando / azione")).toBeInTheDocument();
     expect(screen.getAllByText("/schedine").length).toBeGreaterThan(0);
     expect(screen.getByText("@tester (Test User)")).toBeInTheDocument();
+  });
+
+  it("toggles Telegram command feature flag", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TelegramBotPage />);
+
+    expect(await screen.findByText("Partite (/partite)")).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Disattiva" })[0]);
+
+    expect(apiMocks.updateSubscriptionsDashboardFeatureFlag).toHaveBeenCalled();
   });
 
   it("shows empty events list", async () => {

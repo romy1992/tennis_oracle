@@ -394,6 +394,21 @@ class TelegramFormattingTest(unittest.TestCase):
         self.assertIn("Cancellazione programmata al:", text)
         self.assertIn("Pagamento non riuscito rilevato", text)
 
+    def test_format_subscription_overview_hides_subscription_commands_when_disabled(self):
+        text = format_subscription_overview(
+            plan_name="Pro",
+            subscription_status="expired",
+            trial_ends_at=None,
+            expires_at=datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc),
+            auto_renew=False,
+            cancel_at_period_end=False,
+            payment_failed=True,
+            include_subscription_commands=False,
+        )
+        self.assertNotIn("/gestisci_abbonamento", text)
+        self.assertNotIn("/abbonati", text)
+        self.assertIn("Contatta il supporto", text)
+
     def test_select_distinct_model_payloads_keeps_one_when_equal(self):
         shared_slips = [
             {
@@ -444,7 +459,13 @@ class TelegramFormattingTest(unittest.TestCase):
 
 class TelegramBotUxTest(unittest.TestCase):
     def test_main_menu_keyboard_has_primary_actions(self):
-        markup = main_menu_keyboard()
+        markup = main_menu_keyboard(
+            flags={
+                "telegram.fixtures_enabled": True,
+                "telegram.slips_enabled": True,
+                "telegram.statistics_enabled": True,
+            }
+        )
         labels = [button.text for row in markup.inline_keyboard for button in row]
         data = [button.callback_data for row in markup.inline_keyboard for button in row]
         self.assertEqual(labels, ["Partite", "Schedine", "Statistiche", "Aiuto"])
@@ -471,6 +492,16 @@ class TelegramBotUxTest(unittest.TestCase):
         self.assertNotIn("logistic_regression", help_text)
         self.assertNotIn("random_forest", welcome)
         self.assertNotIn("v3", welcome)
+
+    def test_help_and_welcome_hide_subscription_commands_when_disabled(self):
+        help_text = format_help_text(include_subscription_commands=False)
+        welcome = format_welcome_text(include_subscription_commands=False)
+        self.assertNotIn("/piano", help_text)
+        self.assertNotIn("/abbonati", help_text)
+        self.assertNotIn("/gestisci_abbonamento", help_text)
+        self.assertNotIn("/piano", welcome)
+        self.assertNotIn("/abbonati", welcome)
+        self.assertNotIn("/gestisci_abbonamento", welcome)
 
     def test_format_last_updated_rome(self):
         line = format_last_updated("2026-07-04T10:15:00+00:00")

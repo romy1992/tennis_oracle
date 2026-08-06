@@ -26,7 +26,8 @@ import {
   segmentRoiAnalysis,
   subscriptionDashboardSummary,
   subscriptionDashboardUsers,
-  subscriptionDashboardEvents
+  subscriptionDashboardEvents,
+  featureFlagsList
 } from "./fixtures";
 
 export type ApiMocks = Record<string, Mock>;
@@ -82,6 +83,8 @@ export function stubDefaultApi(apiMocks: {
   getSubscriptionsDashboardSummary?: Mock;
   getSubscriptionsDashboardUsers?: Mock;
   getSubscriptionsDashboardEvents?: Mock;
+  getSubscriptionsDashboardFeatureFlags?: Mock;
+  updateSubscriptionsDashboardFeatureFlag?: Mock;
   suspendDashboardSubscription?: Mock;
   resumeDashboardSubscription?: Mock;
   cancelDashboardSubscription?: Mock;
@@ -194,6 +197,19 @@ export function stubDefaultApi(apiMocks: {
   apiMocks.getSubscriptionsDashboardSummary?.mockResolvedValue(subscriptionDashboardSummary);
   apiMocks.getSubscriptionsDashboardUsers?.mockResolvedValue(subscriptionDashboardUsers);
   apiMocks.getSubscriptionsDashboardEvents?.mockResolvedValue(subscriptionDashboardEvents);
+  apiMocks.getSubscriptionsDashboardFeatureFlags?.mockResolvedValue(featureFlagsList);
+  apiMocks.updateSubscriptionsDashboardFeatureFlag?.mockImplementation(
+    async (featureKey: string, payload: { enabled: boolean }) => {
+      const current = featureFlagsList.items.find((item) => item.key === featureKey);
+      return {
+        key: featureKey,
+        enabled: payload.enabled,
+        description: current?.description || null,
+        updated_at: new Date().toISOString(),
+        updated_by: "admin"
+      };
+    }
+  );
   apiMocks.suspendDashboardSubscription?.mockResolvedValue({
     message: "Abbonamento sospeso.",
     subscription: {

@@ -18,6 +18,7 @@ from backend.src.app.scheduler import (
 )
 from backend.src.app.services.auth import ensure_bootstrap_admin
 from backend.src.app.services.calibration import reconcile_orphaned_calibration_runs
+from backend.src.app.services.feature_flags import seed_default_feature_flags
 from backend.src.app.services.global_update import reconcile_orphaned_runs
 from backend.src.app.services.walk_forward import reconcile_orphaned_walk_forward_runs
 
@@ -60,6 +61,14 @@ async def lifespan(_app: FastAPI):
 
             logging.getLogger(__name__).exception(
                 "Failed to bootstrap admin user from environment."
+            )
+        try:
+            seed_default_feature_flags(db, commit=True)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Failed to seed default feature flags on startup."
             )
     start_global_update_scheduler()
     yield

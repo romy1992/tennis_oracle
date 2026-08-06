@@ -160,6 +160,14 @@ def _seed_dashboard_data(db_session):
 
 def test_subscription_dashboard_requires_admin(client):
     assert client.get("/api/subscriptions/dashboard/summary").status_code == 401
+    assert client.get("/api/subscriptions/dashboard/feature-flags").status_code == 401
+    assert (
+        client.patch(
+            "/api/subscriptions/dashboard/feature-flags/telegram.subscriptions_enabled",
+            json={"enabled": False},
+        ).status_code
+        == 401
+    )
     assert client.get("/api/subscriptions/dashboard/users").status_code == 401
     assert client.get("/api/subscriptions/dashboard/events").status_code == 401
     assert client.get("/api/subscriptions/dashboard/export.csv").status_code == 401
@@ -278,4 +286,57 @@ def test_subscription_dashboard_manual_actions_are_audited(client, auth_headers,
     assert events.status_code == 200
     event_items = events.json()["items"]
     assert any(item["source"] == "admin_action" for item in event_items)
+
+
+def test_subscription_dashboard_feature_flags_toggle_and_audit(client, auth_headers, db_session):
+    listed = client.get(
+        "/api/subscriptions/dashboard/feature-flags",
+        headers=auth_headers,
+    )
+    assert listed.status_code == 200
+    items = listed.json()["items"]
+    keys = {item["key"] for item in items}
+    assert {
+        "telegram.subscriptions_enabled",
+        "telegram.statistics_enabled",
+        "telegram.notifications_enabled",
+        "telegram.authorizations_enabled",
+        "telegram.fixtures_enabled",
+        "telegram.slips_enabled",
+        "telegram.feedback_enabled",
+    }.issubset(keys)
+
+    updated = client.patch(
+        "/api/subscriptions/dashboard/feature-flags/telegram.subscriptions_enabled",
+        headers=auth_headers,
+        json={"enabled": False},
+    )
+    assert updated.status_code == 200
+    payload = updated.json()
+    assert payload["key"] == "telegram.subscriptions_enabled"
+    assert payload["enabled"] is False
+
+    listed_again = client.get(
+        "/api/subscriptions/dashboard/feature-flags",
+        headers=auth_headers,
+    )
+    assert listed_again.status_code == 200
+    row = next(
+        item
+        for item in listed_again.json()["items"]
+        if item["key"] == "telegram.subscriptions_enabled"
+    )
+    assert row["enabled"] is False
+
+    db_session.expire_all()
+    log = db_session.scalars(
+        select(AdminAuditLog)
+        .where(
+            AdminAuditLog.action == "feature_flag_update",
+            AdminAuditLog.target_id == "telegram.subscriptions_enabled",
+        )
+        .order_by(AdminAuditLog.id.desc())
+    ).first()
+    assert log is not None
+
 

@@ -4,6 +4,7 @@ import { MetricCard } from "../components/MetricCard";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
 import type {
+  FeatureFlagRead,
   TelegramBotEvent,
   TelegramBotEventsResponse,
   TelegramBotStatsResponse
@@ -12,6 +13,90 @@ import { formatDate, todayLocalISODate } from "../utils/tennis";
 
 const PAGE_SIZE = 50;
 const DAYS_PAGE_SIZE = 5;
+
+// Ordine di visualizzazione: abbonamenti/policy prima, poi i singoli comandi.
+const FEATURE_FLAG_ORDER = [
+  "telegram.subscriptions_enabled",
+  "telegram.statistics_enabled",
+  "telegram.notifications_enabled",
+  "telegram.authorizations_enabled",
+  "telegram.fixtures_enabled",
+  "telegram.slips_enabled",
+  "telegram.feedback_enabled"
+];
+
+type FeatureFlagInfo = {
+  label: string;
+  onText: string;
+  offText: string;
+};
+
+const FEATURE_FLAG_INFO: Record<string, FeatureFlagInfo> = {
+  "telegram.subscriptions_enabled": {
+    label: "Abbonamenti (/piano, /abbonati, /gestisci_abbonamento)",
+    onText:
+      "Mostra i comandi abbonamento e applica il blocco premium su /partite, /schedine, /statistiche per gli utenti free.",
+    offText:
+      "Nasconde i comandi abbonamento e SBLOCCA /partite, /schedine, /statistiche per tutti gli utenti (nessun blocco premium/upgrade)."
+  },
+  "telegram.statistics_enabled": {
+    label: "Statistiche (/statistiche)",
+    onText: "Il comando /statistiche e visibile in menu/help e funzionante.",
+    offText:
+      "Il comando /statistiche e nascosto ovunque (menu, /start, /help) e risponde \"Comando non disponibile al momento.\""
+  },
+  "telegram.notifications_enabled": {
+    label: "Notifiche (/notifiche)",
+    onText: "Il comando /notifiche e visibile e gli utenti possono gestire le preferenze push.",
+    offText:
+      "Il comando /notifiche e nascosto ovunque e risponde \"Comando non disponibile al momento.\""
+  },
+  "telegram.authorizations_enabled": {
+    label: "Autorizzazioni admin/whitelist",
+    onText:
+      "Applica il gate whitelist/admin: solo utenti attivati/approvati possono usare i comandi protetti.",
+    offText:
+      "Bypassa whitelist/admin: tutti gli utenti possono usare i comandi attivi senza attesa di approvazione."
+  },
+  "telegram.fixtures_enabled": {
+    label: "Partite (/partite)",
+    onText: "Il comando /partite e visibile in menu/help e funzionante.",
+    offText:
+      "Il comando /partite e nascosto ovunque (menu, /start, /help) e risponde \"Comando non disponibile al momento.\""
+  },
+  "telegram.slips_enabled": {
+    label: "Schedine (/schedine)",
+    onText: "Il comando /schedine e visibile in menu/help e funzionante.",
+    offText:
+      "Il comando /schedine e nascosto ovunque (menu, /start, /help) e risponde \"Comando non disponibile al momento.\""
+  },
+  "telegram.feedback_enabled": {
+    label: "Feedback (/feedback)",
+    onText: "Il comando /feedback e visibile e gli utenti possono inviare segnalazioni.",
+    offText:
+      "Il comando /feedback e nascosto ovunque e risponde \"Comando non disponibile al momento.\""
+  }
+};
+
+function featureFlagInfo(key: string): FeatureFlagInfo {
+  return (
+    FEATURE_FLAG_INFO[key] || {
+      label: key,
+      onText: "Funzionalita attiva.",
+      offText: "Funzionalita disattivata."
+    }
+  );
+}
+
+function sortFeatureFlags(items: FeatureFlagRead[]): FeatureFlagRead[] {
+  return [...items].sort((left, right) => {
+    const leftIndex = FEATURE_FLAG_ORDER.indexOf(left.key);
+    const rightIndex = FEATURE_FLAG_ORDER.indexOf(right.key);
+    const safeLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
+    const safeRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
+    return safeLeft - safeRight;
+  });
+}
 
 function todayIso() {
   return todayLocalISODate();
@@ -50,6 +135,7 @@ function successLabel(value: boolean | null) {
 export function TelegramBotPage() {
   const [stats, setStats] = useState<TelegramBotStatsResponse | null>(null);
   const [events, setEvents] = useState<TelegramBotEventsResponse | null>(null);
+  const [featureFlags, setFeatureFlags] = useState<FeatureFlagRead[]>([]);
   const [fromDate, setFromDate] = useState(() => daysAgoIso(30));
   const [toDate, setToDate] = useState(() => todayIso());
   const [action, setAction] = useState("");
@@ -59,13 +145,15 @@ export function TelegramBotPage() {
   const [daysPage, setDaysPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyFeatureKey, setBusyFeatureKey] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
         setLoading(true);
         const parsedUserId = userId.trim() ? Number(userId.trim()) : undefined;
-        const [statsData, eventsData] = await Promise.all([
+        const [statsData, eventsData, featureFlagsData] = await Promise.all([
           apiClient.getTelegramBotStats({ from: fromDate, to: toDate }),
           apiClient.getTelegramBotEvents({
             from: fromDate,
@@ -78,10 +166,12 @@ export function TelegramBotPage() {
             username: username.trim() || undefined,
             limit: PAGE_SIZE,
             offset
-          })
+          }),
+          apiClient.getSubscriptionsDashboardFeatureFlags()
         ]);
         setStats(statsData);
         setEvents(eventsData);
+        setFeatureFlags(featureFlagsData.items);
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Errore inatteso.");
@@ -103,6 +193,24 @@ export function TelegramBotPage() {
     safeDaysPage * DAYS_PAGE_SIZE + DAYS_PAGE_SIZE
   );
   const maxDayCount = Math.max(1, ...daysNewestFirst.map((day) => day.count), 1);
+  const telegramFeatureFlags = sortFeatureFlags(featureFlags);
+
+  async function toggleFeatureFlag(featureKey: string, enabled: boolean) {
+    try {
+      setBusyFeatureKey(featureKey);
+      setActionError(null);
+      const updated = await apiClient.updateSubscriptionsDashboardFeatureFlag(featureKey, {
+        enabled
+      });
+      setFeatureFlags((current) =>
+        current.map((row) => (row.key === updated.key ? updated : row))
+      );
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Operazione non riuscita.");
+    } finally {
+      setBusyFeatureKey(null);
+    }
+  }
 
   if (loading && !stats && !events) {
     return <LoadingState title="Caricamento accessi bot..." />;
@@ -125,6 +233,71 @@ export function TelegramBotPage() {
       </header>
 
       {error ? <ErrorState title="Aggiornamento parziale" message={error} /> : null}
+      {actionError ? <ErrorState title="Operazione non riuscita" message={actionError} /> : null}
+
+      <article className="panel">
+        <div className="panel-header">
+          <h3>Toggle comandi bot</h3>
+          <span className="pill">{telegramFeatureFlags.length} flag</span>
+        </div>
+        {telegramFeatureFlags.length === 0 ? (
+          <EmptyState title="Nessun flag" message="Nessun comando configurato." />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Funzionalita</th>
+                  <th>Stato</th>
+                  <th>Cosa fa ON / OFF</th>
+                  <th>Ultimo aggiornamento</th>
+                  <th>Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                {telegramFeatureFlags.map((row) => {
+                  const busy = busyFeatureKey === row.key;
+                  const info = featureFlagInfo(row.key);
+                  return (
+                    <tr key={row.key}>
+                      <td>{info.label}</td>
+                      <td>{row.enabled ? "ON" : "OFF"}</td>
+                      <td>
+                        <div>
+                          <strong>ON:</strong> {info.onText}
+                        </div>
+                        <div style={{ marginTop: "0.35rem" }}>
+                          <strong>OFF:</strong> {info.offText}
+                        </div>
+                        {row.description ? (
+                          <div style={{ marginTop: "0.35rem" }}>
+                            <small>{row.description}</small>
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        {formatDateTime(row.updated_at)}
+                        <br />
+                        <small>{row.updated_by || "-"}</small>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="action-button secondary"
+                          disabled={busy}
+                          onClick={() => void toggleFeatureFlag(row.key, !row.enabled)}
+                        >
+                          {busy ? "Aggiornamento..." : row.enabled ? "Disattiva" : "Attiva"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </article>
 
       <div className="metrics-grid">
         <MetricCard label="Eventi totali" value={stats?.total_events ?? 0} />

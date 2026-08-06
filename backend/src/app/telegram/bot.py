@@ -4,7 +4,7 @@ import logging
 from datetime import timedelta
 from typing import Any, Awaitable, Callable
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -34,6 +34,17 @@ from backend.src.app.services.payments import (
     PaymentServiceError,
     create_checkout_session_for_telegram_user_safe,
     create_customer_portal_session_for_telegram_user_safe,
+)
+from backend.src.app.services.feature_flags import (
+    ALL_TELEGRAM_FEATURE_FLAG_KEYS,
+    FEATURE_TELEGRAM_AUTHORIZATIONS,
+    FEATURE_TELEGRAM_FEEDBACK,
+    FEATURE_TELEGRAM_FIXTURES,
+    FEATURE_TELEGRAM_NOTIFICATIONS,
+    FEATURE_TELEGRAM_SLIPS,
+    FEATURE_TELEGRAM_STATISTICS,
+    FEATURE_TELEGRAM_SUBSCRIPTIONS,
+    feature_flag_states_safe,
 )
 from backend.src.app.services.subscriptions import (
     PLAN_FOUNDER,
@@ -68,9 +79,9 @@ from .messages import (
     LOADING_PARTITE,
     LOADING_SCHEDINE,
     LOADING_STATISTICHE,
-    WELCOME_TEXT,
     account_status_label,
     append_message_footer,
+    build_welcome_text,
     format_betting_slip_photo_caption,
     format_betting_slip_text,
     format_betting_slips,
@@ -119,19 +130,89 @@ FEEDBACK_USER_DATA_KEY = "feedback_draft"
 FEEDBACK_MESSAGE_MAX = 2000
 
 
-def main_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("Partite", callback_data=MENU_PARTITE),
-                InlineKeyboardButton("Schedine", callback_data=MENU_SCHEDINE),
-            ],
-            [
-                InlineKeyboardButton("Statistiche", callback_data=MENU_STATISTICHE),
-                InlineKeyboardButton("Aiuto", callback_data=MENU_HELP),
-            ],
-        ]
+def _telegram_feature_flags() -> dict[str, bool]:
+    return feature_flag_states_safe(
+        keys=ALL_TELEGRAM_FEATURE_FLAG_KEYS,
+        # Fail-closed in case of transient DB/read issues.
+        default_enabled=False,
     )
+
+
+def _flag_enabled(flags: dict[str, bool], key: str, default: bool = True) -> bool:
+    return bool(flags.get(key, default))
+
+
+def main_menu_keyboard(*, flags: dict[str, bool] | None = None) -> InlineKeyboardMarkup:
+    active = flags or _telegram_feature_flags()
+    rows: list[list[InlineKeyboardButton]] = []
+
+    first_row: list[InlineKeyboardButton] = []
+    if _flag_enabled(active, FEATURE_TELEGRAM_FIXTURES):
+        first_row.append(InlineKeyboardButton("Partite", callback_data=MENU_PARTITE))
+    if _flag_enabled(active, FEATURE_TELEGRAM_SLIPS):
+        first_row.append(InlineKeyboardButton("Schedine", callback_data=MENU_SCHEDINE))
+    if first_row:
+        rows.append(first_row)
+
+    second_row: list[InlineKeyboardButton] = []
+    if _flag_enabled(active, FEATURE_TELEGRAM_STATISTICS):
+        second_row.append(InlineKeyboardButton("Statistiche", callback_data=MENU_STATISTICHE))
+    second_row.append(InlineKeyboardButton("Aiuto", callback_data=MENU_HELP))
+    rows.append(second_row)
+
+    return InlineKeyboardMarkup(rows)
+
+
+def _public_bot_commands(*, flags: dict[str, bool]) -> list[BotCommand]:
+    commands = [
+        BotCommand("start", "avvia il bot"),
+        BotCommand("help", "guida rapida"),
+    ]
+
+    if _flag_enabled(flags, FEATURE_TELEGRAM_FIXTURES):
+        commands.append(BotCommand("partite", "partite di oggi"))
+    if _flag_enabled(flags, FEATURE_TELEGRAM_SLIPS):
+        commands.append(BotCommand("schedine", "schedine di oggi"))
+    if _flag_enabled(flags, FEATURE_TELEGRAM_STATISTICS):
+        commands.append(BotCommand("statistiche", "andamento"))
+    if _flag_enabled(flags, FEATURE_TELEGRAM_NOTIFICATIONS):
+        commands.append(BotCommand("notifiche", "preferenze notifiche"))
+    if _flag_enabled(flags, FEATURE_TELEGRAM_FEEDBACK):
+        commands.append(BotCommand("feedback", "invia feedback"))
+    if _flag_enabled(flags, FEATURE_TELEGRAM_AUTHORIZATIONS):
+        commands.append(BotCommand("accetta_condizioni", "accetta condizioni"))
+
+    if _flag_enabled(flags, FEATURE_TELEGRAM_SUBSCRIPTIONS):
+        commands.extend(
+            [
+                BotCommand("piano", "stato abbonamento"),
+                BotCommand("abbonati", "attiva premium"),
+                BotCommand("gestisci_abbonamento", "gestisci rinnovo"),
+            ]
+        )
+    return commands
+
+
+async def _sync_public_bot_commands(
+    application: Application,
+    *,
+    flags: dict[str, bool],
+) -> None:
+    signature = tuple(
+        (key, _flag_enabled(flags, key, True))
+        for key in ALL_TELEGRAM_FEATURE_FLAG_KEYS
+    )
+    if application.bot_data.get("public_commands_signature") == signature:
+        return
+    try:
+        await application.bot.set_my_commands(
+            _public_bot_commands(
+                flags=flags,
+            )
+        )
+        application.bot_data["public_commands_signature"] = signature
+    except Exception:
+        logger.debug("Impossibile aggiornare la lista comandi Telegram.", exc_info=True)
 
 
 async def _answer_callback(update: Update) -> None:
@@ -159,6 +240,13 @@ def _with_callback_answer(handler: Callable[..., Awaitable[Any]]):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     settings = _settings(context)
+    flags = _telegram_feature_flags()
+    subscriptions_enabled = _flag_enabled(flags, FEATURE_TELEGRAM_SUBSCRIPTIONS)
+    authorizations_enabled = _flag_enabled(flags, FEATURE_TELEGRAM_AUTHORIZATIONS)
+    await _sync_public_bot_commands(
+        context.application,
+        flags=flags,
+    )
     if user is None:
         await _reply(update, format_user_error("Utente Telegram non disponibile."))
         return
@@ -174,7 +262,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id=chat.id if chat is not None else None,
     )
 
-    lines = [WELCOME_TEXT, ""]
+    lines = [
+        build_welcome_text(
+            include_fixtures=_flag_enabled(flags, FEATURE_TELEGRAM_FIXTURES),
+            include_slips=_flag_enabled(flags, FEATURE_TELEGRAM_SLIPS),
+            include_statistics=_flag_enabled(flags, FEATURE_TELEGRAM_STATISTICS),
+            include_subscription_commands=subscriptions_enabled,
+            include_notifications=_flag_enabled(flags, FEATURE_TELEGRAM_NOTIFICATIONS),
+            include_feedback=_flag_enabled(flags, FEATURE_TELEGRAM_FEEDBACK),
+            include_terms=authorizations_enabled,
+        ),
+        "",
+    ]
     if registered is None:
         lines.append(
             "Registrazione temporaneamente non disponibile. Riprova tra poco."
@@ -185,7 +284,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "\n".join(lines),
                 feedback_url=settings.telegram_feedback_url,
             ),
-            reply_markup=main_menu_keyboard(),
+            reply_markup=main_menu_keyboard(flags=flags),
         )
         return
 
@@ -193,12 +292,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if registered.invite_origin:
         lines.append(f"Origine invito: {registered.invite_origin}.")
 
-    if settings.telegram_terms_required and not registered.terms_accepted:
+    if authorizations_enabled and settings.telegram_terms_required and not registered.terms_accepted:
         lines.append("")
         lines.append(
             "Per usare i comandi beta devi accettare le condizioni: /accetta_condizioni"
         )
-    elif settings.telegram_whitelist_enabled and registered.status != "active":
+    elif authorizations_enabled and settings.telegram_whitelist_enabled and registered.status != "active":
         if registered.status == "invited":
             lines.append("")
             lines.append(
@@ -219,7 +318,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "\n".join(lines),
             feedback_url=settings.telegram_feedback_url,
         ),
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(flags=flags),
     )
 
 
@@ -228,10 +327,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 @require_command_access(command_key=COMMAND_HELP)
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = _settings(context)
+    flags = _telegram_feature_flags()
+    await _sync_public_bot_commands(
+        context.application,
+        flags=flags,
+    )
     await _reply(
         update,
-        format_help_text(feedback_url=settings.telegram_feedback_url),
-        reply_markup=main_menu_keyboard(),
+        format_help_text(
+            feedback_url=settings.telegram_feedback_url,
+            include_fixtures=_flag_enabled(flags, FEATURE_TELEGRAM_FIXTURES),
+            include_slips=_flag_enabled(flags, FEATURE_TELEGRAM_SLIPS),
+            include_statistics=_flag_enabled(flags, FEATURE_TELEGRAM_STATISTICS),
+            include_subscription_commands=_flag_enabled(flags, FEATURE_TELEGRAM_SUBSCRIPTIONS),
+            include_notifications=_flag_enabled(flags, FEATURE_TELEGRAM_NOTIFICATIONS),
+            include_feedback=_flag_enabled(flags, FEATURE_TELEGRAM_FEEDBACK),
+        ),
+        reply_markup=main_menu_keyboard(flags=flags),
     )
 
 
@@ -371,6 +483,8 @@ async def piano(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     settings = _settings(context)
+    flags = _telegram_feature_flags()
+    subscriptions_enabled = _flag_enabled(flags, FEATURE_TELEGRAM_SUBSCRIPTIONS)
     snapshot = get_telegram_subscription_snapshot_safe(telegram_user_id=user.id)
     if not snapshot.available:
         await _reply(
@@ -387,20 +501,22 @@ async def piano(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         auto_renew=snapshot.auto_renew,
         cancel_at_period_end=snapshot.cancel_at_period_end,
         payment_failed=snapshot.payment_failed,
+        include_subscription_commands=subscriptions_enabled,
         feedback_url=settings.telegram_feedback_url,
     )
 
     status = (snapshot.subscription_status or "").strip().lower()
     plan_code = (snapshot.plan_code or "").strip().lower()
     hints: list[str] = []
-    if plan_code in {PLAN_PRO, PLAN_FOUNDER} and status in {"trialing", "active", "suspended"}:
-        hints.append("Gestione rinnovo e fatturazione: /gestisci_abbonamento")
-    else:
-        hints.append("Per attivare il premium: /abbonati mensile oppure /abbonati annuale")
+    if subscriptions_enabled:
+        if plan_code in {PLAN_PRO, PLAN_FOUNDER} and status in {"trialing", "active", "suspended"}:
+            hints.append("Gestione rinnovo e fatturazione: /gestisci_abbonamento")
+        else:
+            hints.append("Per attivare il premium: /abbonati mensile oppure /abbonati annuale")
 
     if hints:
         message = f"{message}\n\n" + "\n".join(hints)
-    await _reply(update, message, reply_markup=main_menu_keyboard())
+    await _reply(update, message, reply_markup=main_menu_keyboard(flags=flags))
 
 
 @rate_limited()
@@ -1338,6 +1454,11 @@ async def _post_init(application: Application) -> None:
     application.bot_data["api_client"] = BackendApiClient(
         settings.telegram_api_base_url,
         service_api_key=settings.telegram_service_api_key,
+    )
+    flags = _telegram_feature_flags()
+    await _sync_public_bot_commands(
+        application,
+        flags=flags,
     )
 
 

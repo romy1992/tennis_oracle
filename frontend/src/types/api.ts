@@ -1984,3 +1984,15 @@ export type SubscriptionDashboardManualActionResponse = {
   subscription: SubscriptionDashboardSubscriptionRead;
 };
 
+export type FeatureFlagRead = {
+  key: string;
+  enabled: boolean;
+  description: string | null;
+  updated_at: string;
+  updated_by: string | null;
+};
+
+export type FeatureFlagListResponse = {
+  items: FeatureFlagRead[];
+};
+
