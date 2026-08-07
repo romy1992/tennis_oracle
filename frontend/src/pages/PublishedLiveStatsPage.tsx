@@ -4,6 +4,7 @@ import { MetricCard } from "../components/MetricCard";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
 import type { PublishedLiveStatsBucket, PublishedLiveStatsSummary } from "../types/api";
+import { MODEL_VERSIONS } from "../utils/modelVersion";
 import { todayLocalISODate } from "../utils/tennis";
 
 function daysAgoIso(days: number) {
@@ -92,6 +93,7 @@ export function PublishedLiveStatsPage() {
   const [stats, setStats] = useState<PublishedLiveStatsSummary | null>(null);
   const [fromDate, setFromDate] = useState(() => daysAgoIso(90));
   const [toDate, setToDate] = useState(() => todayLocalISODate());
+  const [modelVersion, setModelVersion] = useState("");
   const [latestOnly, setLatestOnly] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +105,7 @@ export function PublishedLiveStatsPage() {
         const response = await apiClient.getPublishedLiveStats({
           from: fromDate,
           to: toDate,
+          model_version: modelVersion || undefined,
           latest_only: latestOnly
         });
         setStats(response);
@@ -114,7 +117,7 @@ export function PublishedLiveStatsPage() {
       }
     }
     void load();
-  }, [fromDate, toDate, latestOnly]);
+  }, [fromDate, toDate, modelVersion, latestOnly]);
 
   if (loading) {
     return <LoadingState title="Caricamento statistiche live..." />;
@@ -135,6 +138,37 @@ export function PublishedLiveStatsPage() {
             </p>
           </div>
         </header>
+
+        <div className="filters-grid compact">
+          <label>
+            Da
+            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+          </label>
+          <label>
+            A
+            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+          </label>
+          <label>
+            Versione modello
+            <select value={modelVersion} onChange={(e) => setModelVersion(e.target.value)}>
+              <option value="">Tutte</option>
+              {MODEL_VERSIONS.map((entry) => (
+                <option key={entry.value} value={entry.value}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={latestOnly}
+              onChange={(e) => setLatestOnly(e.target.checked)}
+            />{" "}
+            Solo versione più recente
+          </label>
+        </div>
+
         <EmptyState
           title="Nessuna pubblicazione"
           message="Pubblica tip nel registro immutabile per vedere hit rate, ROI, drawdown e distribuzioni."
@@ -163,6 +197,17 @@ export function PublishedLiveStatsPage() {
         <label>
           A
           <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </label>
+        <label>
+          Versione modello
+          <select value={modelVersion} onChange={(e) => setModelVersion(e.target.value)}>
+            <option value="">Tutte</option>
+            {MODEL_VERSIONS.map((entry) => (
+              <option key={entry.value} value={entry.value}>
+                {entry.label}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           <input

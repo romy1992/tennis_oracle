@@ -8,6 +8,7 @@ import type {
   PublishedPredictionListResponse,
   PublishedPredictionVersionChainResponse
 } from "../types/api";
+import { MODEL_VERSIONS } from "../utils/modelVersion";
 import { formatDate, todayLocalISODate } from "../utils/tennis";
 
 const PAGE_SIZE = 50;
@@ -57,6 +58,7 @@ export function PublishedPredictionsPage() {
   const [toDate, setToDate] = useState(() => todayIso());
   const [eventKey, setEventKey] = useState("");
   const [source, setSource] = useState("");
+  const [modelVersion, setModelVersion] = useState("");
   const [latestOnly, setLatestOnly] = useState(true);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -75,6 +77,7 @@ export function PublishedPredictionsPage() {
             parsedEventKey !== undefined && Number.isFinite(parsedEventKey)
               ? parsedEventKey
               : undefined,
+          model_version: modelVersion || undefined,
           publication_source: source.trim() || undefined,
           latest_only: latestOnly,
           limit: PAGE_SIZE,
@@ -89,7 +92,7 @@ export function PublishedPredictionsPage() {
       }
     }
     void load();
-  }, [fromDate, toDate, eventKey, source, latestOnly, offset]);
+  }, [fromDate, toDate, eventKey, source, modelVersion, latestOnly, offset]);
 
   async function openVersions(publicationId: string) {
     try {
@@ -173,6 +176,23 @@ export function PublishedPredictionsPage() {
               setSource(event.target.value);
             }}
           />
+        </label>
+        <label>
+          Versione modello
+          <select
+            value={modelVersion}
+            onChange={(event) => {
+              setOffset(0);
+              setModelVersion(event.target.value);
+            }}
+          >
+            <option value="">Tutte</option>
+            {MODEL_VERSIONS.map((entry) => (
+              <option key={entry.value} value={entry.value}>
+                {entry.label}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="checkbox-field">
           <input
