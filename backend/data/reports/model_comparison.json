@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-05T10:20:28.603985+00:00",
+  "generated_at": "2026-08-07T08:56:08.156971+00:00",
   "versions": {
     "v1": {
       "metrics_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\baseline_metrics.json",
@@ -383,6 +383,139 @@
             "yield": -0.054559,
             "odds_coverage_rows": 19997,
             "odds_coverage_pct": 100.0
+          }
+        }
+      },
+      "market_benchmark": {
+        "market_accuracy": 0.711857,
+        "market_log_loss": 0.552517,
+        "market_roc_auc": 0.78994,
+        "market_profit_if_bet_player_1_all": -2190.771184,
+        "market_roi_if_bet_player_1_all": -0.109555,
+        "odds_coverage_rows": 19997,
+        "odds_coverage_pct": 100.0
+      }
+    },
+    "v4": {
+      "metrics_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\baseline_v4_metrics.json",
+      "dataset_used": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\processed\\tennis_winner_dataset_with_odds_v3.csv",
+      "features_used": [
+        "surface",
+        "rank_diff",
+        "rank_points_diff",
+        "elo_diff",
+        "surface_elo_diff",
+        "player_1_last_5_win_rate",
+        "player_2_last_5_win_rate",
+        "player_1_last_10_win_rate",
+        "player_2_last_10_win_rate",
+        "player_1_surface_last_10_win_rate",
+        "player_2_surface_last_10_win_rate",
+        "player_1_matches_last_14_days",
+        "player_2_matches_last_14_days",
+        "player_1_days_since_last_match",
+        "player_2_days_since_last_match",
+        "h2h_player_1_wins",
+        "h2h_player_2_wins",
+        "h2h_surface_player_1_wins",
+        "h2h_surface_player_2_wins",
+        "player_1_age",
+        "player_2_age",
+        "age_diff",
+        "player_1_height",
+        "player_2_height",
+        "height_diff",
+        "player_1_hand",
+        "player_2_hand",
+        "atp_surface",
+        "atp_tourney_level",
+        "atp_round",
+        "atp_best_of",
+        "atp_match_found",
+        "avg_player_1_odds",
+        "avg_player_2_odds",
+        "avg_market_prob_player_1",
+        "avg_market_prob_player_2",
+        "avg_bookmaker_margin",
+        "odds_bookmaker_count"
+      ],
+      "rank_features_note": "Same features as v3 (Elo/rank/form/H2H + pre-match odds aggregates). Model: soft-voting ensemble of tuned logistic_regression + xgboost + hist_gradient_boosting (grid search Fasi 1-2, voting Fase 3, validato con walk-forward multi-finestra in Fase 5/5.2). Trains and predicts only when odds are available, same as v3.",
+      "models": {
+        "voting_ensemble": {
+          "accuracy": 0.711607,
+          "precision": 0.715141,
+          "recall": 0.730911,
+          "f1": 0.72294,
+          "roc_auc": 0.789457,
+          "log_loss": 0.549952,
+          "confusion_matrix": [
+            [
+              6706,
+              2997
+            ],
+            [
+              2770,
+              7524
+            ]
+          ],
+          "class_distribution_train": {
+            "1": 41016,
+            "0": 38969
+          },
+          "class_distribution_test": {
+            "1": 10294,
+            "0": 9703
+          },
+          "value_bet_overall": {
+            "edge_threshold": 0.03,
+            "bets_count": 2515,
+            "hit_rate": 0.853678,
+            "total_profit": -62.528216,
+            "roi": -0.024862,
+            "yield": -0.024862,
+            "odds_coverage_rows": 19997,
+            "odds_coverage_pct": 100.0
+          },
+          "value_bet_with_odds": {
+            "edge_threshold": 0.03,
+            "bets_count": 2515,
+            "hit_rate": 0.853678,
+            "total_profit": -62.528216,
+            "roi": -0.024862,
+            "yield": -0.024862,
+            "odds_coverage_rows": 19997,
+            "odds_coverage_pct": 100.0
+          },
+          "base_estimators_provenance": {
+            "logistic_regression": {
+              "params_used": {
+                "C": 0.01,
+                "class_weight": "balanced",
+                "l1_ratio": 0.0,
+                "max_iter": 3000,
+                "solver": "lbfgs"
+              },
+              "source": "v4_grid_search_results.json (2026-08-07T05:07:48.918557+00:00)"
+            },
+            "xgboost": {
+              "params_used": {
+                "colsample_bytree": 0.8,
+                "learning_rate": 0.05,
+                "max_depth": 3,
+                "n_estimators": 100,
+                "subsample": 0.8
+              },
+              "source": "v4_grid_search_results.json (2026-08-07T05:07:48.918557+00:00)"
+            },
+            "hist_gradient_boosting": {
+              "params_used": {
+                "l2_regularization": 0.0,
+                "learning_rate": 0.05,
+                "max_depth": 10,
+                "max_iter": 100
+              },
+              "source": "v4_grid_search_results.json (2026-08-07T05:07:48.918557+00:00)"
+            }
           }
         }
       },

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-ModelVersion = Literal["v1", "v2", "v3"]
+ModelVersion = Literal["v1", "v2", "v3", "v4"]
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PROCESSED_DATA_DIR = REPO_ROOT / "backend" / "data" / "processed"
@@ -48,6 +48,15 @@ DATASET_VERSIONS: dict[ModelVersion, DatasetVersionPaths] = {
         atp_enriched_dataset="tennis_winner_dataset_atp_enriched_v3.csv",
         with_odds_dataset="tennis_winner_dataset_with_odds_v3.csv",
     ),
+    # v4 riusa esattamente lo stesso dataset/feature-set di v3 (Elo/rank/form/H2H +
+    # quote di mercato): non è un nuovo dataset, ma un nuovo modello (ensemble
+    # voting soft: logistic_regression + xgboost + hist_gradient_boosting tunati
+    # nelle Fasi 1-4) addestrato sugli stessi dati.
+    "v4": DatasetVersionPaths(
+        base_dataset="tennis_winner_dataset_v3.csv",
+        atp_enriched_dataset="tennis_winner_dataset_atp_enriched_v3.csv",
+        with_odds_dataset="tennis_winner_dataset_with_odds_v3.csv",
+    ),
 }
 
 MODEL_VERSIONS: dict[ModelVersion, ModelVersionPaths] = {
@@ -76,6 +85,19 @@ MODEL_VERSIONS: dict[ModelVersion, ModelVersionPaths] = {
         rank_features_note=(
             "Uses v2 historical ATP rank/Elo/form/H2H features plus pre-match "
             "match-winner odds aggregates. Trains and predicts only when odds are available."
+        ),
+    ),
+    "v4": ModelVersionPaths(
+        version="v4",
+        datasets=DATASET_VERSIONS["v4"],
+        models_dir=MODELS_DIR / "v4",
+        metrics_filename="baseline_v4_metrics.json",
+        rank_features_note=(
+            "Same features as v3 (Elo/rank/form/H2H + pre-match odds aggregates). "
+            "Model: soft-voting ensemble of tuned logistic_regression + xgboost + "
+            "hist_gradient_boosting (grid search Fasi 1-2, voting Fase 3, validato "
+            "con walk-forward multi-finestra in Fase 5/5.2). Trains and predicts "
+            "only when odds are available, same as v3."
         ),
     ),
 }

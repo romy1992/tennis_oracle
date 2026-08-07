@@ -1,0 +1,710 @@
+{
+  "generated_at": "2026-08-07T05:07:48.918557+00:00",
+  "phase": "fase_1_grid_search",
+  "search_model_version_base": "v3",
+  "dataset_used": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\processed\\tennis_winner_dataset_with_odds_v3.csv",
+  "rows_total": 99982,
+  "rows_before_odds_filter": 338564,
+  "date_min": "2021-10-07",
+  "date_max": "2026-06-21",
+  "split": {
+    "strategy": "temporal_dev_test",
+    "dev_size": 0.8,
+    "dev_rows": 79985,
+    "test_rows": 19997,
+    "dev_date_min": "2021-10-07",
+    "dev_date_max": "2025-11-27",
+    "test_date_min": "2025-11-27",
+    "test_date_max": "2026-06-21",
+    "inner_cv": "TimeSeriesSplit(n_splits=3)"
+  },
+  "features_used": [
+    "surface",
+    "rank_diff",
+    "rank_points_diff",
+    "elo_diff",
+    "surface_elo_diff",
+    "player_1_last_5_win_rate",
+    "player_2_last_5_win_rate",
+    "player_1_last_10_win_rate",
+    "player_2_last_10_win_rate",
+    "player_1_surface_last_10_win_rate",
+    "player_2_surface_last_10_win_rate",
+    "player_1_matches_last_14_days",
+    "player_2_matches_last_14_days",
+    "player_1_days_since_last_match",
+    "player_2_days_since_last_match",
+    "h2h_player_1_wins",
+    "h2h_player_2_wins",
+    "h2h_surface_player_1_wins",
+    "h2h_surface_player_2_wins",
+    "player_1_age",
+    "player_2_age",
+    "age_diff",
+    "player_1_height",
+    "player_2_height",
+    "height_diff",
+    "player_1_hand",
+    "player_2_hand",
+    "atp_surface",
+    "atp_tourney_level",
+    "atp_round",
+    "atp_best_of",
+    "atp_match_found",
+    "avg_player_1_odds",
+    "avg_player_2_odds",
+    "avg_market_prob_player_1",
+    "avg_market_prob_player_2",
+    "avg_bookmaker_margin",
+    "odds_bookmaker_count"
+  ],
+  "features_excluded": [
+    "match_id",
+    "match_date",
+    "player_1_id",
+    "player_2_id",
+    "player_1_rank",
+    "player_2_rank",
+    "player_1_rank_points",
+    "player_2_rank_points",
+    "player_1_elo",
+    "player_2_elo",
+    "player_1_surface_elo",
+    "player_2_surface_elo",
+    "target_player_1_win",
+    "atp_source_file",
+    "atp_category",
+    "atp_tourney_id",
+    "atp_tourney_name",
+    "atp_tourney_date",
+    "atp_days_from_tourney_start",
+    "atp_tournament_similarity",
+    "atp_score",
+    "atp_minutes",
+    "player_1_atp_id",
+    "player_2_atp_id",
+    "player_1_atp_name",
+    "player_2_atp_name",
+    "player_1_ioc",
+    "player_2_ioc",
+    "player_1_atp_rank",
+    "player_2_atp_rank",
+    "atp_rank_diff",
+    "player_1_atp_rank_points",
+    "player_2_atp_rank_points",
+    "atp_rank_points_diff",
+    "market_prob_player_1",
+    "market_prob_player_2",
+    "market_edge_baseline_player_1",
+    "player_1_profit_if_bet",
+    "player_2_profit_if_bet"
+  ],
+  "edge_threshold": 0.03,
+  "quick_mode": false,
+  "algorithms": {
+    "logistic_regression": {
+      "best_params": {
+        "model__C": 0.01,
+        "model__class_weight": "balanced",
+        "model__l1_ratio": 0.0,
+        "model__max_iter": 3000,
+        "model__solver": "lbfgs"
+      },
+      "cv_best_roc_auc": 0.781933,
+      "cv_best_neg_log_loss": -0.558802,
+      "cv_top_combinations": [
+        {
+          "params": {
+            "model__C": 0.01,
+            "model__class_weight": "balanced",
+            "model__l1_ratio": 0.0,
+            "model__max_iter": 3000,
+            "model__solver": "lbfgs"
+          },
+          "mean_roc_auc": 0.781933,
+          "std_roc_auc": 0.012359,
+          "mean_neg_log_loss": -0.558802
+        },
+        {
+          "params": {
+            "model__C": 0.01,
+            "model__class_weight": null,
+            "model__l1_ratio": 0.0,
+            "model__max_iter": 3000,
+            "model__solver": "lbfgs"
+          },
+          "mean_roc_auc": 0.781931,
+          "std_roc_auc": 0.012359,
+          "mean_neg_log_loss": -0.558575
+        },
+        {
+          "params": {
+            "model__C": 0.1,
+            "model__class_weight": null,
+            "model__l1_ratio": 0.5,
+            "model__max_iter": 1500,
+            "model__solver": "saga",
+            "model__tol": 0.001
+          },
+          "mean_roc_auc": 0.781918,
+          "std_roc_auc": 0.012396,
+          "mean_neg_log_loss": -0.558624
+        },
+        {
+          "params": {
+            "model__C": 0.1,
+            "model__class_weight": "balanced",
+            "model__l1_ratio": 0.0,
+            "model__max_iter": 3000,
+            "model__solver": "lbfgs"
+          },
+          "mean_roc_auc": 0.781801,
+          "std_roc_auc": 0.012432,
+          "mean_neg_log_loss": -0.559067
+        },
+        {
+          "params": {
+            "model__C": 0.1,
+            "model__class_weight": null,
+            "model__l1_ratio": 0.0,
+            "model__max_iter": 3000,
+            "model__solver": "lbfgs"
+          },
+          "mean_roc_auc": 0.781791,
+          "std_roc_auc": 0.012425,
+          "mean_neg_log_loss": -0.558797
+        }
+      ],
+      "test_metrics": {
+        "accuracy": 0.711807,
+        "precision": 0.723444,
+        "recall": 0.712551,
+        "f1": 0.717956,
+        "roc_auc": 0.789267,
+        "log_loss": 0.550324,
+        "confusion_matrix": [
+          [
+            6899,
+            2804
+          ],
+          [
+            2959,
+            7335
+          ]
+        ],
+        "class_distribution_train": {
+          "1": 41016,
+          "0": 38969
+        },
+        "class_distribution_test": {
+          "1": 10294,
+          "0": 9703
+        },
+        "value_bet_overall": {
+          "edge_threshold": 0.03,
+          "bets_count": 2242,
+          "hit_rate": 0.879572,
+          "total_profit": -57.310783,
+          "roi": -0.025562,
+          "yield": -0.025562,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        },
+        "value_bet_with_odds": {
+          "edge_threshold": 0.03,
+          "bets_count": 2242,
+          "hit_rate": 0.879572,
+          "total_profit": -57.310783,
+          "roi": -0.025562,
+          "yield": -0.025562,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        }
+      },
+      "fit_seconds": 110.68,
+      "model_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\models\\v4_search\\logistic_regression.pkl"
+    },
+    "random_forest": {
+      "best_params": {
+        "model__max_depth": 10,
+        "model__max_features": "log2",
+        "model__min_samples_leaf": 50,
+        "model__n_estimators": 200
+      },
+      "cv_best_roc_auc": 0.782904,
+      "cv_best_neg_log_loss": -0.558599,
+      "cv_top_combinations": [
+        {
+          "params": {
+            "model__max_depth": 10,
+            "model__max_features": "log2",
+            "model__min_samples_leaf": 50,
+            "model__n_estimators": 200
+          },
+          "mean_roc_auc": 0.782904,
+          "std_roc_auc": 0.011222,
+          "mean_neg_log_loss": -0.558599
+        },
+        {
+          "params": {
+            "model__max_depth": 10,
+            "model__max_features": "log2",
+            "model__min_samples_leaf": 50,
+            "model__n_estimators": 100
+          },
+          "mean_roc_auc": 0.782878,
+          "std_roc_auc": 0.011266,
+          "mean_neg_log_loss": -0.558397
+        },
+        {
+          "params": {
+            "model__max_depth": 20,
+            "model__max_features": "log2",
+            "model__min_samples_leaf": 50,
+            "model__n_estimators": 100
+          },
+          "mean_roc_auc": 0.782811,
+          "std_roc_auc": 0.011502,
+          "mean_neg_log_loss": -0.558067
+        },
+        {
+          "params": {
+            "model__max_depth": 20,
+            "model__max_features": "log2",
+            "model__min_samples_leaf": 50,
+            "model__n_estimators": 200
+          },
+          "mean_roc_auc": 0.782798,
+          "std_roc_auc": 0.011469,
+          "mean_neg_log_loss": -0.558069
+        },
+        {
+          "params": {
+            "model__max_depth": 14,
+            "model__max_features": "log2",
+            "model__min_samples_leaf": 50,
+            "model__n_estimators": 100
+          },
+          "mean_roc_auc": 0.782717,
+          "std_roc_auc": 0.011618,
+          "mean_neg_log_loss": -0.55807
+        }
+      ],
+      "test_metrics": {
+        "accuracy": 0.711107,
+        "precision": 0.713974,
+        "recall": 0.732077,
+        "f1": 0.722912,
+        "roc_auc": 0.788974,
+        "log_loss": 0.552809,
+        "confusion_matrix": [
+          [
+            6684,
+            3019
+          ],
+          [
+            2758,
+            7536
+          ]
+        ],
+        "class_distribution_train": {
+          "1": 41016,
+          "0": 38969
+        },
+        "class_distribution_test": {
+          "1": 10294,
+          "0": 9703
+        },
+        "value_bet_overall": {
+          "edge_threshold": 0.03,
+          "bets_count": 2538,
+          "hit_rate": 0.663909,
+          "total_profit": -266.570527,
+          "roi": -0.105032,
+          "yield": -0.105032,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        },
+        "value_bet_with_odds": {
+          "edge_threshold": 0.03,
+          "bets_count": 2538,
+          "hit_rate": 0.663909,
+          "total_profit": -266.570527,
+          "roi": -0.105032,
+          "yield": -0.105032,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        }
+      },
+      "fit_seconds": 194.34,
+      "model_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\models\\v4_search\\random_forest.pkl"
+    },
+    "hist_gradient_boosting": {
+      "best_params": {
+        "model__l2_regularization": 0.0,
+        "model__learning_rate": 0.05,
+        "model__max_depth": 10,
+        "model__max_iter": 100
+      },
+      "cv_best_roc_auc": 0.78129,
+      "cv_best_neg_log_loss": -0.559086,
+      "cv_top_combinations": [
+        {
+          "params": {
+            "model__l2_regularization": 0.0,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 10,
+            "model__max_iter": 100
+          },
+          "mean_roc_auc": 0.78129,
+          "std_roc_auc": 0.012513,
+          "mean_neg_log_loss": -0.559086
+        },
+        {
+          "params": {
+            "model__l2_regularization": 0.0,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 10,
+            "model__max_iter": 300
+          },
+          "mean_roc_auc": 0.781288,
+          "std_roc_auc": 0.012515,
+          "mean_neg_log_loss": -0.559114
+        },
+        {
+          "params": {
+            "model__l2_regularization": 1.0,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 6,
+            "model__max_iter": 100
+          },
+          "mean_roc_auc": 0.781274,
+          "std_roc_auc": 0.012476,
+          "mean_neg_log_loss": -0.55906
+        },
+        {
+          "params": {
+            "model__l2_regularization": 1.0,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 6,
+            "model__max_iter": 300
+          },
+          "mean_roc_auc": 0.781269,
+          "std_roc_auc": 0.012482,
+          "mean_neg_log_loss": -0.559077
+        },
+        {
+          "params": {
+            "model__l2_regularization": 1.0,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 10,
+            "model__max_iter": 100
+          },
+          "mean_roc_auc": 0.781141,
+          "std_roc_auc": 0.012524,
+          "mean_neg_log_loss": -0.559164
+        }
+      ],
+      "test_metrics": {
+        "accuracy": 0.711507,
+        "precision": 0.713142,
+        "recall": 0.73538,
+        "f1": 0.72409,
+        "roc_auc": 0.788756,
+        "log_loss": 0.55075,
+        "confusion_matrix": [
+          [
+            6658,
+            3045
+          ],
+          [
+            2724,
+            7570
+          ]
+        ],
+        "class_distribution_train": {
+          "1": 41016,
+          "0": 38969
+        },
+        "class_distribution_test": {
+          "1": 10294,
+          "0": 9703
+        },
+        "value_bet_overall": {
+          "edge_threshold": 0.03,
+          "bets_count": 3809,
+          "hit_rate": 0.755841,
+          "total_profit": -181.360463,
+          "roi": -0.047614,
+          "yield": -0.047614,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        },
+        "value_bet_with_odds": {
+          "edge_threshold": 0.03,
+          "bets_count": 3809,
+          "hit_rate": 0.755841,
+          "total_profit": -181.360463,
+          "roi": -0.047614,
+          "yield": -0.047614,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        }
+      },
+      "fit_seconds": 205.24,
+      "model_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\models\\v4_search\\hist_gradient_boosting.pkl"
+    },
+    "xgboost": {
+      "best_params": {
+        "model__colsample_bytree": 0.8,
+        "model__learning_rate": 0.05,
+        "model__max_depth": 3,
+        "model__n_estimators": 100,
+        "model__subsample": 0.8
+      },
+      "cv_best_roc_auc": 0.782368,
+      "cv_best_neg_log_loss": -0.558212,
+      "cv_top_combinations": [
+        {
+          "params": {
+            "model__colsample_bytree": 0.8,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 3,
+            "model__n_estimators": 100,
+            "model__subsample": 0.8
+          },
+          "mean_roc_auc": 0.782368,
+          "std_roc_auc": 0.012591,
+          "mean_neg_log_loss": -0.558212
+        },
+        {
+          "params": {
+            "model__colsample_bytree": 0.8,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 3,
+            "model__n_estimators": 100,
+            "model__subsample": 1.0
+          },
+          "mean_roc_auc": 0.782289,
+          "std_roc_auc": 0.01264,
+          "mean_neg_log_loss": -0.55834
+        },
+        {
+          "params": {
+            "model__colsample_bytree": 0.8,
+            "model__learning_rate": 0.1,
+            "model__max_depth": 3,
+            "model__n_estimators": 100,
+            "model__subsample": 1.0
+          },
+          "mean_roc_auc": 0.782148,
+          "std_roc_auc": 0.012447,
+          "mean_neg_log_loss": -0.558246
+        },
+        {
+          "params": {
+            "model__colsample_bytree": 0.8,
+            "model__learning_rate": 0.1,
+            "model__max_depth": 3,
+            "model__n_estimators": 100,
+            "model__subsample": 0.8
+          },
+          "mean_roc_auc": 0.78189,
+          "std_roc_auc": 0.012676,
+          "mean_neg_log_loss": -0.558368
+        },
+        {
+          "params": {
+            "model__colsample_bytree": 0.8,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 3,
+            "model__n_estimators": 300,
+            "model__subsample": 0.8
+          },
+          "mean_roc_auc": 0.781793,
+          "std_roc_auc": 0.012566,
+          "mean_neg_log_loss": -0.55846
+        }
+      ],
+      "test_metrics": {
+        "accuracy": 0.711407,
+        "precision": 0.71345,
+        "recall": 0.734311,
+        "f1": 0.72373,
+        "roc_auc": 0.789312,
+        "log_loss": 0.550374,
+        "confusion_matrix": [
+          [
+            6667,
+            3036
+          ],
+          [
+            2735,
+            7559
+          ]
+        ],
+        "class_distribution_train": {
+          "1": 41016,
+          "0": 38969
+        },
+        "class_distribution_test": {
+          "1": 10294,
+          "0": 9703
+        },
+        "value_bet_overall": {
+          "edge_threshold": 0.03,
+          "bets_count": 2743,
+          "hit_rate": 0.82829,
+          "total_profit": -89.293834,
+          "roi": -0.032553,
+          "yield": -0.032553,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        },
+        "value_bet_with_odds": {
+          "edge_threshold": 0.03,
+          "bets_count": 2743,
+          "hit_rate": 0.82829,
+          "total_profit": -89.293834,
+          "roi": -0.032553,
+          "yield": -0.032553,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        }
+      },
+      "fit_seconds": 89.0,
+      "model_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\models\\v4_search\\xgboost.pkl"
+    },
+    "lightgbm": {
+      "best_params": {
+        "model__learning_rate": 0.05,
+        "model__max_depth": -1,
+        "model__n_estimators": 100,
+        "model__num_leaves": 31
+      },
+      "cv_best_roc_auc": 0.781286,
+      "cv_best_neg_log_loss": -0.559148,
+      "cv_top_combinations": [
+        {
+          "params": {
+            "model__learning_rate": 0.05,
+            "model__max_depth": -1,
+            "model__n_estimators": 100,
+            "model__num_leaves": 31
+          },
+          "mean_roc_auc": 0.781286,
+          "std_roc_auc": 0.01249,
+          "mean_neg_log_loss": -0.559148
+        },
+        {
+          "params": {
+            "model__learning_rate": 0.05,
+            "model__max_depth": 10,
+            "model__n_estimators": 100,
+            "model__num_leaves": 31
+          },
+          "mean_roc_auc": 0.781172,
+          "std_roc_auc": 0.012543,
+          "mean_neg_log_loss": -0.559157
+        },
+        {
+          "params": {
+            "model__learning_rate": 0.05,
+            "model__max_depth": -1,
+            "model__n_estimators": 100,
+            "model__num_leaves": 63
+          },
+          "mean_roc_auc": 0.779866,
+          "std_roc_auc": 0.012799,
+          "mean_neg_log_loss": -0.560441
+        },
+        {
+          "params": {
+            "model__learning_rate": 0.05,
+            "model__max_depth": 10,
+            "model__n_estimators": 100,
+            "model__num_leaves": 63
+          },
+          "mean_roc_auc": 0.779813,
+          "std_roc_auc": 0.012698,
+          "mean_neg_log_loss": -0.560537
+        },
+        {
+          "params": {
+            "model__learning_rate": 0.1,
+            "model__max_depth": 10,
+            "model__n_estimators": 100,
+            "model__num_leaves": 31
+          },
+          "mean_roc_auc": 0.779497,
+          "std_roc_auc": 0.0126,
+          "mean_neg_log_loss": -0.561027
+        }
+      ],
+      "test_metrics": {
+        "accuracy": 0.710457,
+        "precision": 0.711535,
+        "recall": 0.735866,
+        "f1": 0.723496,
+        "roc_auc": 0.788608,
+        "log_loss": 0.551133,
+        "confusion_matrix": [
+          [
+            6632,
+            3071
+          ],
+          [
+            2719,
+            7575
+          ]
+        ],
+        "class_distribution_train": {
+          "1": 41016,
+          "0": 38969
+        },
+        "class_distribution_test": {
+          "1": 10294,
+          "0": 9703
+        },
+        "value_bet_overall": {
+          "edge_threshold": 0.03,
+          "bets_count": 3871,
+          "hit_rate": 0.754585,
+          "total_profit": -204.500874,
+          "roi": -0.052829,
+          "yield": -0.052829,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        },
+        "value_bet_with_odds": {
+          "edge_threshold": 0.03,
+          "bets_count": 3871,
+          "hit_rate": 0.754585,
+          "total_profit": -204.500874,
+          "roi": -0.052829,
+          "yield": -0.052829,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        }
+      },
+      "fit_seconds": 135.84,
+      "model_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\models\\v4_search\\lightgbm.pkl"
+    }
+  },
+  "market_benchmark_on_test": {
+    "market_accuracy": 0.711857,
+    "market_log_loss": 0.552517,
+    "market_roc_auc": 0.78994,
+    "market_profit_if_bet_player_1_all": -2190.771184,
+    "market_roi_if_bet_player_1_all": -0.109555,
+    "odds_coverage_rows": 19997,
+    "odds_coverage_pct": 100.0
+  },
+  "winner": "xgboost",
+  "winner_test_roc_auc": 0.789312,
+  "notes": [
+    "Script esplorativo Fase 1: NON sovrascrive v1/v2/v3 ne' model_registry.json.",
+    "Modelli salvati in data/models/v4_search/ solo per ispezione manuale.",
+    "Il vincitore va validato con walk-forward (Fase 5) prima di una eventuale promozione a v4 ufficiale."
+  ]
+}

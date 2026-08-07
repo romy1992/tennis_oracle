@@ -193,7 +193,8 @@ class TrainingResult:
 
 
 def allowed_feature_columns(model_version: str) -> list[str]:
-    if model_version == "v3":
+    if model_version in ("v3", "v4"):
+        # v4 riusa esattamente lo stesso feature-set di v3 (ensemble, non nuove feature).
         return ALLOWED_FEATURE_COLUMNS_V3
     if model_version == "v2":
         return ALLOWED_FEATURE_COLUMNS_V2
@@ -201,7 +202,7 @@ def allowed_feature_columns(model_version: str) -> list[str]:
 
 
 def leakage_excluded_columns(model_version: str = "v2") -> set[str]:
-    if model_version == "v3":
+    if model_version in ("v3", "v4"):
         return LEAKAGE_EXCLUDED_COLUMNS.difference(ODDS_FEATURE_COLUMNS)
     return LEAKAGE_EXCLUDED_COLUMNS
 
@@ -352,10 +353,10 @@ def train_baseline(
     dataset_path = select_training_dataset(processed_dir, model_version=model_version)
     dataframe = pd.read_csv(dataset_path, low_memory=False)
     rows_before_odds_filter = len(dataframe)
-    if model_version == "v3":
+    if model_version in ("v3", "v4"):
         dataframe = filter_rows_with_valid_odds(dataframe)
         if dataframe.empty:
-            raise ValueError("Dataset v3 senza righe con odds valide.")
+            raise ValueError(f"Dataset {model_version} senza righe con odds valide.")
     split = temporal_train_test_split(dataframe, test_size=test_size)
     feature_columns = selected_feature_columns(split.train, model_version=model_version)
     if not feature_columns:
@@ -444,7 +445,7 @@ def train_baseline(
         "model_paths": {name: str(path) for name, path in model_paths.items()},
         "metrics_path": str(reports_path / metrics_filename),
     }
-    if model_version == "v3":
+    if model_version in ("v3", "v4"):
         metrics["odds_filter"] = {
             "required": True,
             "rows_removed": int(rows_before_odds_filter - len(dataframe)),
@@ -592,14 +593,17 @@ def update_model_registry_entry(
     metrics_path: Path,
     dataset_path: Path,
     models_dir: Path,
+    registry_path: Path | None = None,
 ) -> None:
-    registry = _load_registry()
+    resolved_registry_path = registry_path or REGISTRY_PATH
+    registry = _load_registry(resolved_registry_path)
     now = datetime.now(timezone.utc).isoformat()
     version_paths = MODEL_VERSIONS[model_version]  # type: ignore[index]
     labels = {
         "v1": "Baseline form+H2H+ATP parziale",
         "v2": "Elo + ranking storico",
         "v3": "Odds-aware",
+        "v4": "Ensemble voting (v3 features)",
     }
     descriptions = {
         "v1": "Primo baseline senza Elo/rank reali. Odds solo benchmark.",
@@ -607,6 +611,13 @@ def update_model_registry_entry(
         "v3": (
             "Elo/rank/form/H2H come v2 con odds match-winner aggregate come feature ML. "
             "Training e inferenza solo su match con odds."
+        ),
+        "v4": (
+            "Stesse feature di v3 (Elo/rank/form/H2H + odds). Modello: soft-voting ensemble "
+            "di logistic_regression + xgboost + hist_gradient_boosting, iperparametri tunati "
+            "via grid search (Fasi 1-2) e combinati in Fase 3. Validato con walk-forward "
+            "multi-finestra (Fase 5/5.2): ROC AUC marginalmente superiore a v3, ROI value-bet "
+            "piu' stabile nel tempo su finestre con storia matura (>=3 anni)."
         ),
     }
     entry = {
@@ -631,15 +642,20 @@ def update_model_registry_entry(
         registry["planned_versions"] = [
             item for item in registry.get("planned_versions", []) if item.get("id") != "v3"
         ]
+    if model_version == "v4":
+        registry["planned_versions"] = [
+            item for item in registry.get("planned_versions", []) if item.get("id") != "v4"
+        ]
 
-    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with REGISTRY_PATH.open("w", encoding="utf-8") as registry_file:
+    resolved_registry_path.parent.mkdir(parents=True, exist_ok=True)
+    with resolved_registry_path.open("w", encoding="utf-8") as registry_file:
         json.dump(registry, registry_file, indent=2, ensure_ascii=False)
 
 
-def _load_registry() -> dict[str, Any]:
-    if REGISTRY_PATH.exists():
-        with REGISTRY_PATH.open("r", encoding="utf-8") as registry_file:
+def _load_registry(registry_path: Path | None = None) -> dict[str, Any]:
+    resolved = registry_path or REGISTRY_PATH
+    if resolved.exists():
+        with resolved.open("r", encoding="utf-8") as registry_file:
             return json.load(registry_file)
     return {"versions": []}
 

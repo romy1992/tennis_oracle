@@ -70,7 +70,7 @@ def run_upcoming_prediction_generation(
             from_date=today,
             to_date=today + timedelta(days=days_forward),
             limit=500,
-            odds_required=model_version == "v3",
+            odds_required=model_version in ("v3", "v4"),
         )
         try:
             predictions = predict_upcoming_fixtures(
@@ -107,7 +107,7 @@ if __name__ == "__main__":
         description="Generate persisted predictions for upcoming fixtures."
     )
     parser.add_argument("--days-forward", type=int, default=10)
-    parser.add_argument("--model-version", choices=["v1", "v2", "v3"], default="v2")
+    parser.add_argument("--model-version", choices=["v1", "v2", "v3", "v4"], default="v2")
     parser.add_argument("--model-name", default=None)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)

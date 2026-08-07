@@ -1,0 +1,228 @@
+{
+  "generated_at": "2026-08-07T05:55:10.491332+00:00",
+  "phase": "fase_3_voting_ensemble",
+  "source_search_report": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\reports\\v4_grid_search_results.json",
+  "algorithms_used": [
+    "hist_gradient_boosting",
+    "lightgbm",
+    "logistic_regression",
+    "random_forest",
+    "xgboost"
+  ],
+  "edge_threshold": 0.03,
+  "strategies": {
+    "uniform": {
+      "description": "Pesi uguali per tutti gli algoritmi (1,1,1).",
+      "weights": {
+        "hist_gradient_boosting": 1.0,
+        "lightgbm": 1.0,
+        "logistic_regression": 1.0,
+        "random_forest": 1.0,
+        "xgboost": 1.0
+      },
+      "test_metrics": {
+        "accuracy": 0.711707,
+        "precision": 0.714259,
+        "recall": 0.73334,
+        "f1": 0.723673,
+        "roc_auc": 0.789367,
+        "log_loss": 0.550349,
+        "confusion_matrix": [
+          [
+            6683,
+            3020
+          ],
+          [
+            2745,
+            7549
+          ]
+        ],
+        "class_distribution_train": {
+          "1": 41016,
+          "0": 38969
+        },
+        "class_distribution_test": {
+          "1": 10294,
+          "0": 9703
+        },
+        "value_bet_overall": {
+          "edge_threshold": 0.03,
+          "bets_count": 2571,
+          "hit_rate": 0.823804,
+          "total_profit": -90.002997,
+          "roi": -0.035007,
+          "yield": -0.035007,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        },
+        "value_bet_with_odds": {
+          "edge_threshold": 0.03,
+          "bets_count": 2571,
+          "hit_rate": 0.823804,
+          "total_profit": -90.002997,
+          "roi": -0.035007,
+          "yield": -0.035007,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        }
+      }
+    },
+    "cv_score_weighted": {
+      "description": "Pesi proporzionali al CV best roc_auc di ciascun algoritmo.",
+      "weights": {
+        "hist_gradient_boosting": 0.78129,
+        "lightgbm": 0.781286,
+        "logistic_regression": 0.781933,
+        "random_forest": 0.782904,
+        "xgboost": 0.782368
+      },
+      "test_metrics": {
+        "accuracy": 0.711707,
+        "precision": 0.714259,
+        "recall": 0.73334,
+        "f1": 0.723673,
+        "roc_auc": 0.789367,
+        "log_loss": 0.550349,
+        "confusion_matrix": [
+          [
+            6683,
+            3020
+          ],
+          [
+            2745,
+            7549
+          ]
+        ],
+        "class_distribution_train": {
+          "1": 41016,
+          "0": 38969
+        },
+        "class_distribution_test": {
+          "1": 10294,
+          "0": 9703
+        },
+        "value_bet_overall": {
+          "edge_threshold": 0.03,
+          "bets_count": 2571,
+          "hit_rate": 0.823804,
+          "total_profit": -90.002997,
+          "roi": -0.035007,
+          "yield": -0.035007,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        },
+        "value_bet_with_odds": {
+          "edge_threshold": 0.03,
+          "bets_count": 2571,
+          "hit_rate": 0.823804,
+          "total_profit": -90.002997,
+          "roi": -0.035007,
+          "yield": -0.035007,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        }
+      }
+    },
+    "favor_best": {
+      "description": "Peso doppio per l'algoritmo con miglior CV roc_auc, 1 per gli altri.",
+      "weights": {
+        "hist_gradient_boosting": 1.0,
+        "lightgbm": 1.0,
+        "logistic_regression": 1.0,
+        "random_forest": 2.0,
+        "xgboost": 1.0
+      },
+      "test_metrics": {
+        "accuracy": 0.712007,
+        "precision": 0.714786,
+        "recall": 0.733048,
+        "f1": 0.723802,
+        "roc_auc": 0.789357,
+        "log_loss": 0.550612,
+        "confusion_matrix": [
+          [
+            6692,
+            3011
+          ],
+          [
+            2748,
+            7546
+          ]
+        ],
+        "class_distribution_train": {
+          "1": 41016,
+          "0": 38969
+        },
+        "class_distribution_test": {
+          "1": 10294,
+          "0": 9703
+        },
+        "value_bet_overall": {
+          "edge_threshold": 0.03,
+          "bets_count": 2426,
+          "hit_rate": 0.807914,
+          "total_profit": -87.876088,
+          "roi": -0.036223,
+          "yield": -0.036223,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        },
+        "value_bet_with_odds": {
+          "edge_threshold": 0.03,
+          "bets_count": 2426,
+          "hit_rate": 0.807914,
+          "total_profit": -87.876088,
+          "roi": -0.036223,
+          "yield": -0.036223,
+          "odds_coverage_rows": 19997,
+          "odds_coverage_pct": 100.0
+        }
+      }
+    }
+  },
+  "best_strategy": "uniform",
+  "best_voting_model_path": "C:\\Users\\trott\\git\\tennis_oracle\\backend\\data\\models\\v4_voting\\voting_uniform.pkl",
+  "single_algorithm_comparison": {
+    "hist_gradient_boosting": {
+      "roc_auc": 0.788756,
+      "log_loss": 0.55075,
+      "accuracy": 0.711507
+    },
+    "lightgbm": {
+      "roc_auc": 0.788608,
+      "log_loss": 0.551133,
+      "accuracy": 0.710457
+    },
+    "logistic_regression": {
+      "roc_auc": 0.789267,
+      "log_loss": 0.550324,
+      "accuracy": 0.711807
+    },
+    "random_forest": {
+      "roc_auc": 0.788974,
+      "log_loss": 0.552809,
+      "accuracy": 0.711107
+    },
+    "xgboost": {
+      "roc_auc": 0.789312,
+      "log_loss": 0.550374,
+      "accuracy": 0.711407
+    }
+  },
+  "best_single_algorithm": "xgboost",
+  "voting_beats_best_single_algorithm": true,
+  "market_benchmark_on_test": {
+    "market_accuracy": 0.711857,
+    "market_log_loss": 0.552517,
+    "market_roc_auc": 0.78994,
+    "market_profit_if_bet_player_1_all": -2190.771184,
+    "market_roi_if_bet_player_1_all": -0.109555,
+    "odds_coverage_rows": 19997,
+    "odds_coverage_pct": 100.0
+  },
+  "notes": [
+    "Script esplorativo Fase 3: NON sovrascrive v1/v2/v3 ne' model_registry.json.",
+    "Pesi provati: uniform, cv_score_weighted, favor_best (vedi WEIGHT_STRATEGIES).",
+    "Se voting_beats_best_single_algorithm=false, conviene tenere il singolo modello (piu' semplice da mantenere/spiegare) invece dell'ensemble."
+  ]
+}

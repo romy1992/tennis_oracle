@@ -130,14 +130,14 @@ class PreMatchFeatureBuilder:
         builder = cls()
         matches = load_legacy_match_rows(db)
         builder._ingest_history(matches)
-        if model_version in {"v2", "v3"}:
+        if model_version in {"v2", "v3", "v4"}:
             try:
                 base_path = select_training_dataset_path(PROCESSED_DATA_DIR, version=model_version)
             except FileNotFoundError:
                 try:
                     base_path = (
                         select_training_dataset_path(PROCESSED_DATA_DIR, version="v2")
-                        if model_version == "v3"
+                        if model_version in {"v3", "v4"}
                         else None
                     )
                 except FileNotFoundError:
@@ -256,7 +256,7 @@ class PreMatchFeatureBuilder:
         warnings: list[str] = []
         features_available = bool(player_1_history or player_2_history)
 
-        if model_version in {"v2", "v3"}:
+        if model_version in {"v2", "v3", "v4"}:
             rank_features = (self.ranking_lookup or HistoricalRankingLookup(pd.DataFrame(), {})).pre_match_features(
                 player_1_id,
                 player_2_id,
@@ -303,7 +303,7 @@ class PreMatchFeatureBuilder:
         row.update(ATP_DEFAULTS)
         row["atp_surface"] = normalised_surface
 
-        if model_version == "v3":
+        if model_version in {"v3", "v4"}:
             odds_features = odds_feature_row(
                 event_key=event_key,
                 match_date=match_date,
@@ -327,13 +327,13 @@ class PreMatchFeatureBuilder:
 
 def _clean_features(row: dict[str, Any], model_version: ModelVersion) -> pd.DataFrame:
     dataframe = pd.DataFrame([row])
-    if model_version == "v3":
+    if model_version in {"v3", "v4"}:
         cleaned = clean_dataset_dataframe_v2(dataframe)
         for column in ODDS_FEATURE_COLUMNS:
             if column in dataframe.columns and not cleaned.empty:
                 cleaned[column] = pd.to_numeric(dataframe[column], errors="coerce").values
         return cleaned
-    if model_version in {"v2", "v3"}:
+    if model_version == "v2":
         return clean_dataset_dataframe_v2(dataframe)
     return clean_dataset_dataframe(dataframe)
 
@@ -436,7 +436,7 @@ def predict_fixture(
         model_version=model_version,
         odds=fixture.odds,
     )
-    if model_version == "v3" and "missing_odds" in warnings:
+    if model_version in {"v3", "v4"} and "missing_odds" in warnings:
         return {
             "event_key": fixture.event_key,
             "model_version": model_version,
@@ -453,7 +453,7 @@ def predict_fixture(
     pipeline = artifact["pipeline"]
 
     missing_columns = [column for column in feature_columns if column not in cleaned.columns]
-    if model_version == "v3":
+    if model_version in {"v3", "v4"}:
         missing_odds_columns = [column for column in ODDS_FEATURE_COLUMNS if column in feature_columns and column not in cleaned.columns]
         if missing_odds_columns:
             return {
