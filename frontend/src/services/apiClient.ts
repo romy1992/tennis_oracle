@@ -331,8 +331,14 @@ export const apiClient = {
     ),
   getBettingSlipCalendar: (params: { model_version?: MLModelVersion; model_name?: string } = {}) =>
     request<BettingSlipCalendarResponse>(withQuery("/api/betting-slips/calendar", params)),
-  startGlobalUpdate: (params: { force?: boolean; days_forward?: number; days_back_fixtures?: number } = {}) =>
-    post<GlobalUpdateStartResponse>("/api/global-update", params),
+  startGlobalUpdate: (
+    params: {
+      force?: boolean;
+      days_forward?: number;
+      days_back_fixtures?: number;
+      versions?: string[];
+    } = {}
+  ) => post<GlobalUpdateStartResponse>("/api/global-update", params),
   getGlobalUpdateStatus: () => request<GlobalUpdateRunRead | null>("/api/global-update/status"),
   getGlobalUpdateLatest: () => request<GlobalUpdateRunRead | null>("/api/global-update/latest"),
   cancelGlobalUpdate: (runId: number) =>

@@ -215,6 +215,26 @@ a {
   gap: 10px;
 }
 
+.global-update-version-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 0.8rem;
+  color: #b7c0d1;
+}
+
+.global-update-version-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.global-update-version-checkbox input {
+  cursor: pointer;
+}
+
 .global-update-actions {
   display: flex;
   flex-wrap: wrap;

@@ -1,8 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useGlobalUpdate } from "../hooks/useGlobalUpdate";
 import { ApiError } from "../services/apiClient";
+import type { MLModelVersion } from "../types/api";
+import {
+  MODEL_VERSIONS,
+  readStoredGlobalUpdateVersions,
+  writeStoredGlobalUpdateVersions
+} from "../utils/modelVersion";
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -22,11 +28,32 @@ export function GlobalUpdateControls() {
     useGlobalUpdate();
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [selectedVersions, setSelectedVersions] = useState<MLModelVersion[]>(() =>
+    readStoredGlobalUpdateVersions()
+  );
+
+  useEffect(() => {
+    writeStoredGlobalUpdateVersions(selectedVersions);
+  }, [selectedVersions]);
+
+  const allVersionsSelected = selectedVersions.length === MODEL_VERSIONS.length;
+
+  function toggleVersion(version: MLModelVersion) {
+    setSelectedVersions((current) => {
+      if (current.includes(version)) {
+        if (current.length === 1) {
+          return current; // keep at least one version selected
+        }
+        return current.filter((value) => value !== version);
+      }
+      return [...current, version];
+    });
+  }
 
   async function handleClick() {
     try {
       setActionError(null);
-      await triggerUpdate(true);
+      await triggerUpdate(true, allVersionsSelected ? undefined : selectedVersions);
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -58,6 +85,19 @@ export function GlobalUpdateControls() {
 
   return (
     <div className="global-update-controls">
+      <div className="global-update-version-filters">
+        {MODEL_VERSIONS.map((option) => (
+          <label key={option.value} className="global-update-version-checkbox">
+            <input
+              type="checkbox"
+              checked={selectedVersions.includes(option.value)}
+              disabled={isRunning}
+              onChange={() => toggleVersion(option.value)}
+            />
+            {option.label}
+          </label>
+        ))}
+      </div>
       <div className="global-update-actions">
         <button
           type="button"
@@ -65,7 +105,11 @@ export function GlobalUpdateControls() {
           onClick={() => void handleClick()}
           disabled={isRunning}
         >
-          {isRunning ? "Aggiornamento globale..." : "Aggiorna tutto"}
+          {isRunning
+            ? "Aggiornamento globale..."
+            : allVersionsSelected
+              ? "Aggiorna tutto"
+              : `Aggiorna selezionate (${selectedVersions.join(", ")})`}
         </button>
         {isRunning && status ? (
           <button

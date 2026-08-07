@@ -80,6 +80,28 @@ describe("GlobalUpdateControls", () => {
     expect(screen.getByText("42%")).toBeInTheDocument();
   });
 
+  it("lets the user restrict the update to a subset of versions", async () => {
+    apiMocks.getGlobalUpdateStatus.mockResolvedValue(idleGlobalUpdate);
+    apiMocks.startGlobalUpdate.mockResolvedValue({ run_id: 9, status: "pending" });
+    const user = userEvent.setup();
+
+    renderWithProviders(<GlobalUpdateControls />);
+    await screen.findByRole("button", { name: "Aggiorna tutto" });
+
+    await user.click(screen.getByRole("checkbox", { name: "v1" }));
+    await user.click(screen.getByRole("checkbox", { name: "v2" }));
+
+    const partialButton = await screen.findByRole("button", { name: /Aggiorna selezionate/ });
+    await user.click(partialButton);
+
+    await waitFor(() => {
+      expect(apiMocks.startGlobalUpdate).toHaveBeenCalledWith({
+        force: true,
+        versions: ["v3", "v4"]
+      });
+    });
+  });
+
   it("surfaces API errors from the trigger action", async () => {
     apiMocks.getGlobalUpdateStatus.mockResolvedValue(idleGlobalUpdate);
     apiMocks.startGlobalUpdate.mockRejectedValue(new ApiError("Run già attiva", 409));

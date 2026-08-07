@@ -12,7 +12,7 @@ from backend.src.app.ml.datasets.odds_builder import (
     average_match_winner_odds_from_record,
 )
 from backend.src.app.ml.model_selection import select_best_model
-from backend.src.app.ml.model_versioning import ModelVersion
+from backend.src.app.ml.model_versioning import ODDS_REQUIRED_VERSIONS, ModelVersion
 from backend.src.app.models import Fixture, MatchPrediction, NextFixture
 from backend.src.app.schemas.prediction import (
     DailyPredictionStatsDay,
@@ -612,7 +612,7 @@ def get_next_fixtures_with_predictions(
     player_name: str | None = None,
 ) -> FixturesWithPredictionsPage:
     today = date.today()
-    odds_required = model_version == "v3"
+    odds_required = model_version in ODDS_REQUIRED_VERSIONS
     upcoming_from, upcoming_to = _upcoming_date_bounds(status, today, from_date, to_date)
     played_from, played_to = _played_date_bounds(status, today, from_date, to_date)
 

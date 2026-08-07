@@ -306,6 +306,59 @@ class PredictionStatsTest(unittest.TestCase):
         self.assertIsNone(fixtures[1].prediction)
         self.assertEqual(fixtures[1].prediction_warning, "missing_persisted_prediction")
 
+    def test_v4_requires_odds_like_v3(self):
+        """v4 shares v3's odds-aware feature set: fixtures without odds must be excluded."""
+        today = date(2026, 6, 21)
+        with self.Session() as session:
+            session.add_all(
+                [
+                    NextFixture(
+                        event_key=1,
+                        event_date=today,
+                        event_first_player="A",
+                        event_second_player="B",
+                        odds={
+                            "1": {
+                                "Home/Away": {
+                                    "Home": {"Book A": "2.10"},
+                                    "Away": {"Book A": "1.70"},
+                                }
+                            }
+                        },
+                        is_completed=False,
+                    ),
+                    NextFixture(
+                        event_key=2,
+                        event_date=today,
+                        event_first_player="C",
+                        event_second_player="D",
+                        is_completed=False,
+                    ),
+                ]
+            )
+            session.commit()
+
+            page_v4 = get_next_fixtures_with_predictions(
+                db=session,
+                model_version="v4",
+                model_name="voting_ensemble",
+                from_date=today,
+                to_date=today,
+            )
+            page_v3 = get_next_fixtures_with_predictions(
+                db=session,
+                model_version="v3",
+                model_name="logistic_regression",
+                from_date=today,
+                to_date=today,
+            )
+
+        # Only the fixture with odds (event_key=1) should be returned for both v3 and v4.
+        self.assertEqual(page_v4.total, 1)
+        self.assertEqual([f.event_key for f in page_v4.items], [1])
+        self.assertEqual(page_v3.total, 1)
+        self.assertEqual([f.event_key for f in page_v3.items], [1])
+
 
 if __name__ == "__main__":
     unittest.main()

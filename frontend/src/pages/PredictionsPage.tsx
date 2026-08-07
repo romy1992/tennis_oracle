@@ -203,6 +203,7 @@ export function PredictionsPage() {
   const [minEdgePercent, setMinEdgePercent] = useState(2);
   const [error, setError] = useState<string | null>(null);
   const [lastReloadToken, setLastReloadToken] = useState<string | null>(null);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(totalFixtures / PAGE_SIZE));
   const showResultDots = statusFilter === "played" || statusFilter === "all";
@@ -217,6 +218,8 @@ export function PredictionsPage() {
         }
       } catch {
         setAvailableVersions([]);
+      } finally {
+        setCatalogLoaded(true);
       }
     }
     void loadCatalog();
@@ -308,6 +311,9 @@ export function PredictionsPage() {
   }, [fixtures, singleValueByModel, modelNames, minEdgePercent]);
 
   useEffect(() => {
+    if (!catalogLoaded) {
+      return;
+    }
     async function load() {
       try {
         setLoading(true);
@@ -320,7 +326,7 @@ export function PredictionsPage() {
       }
     }
     void load();
-  }, [loadPageData]);
+  }, [catalogLoaded, loadPageData]);
 
   useEffect(() => {
     if (!lastCompletedAt || lastCompletedAt === lastReloadToken) {

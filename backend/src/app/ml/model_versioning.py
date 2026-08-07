@@ -6,6 +6,10 @@ from typing import Literal
 
 ModelVersion = Literal["v1", "v2", "v3", "v4"]
 
+# Versions whose model trains/predicts only on fixtures with pre-match market
+# odds available (v3 and v4 share the same odds-aware feature set).
+ODDS_REQUIRED_VERSIONS: frozenset[str] = frozenset({"v3", "v4"})
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PROCESSED_DATA_DIR = REPO_ROOT / "backend" / "data" / "processed"
 MODELS_DIR = REPO_ROOT / "backend" / "data" / "models"

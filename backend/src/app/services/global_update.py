@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.src.app.core.config import get_settings
 from backend.src.app.db.session import SessionLocal
-from backend.src.app.ml.model_versioning import MODEL_VERSIONS, ModelVersion
+from backend.src.app.ml.model_versioning import MODEL_VERSIONS, ODDS_REQUIRED_VERSIONS, ModelVersion
 from backend.src.app.ml.prediction.predictor import (
     PredictUpcomingCancelled,
     clear_model_cache,
@@ -418,6 +418,7 @@ def start_global_update(
     resume: bool = False,
     resume_run_id: int | None = None,
     blocking: bool = False,
+    versions: list[str] | None = None,
 ) -> tuple[GlobalUpdateRun | None, str]:
     """Create or resume a run and start processing.
 
@@ -473,6 +474,14 @@ def start_global_update(
                     )
 
             combinations = list_enabled_combinations()
+            if versions:
+                requested = set(versions)
+                combinations = [c for c in combinations if c.model_version in requested]
+                if not combinations:
+                    return None, (
+                        "Nessuna combinazione abilitata per le versioni selezionate "
+                        f"({', '.join(sorted(requested))})."
+                    )
             if not combinations:
                 return None, "No enabled model/version combinations found."
 
@@ -795,7 +804,7 @@ def _execute_global_update(
                     from_date=today,
                     to_date=today + timedelta(days=days_forward),
                     limit=500,
-                    odds_required=version == "v3",
+                    odds_required=version in ODDS_REQUIRED_VERSIONS,
                 )
             run.fixtures_processed = max(
                 (len(fixtures) for fixtures in upcoming_fixtures_by_version.values()),
@@ -878,7 +887,7 @@ def _execute_global_update(
                                 from_date=today,
                                 to_date=today + timedelta(days=days_forward),
                                 limit=500,
-                                odds_required=combo.model_version == "v3",
+                                odds_required=combo.model_version in ODDS_REQUIRED_VERSIONS,
                             )
                             if fixtures:
                                 def _progress_callback(fixture_index: int, fixture_total: int) -> None:
