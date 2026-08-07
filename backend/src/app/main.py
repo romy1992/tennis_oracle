@@ -30,29 +30,50 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     with SessionLocal() as db:
-        reconciled = reconcile_orphaned_runs(db)
-        if reconciled:
+        try:
+            reconciled = reconcile_orphaned_runs(db)
+            if reconciled:
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "Reconciled %s orphaned global update run(s) on startup.",
+                    reconciled,
+                )
+        except Exception:
             import logging
 
-            logging.getLogger(__name__).info(
-                "Reconciled %s orphaned global update run(s) on startup.",
-                reconciled,
+            logging.getLogger(__name__).exception(
+                "Failed to reconcile orphaned global update runs on startup."
             )
-        wf_reconciled = reconcile_orphaned_walk_forward_runs(db)
-        if wf_reconciled:
+        try:
+            wf_reconciled = reconcile_orphaned_walk_forward_runs(db)
+            if wf_reconciled:
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "Reconciled %s orphaned walk-forward run(s) on startup.",
+                    wf_reconciled,
+                )
+        except Exception:
             import logging
 
-            logging.getLogger(__name__).info(
-                "Reconciled %s orphaned walk-forward run(s) on startup.",
-                wf_reconciled,
+            logging.getLogger(__name__).exception(
+                "Failed to reconcile orphaned walk-forward runs on startup."
             )
-        cal_reconciled = reconcile_orphaned_calibration_runs(db)
-        if cal_reconciled:
+        try:
+            cal_reconciled = reconcile_orphaned_calibration_runs(db)
+            if cal_reconciled:
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "Reconciled %s orphaned calibration run(s) on startup.",
+                    cal_reconciled,
+                )
+        except Exception:
             import logging
 
-            logging.getLogger(__name__).info(
-                "Reconciled %s orphaned calibration run(s) on startup.",
-                cal_reconciled,
+            logging.getLogger(__name__).exception(
+                "Failed to reconcile orphaned calibration runs on startup."
             )
         try:
             ensure_bootstrap_admin(db, settings)

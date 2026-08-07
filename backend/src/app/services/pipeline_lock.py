@@ -118,3 +118,34 @@ def get_pipeline_lock(
     name: str = GLOBAL_UPDATE_LOCK_NAME,
 ) -> PipelineLock | None:
     return db.get(PipelineLock, name)
+
+
+def force_release_pipeline_lock(
+    db: Session,
+    *,
+    name: str = GLOBAL_UPDATE_LOCK_NAME,
+) -> bool:
+    """Unconditionally clear a lease, regardless of the current owner token.
+
+    Unlike :func:`release_pipeline_lock` (which requires the caller to prove
+    ownership), this is meant for recovery paths where other evidence already
+    proves the lease is stale: e.g. the run it was acquired for has already
+    been reconciled/marked terminal, so no live process can legitimately hold
+    it anymore. Without this, a worker that dies without running its
+    ``finally`` block (process kill, host crash, forced container recreate)
+    leaves the lease dangling for up to its full TTL (hours), blocking every
+    new run attempt with "another worker holds it" even though nothing is
+    actually running.
+    """
+    lock = _load_for_update(db, name)
+    if lock.owner_token is None:
+        db.rollback()
+        return False
+    lock.owner_token = None
+    lock.run_id = None
+    lock.acquired_at = None
+    lock.expires_at = None
+    lock.heartbeat_at = None
+    db.commit()
+    return True
+
