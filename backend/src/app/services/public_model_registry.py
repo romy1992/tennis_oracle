@@ -26,8 +26,8 @@ from backend.src.entity.public_model_registry import PublicModelRegistryEntry
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_PUBLIC_MODEL_VERSIONS = frozenset({"v1", "v2", "v3"})
-ALLOWED_PUBLIC_MODEL_NAMES = frozenset({"logistic_regression", "random_forest"})
+ALLOWED_PUBLIC_MODEL_VERSIONS = frozenset({"v1", "v2", "v3", "v4"})
+ALLOWED_PUBLIC_MODEL_NAMES = frozenset({"logistic_regression", "random_forest", "voting_ensemble"})
 OPEN_STATUSES = frozenset({"candidate", "active"})
 PublicModelRegistryStatus = Literal["candidate", "active", "retired"]
 

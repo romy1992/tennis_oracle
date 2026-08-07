@@ -47,6 +47,7 @@ FoldStatus = Literal["completed", "skipped_insufficient_data", "skipped_single_c
 PrepareProgressCallback = Callable[[str], None]
 ProgressCallback = Callable[[str, int, int], None]
 ShouldCancel = Callable[[], bool]
+EstimatorsFactory = Callable[[int], dict[str, Any]]
 
 MODEL_NAMES = ("logistic_regression", "random_forest")
 OFFICIAL_BENCHMARK_NAMES = (
@@ -474,6 +475,7 @@ def _evaluate_official_contenders(
     test: pd.DataFrame,
     *,
     probabilities_by_name: dict[str, pd.Series],
+    contenders: tuple[str, ...] = OFFICIAL_CONTENDERS,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     if TARGET_COLUMN not in test.columns:
         raise ValueError(f"Colonna target mancante: {TARGET_COLUMN}")
@@ -484,7 +486,7 @@ def _evaluate_official_contenders(
     required = y_true_all.notna() & (odds_1_all > 1.0) & (odds_2_all > 1.0)
 
     contender_masks: dict[str, pd.Series] = {}
-    for name in OFFICIAL_CONTENDERS:
+    for name in contenders:
         series = probabilities_by_name.get(name)
         if series is None:
             contender_masks[name] = pd.Series(False, index=test.index)
@@ -524,7 +526,7 @@ def _evaluate_official_contenders(
     y_true = y_true_all.loc[common_mask].astype(int)
     odds_1 = odds_1_all.loc[common_mask]
     odds_2 = odds_2_all.loc[common_mask]
-    for name in OFFICIAL_CONTENDERS:
+    for name in contenders:
         probs = pd.to_numeric(probabilities_by_name[name], errors="coerce").loc[common_mask]
         metrics = _compute_official_metrics(y_true, probs, odds_1, odds_2)
         metrics["official_common_sample_rows"] = common_rows
@@ -542,8 +544,15 @@ def evaluate_fold_models(
     fold: WalkForwardFoldSpec,
     config: WalkForwardConfig,
     model_names: tuple[str, ...] = MODEL_NAMES,
+    estimators_factory: EstimatorsFactory = _estimators,
 ) -> list[WalkForwardFoldOutcome]:
-    """Train in-memory only; do not write production model artifacts."""
+    """Train in-memory only; do not write production model artifacts.
+
+    ``estimators_factory`` di default costruisce i due modelli ufficiali
+    (logistic_regression/random_forest). Può essere sostituita (es. dagli
+    script esplorativi Fase 5 per v4) per validare stimatori/ensemble diversi
+    senza duplicare tutta la logica di fold/leakage/metriche di questo modulo.
+    """
     from sklearn.pipeline import Pipeline
 
     feature_columns = selected_feature_columns(train, model_version=model_version)
@@ -632,7 +641,7 @@ def evaluate_fold_models(
     x_train = train[feature_columns]
     x_test = test[feature_columns]
     market = market_benchmark_metrics(test)
-    estimators = _estimators(config.random_state)
+    estimators = estimators_factory(config.random_state)
     trained_probabilities: dict[str, pd.Series] = {}
 
     for model_name in model_names:
@@ -713,9 +722,16 @@ def evaluate_fold_models(
             )
 
     official_probabilities = _official_probability_inputs(test, trained_probabilities)
+    # I "contenders" ufficiali sono i benchmark fissi + i model_names effettivamente
+    # valutati in questo fold: per le chiamate standard (model_names=MODEL_NAMES,
+    # default) equivale esattamente a OFFICIAL_CONTENDERS; se model_names include un
+    # modello extra (es. l'ensemble esplorativo v4), anche quello riceve lo stesso
+    # calcolo "official_benchmark" (bet-always sul predetto, ROI/log_loss/brier/...).
+    contenders = tuple(dict.fromkeys((*OFFICIAL_BENCHMARK_NAMES, *model_names)))
     official_metrics, sample_meta = _evaluate_official_contenders(
         test,
         probabilities_by_name=official_probabilities,
+        contenders=contenders,
     )
 
     for outcome in outcomes:
@@ -919,6 +935,7 @@ def run_walk_forward_for_version(
     model_names: tuple[str, ...] = MODEL_NAMES,
     progress_callback: ProgressCallback | None = None,
     should_cancel: ShouldCancel | None = None,
+    estimators_factory: EstimatorsFactory = _estimators,
 ) -> WalkForwardVersionResult:
     config.validate()
     dataset_path = select_training_dataset(processed_dir, model_version=model_version)
@@ -945,6 +962,7 @@ def run_walk_forward_for_version(
                 fold=fold,
                 config=config,
                 model_names=model_names,
+                estimators_factory=estimators_factory,
             )
         )
         if progress_callback:

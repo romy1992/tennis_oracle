@@ -6,19 +6,21 @@ const NAME_STORAGE_KEY = "tennis_oracle_selected_model_name";
 export const MODEL_VERSIONS: Array<{ value: MLModelVersion; label: string }> = [
   { value: "v1", label: "v1" },
   { value: "v2", label: "v2" },
-  { value: "v3", label: "v3 odds-aware" }
+  { value: "v3", label: "v3 odds-aware" },
+  { value: "v4", label: "v4 ensemble (voting)" }
 ];
 
 export const MODEL_NAMES: Array<{ value: MLModelName; label: string }> = [
   { value: "logistic_regression", label: "Logistic regression" },
-  { value: "random_forest", label: "Random forest" }
+  { value: "random_forest", label: "Random forest" },
+  { value: "voting_ensemble", label: "Voting ensemble (v4)" }
 ];
 
-export const DEFAULT_MODEL_VERSION: MLModelVersion = "v3";
-const FALLBACK_MODEL_NAME: MLModelName = "logistic_regression";
+export const DEFAULT_MODEL_VERSION: MLModelVersion = "v4";
+const FALLBACK_MODEL_NAME: MLModelName = "voting_ensemble";
 
 function isMLModelVersion(value: string | null | undefined): value is MLModelVersion {
-  return value === "v1" || value === "v2" || value === "v3";
+  return value === "v1" || value === "v2" || value === "v3" || value === "v4";
 }
 
 export function readStoredModelVersion(): MLModelVersion {
@@ -54,7 +56,7 @@ export function resolvePreferredModelVersion(
 
 export function readStoredModelName(): MLModelName {
   const value = window.localStorage.getItem(NAME_STORAGE_KEY);
-  if (value === "logistic_regression" || value === "random_forest") {
+  if (value === "logistic_regression" || value === "random_forest" || value === "voting_ensemble") {
     return value;
   }
   return FALLBACK_MODEL_NAME;

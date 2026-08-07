@@ -53,8 +53,8 @@ export type ListParams = {
   offset?: number;
 };
 
-export type MLModelVersion = "v1" | "v2" | "v3";
-export type MLModelName = "logistic_regression" | "random_forest";
+export type MLModelVersion = "v1" | "v2" | "v3" | "v4";
+export type MLModelName = "logistic_regression" | "random_forest" | "voting_ensemble";
 
 export type NextFixture = {
   id: number;
