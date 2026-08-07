@@ -41,6 +41,7 @@ from backend.src.app.services.live_publication_service import (
 from backend.src.app.services.pipeline_lock import (
     GLOBAL_UPDATE_LOCK_NAME,
     acquire_pipeline_lock,
+    force_release_pipeline_lock,
     get_pipeline_lock,
     heartbeat_pipeline_lock,
     new_owner_token,
@@ -295,6 +296,23 @@ def reconcile_orphaned_runs(db: Session) -> int:
             run,
             reason="Run interrupted (backend restarted or worker lost). Resume with --resume.",
         )
+        # The dead worker may have died holding the distributed pipeline lock
+        # without ever reaching its `finally` release (process kill, host
+        # crash, forced container recreate). Since we just proved this run is
+        # no longer live, clear the lease immediately instead of leaving it
+        # dangling for up to its full TTL (hours), which would otherwise
+        # block every new "Aggiorna" attempt with "another worker holds it".
+        # Defensive: never let a lock-release hiccup abort reconciliation of
+        # the remaining orphaned runs, nor bubble up and crash the caller
+        # (e.g. API startup lifespan) — the reconcile loop must be best-effort.
+        try:
+            lock = get_pipeline_lock(db)
+            if lock is not None and lock.run_id == run.id:
+                force_release_pipeline_lock(db)
+        except Exception:
+            logger.exception(
+                "Failed to release stale pipeline lock for orphaned run_id=%s", run.id
+            )
         _cancel_requested.discard(run.id)
         _cancel_cache.pop(run.id, None)
         reconciled += 1
@@ -599,6 +617,35 @@ def _sync_cloud_step() -> dict[str, Any]:
     return {"skipped": False, "summary": summary}
 
 
+def _steal_stale_lock_if_orphaned(
+    db: Session,
+    *,
+    owner_token: str,
+    run_id: int,
+    ttl_seconds: int,
+) -> bool:
+    """Self-heal a lease dangling from a dead worker, then retry acquisition once.
+
+    Defense-in-depth alongside the ``reconcile_orphaned_runs`` cleanup (which
+    only runs on API startup): if the lock is held for a *different* run whose
+    own status already reached a terminal state, no live process can
+    legitimately own the lease anymore, no matter what its TTL says. Clearing
+    it here means a simple retry ("click Aggiorna again") recovers instantly
+    instead of staying blocked for up to ``global_update_lock_ttl_seconds``.
+    """
+    current = get_pipeline_lock(db)
+    if current is None or current.run_id is None or current.run_id == run_id:
+        return False
+    holder = get_run_by_id(db, current.run_id)
+    if holder is not None and holder.status in RUNNING_STATUSES:
+        return False  # genuinely still running elsewhere
+    if not force_release_pipeline_lock(db):
+        return False
+    return acquire_pipeline_lock(
+        db, owner_token=owner_token, run_id=run_id, ttl_seconds=ttl_seconds
+    )
+
+
 def _execute_global_update(
     run_id: int,
     days_forward: int,
@@ -628,6 +675,13 @@ def _execute_global_update(
                     run_id=run_id,
                     ttl_seconds=settings.global_update_lock_ttl_seconds,
                 )
+                if not lock_acquired:
+                    lock_acquired = _steal_stale_lock_if_orphaned(
+                        db,
+                        owner_token=owner_token,
+                        run_id=run_id,
+                        ttl_seconds=settings.global_update_lock_ttl_seconds,
+                    )
                 if not lock_acquired:
                     run.status = "failed"
                     run.current_phase = "Lock non acquisito"

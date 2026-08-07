@@ -11,6 +11,12 @@ from backend.src.app.services.global_update import (
     get_resumable_run,
     reconcile_orphaned_runs,
     start_global_update,
+    _steal_stale_lock_if_orphaned,
+)
+from backend.src.app.services.pipeline_lock import (
+    acquire_pipeline_lock,
+    get_pipeline_lock,
+    new_owner_token,
 )
 from backend.src.entity.global_update_run import GlobalUpdateRun, GlobalUpdateRunItem
 from backend.src.jobs.run_global_update import run_job
@@ -98,6 +104,176 @@ class ResumeAndReconcileTest(unittest.TestCase):
             resumable = get_resumable_run(session)
             assert resumable is not None
             self.assertEqual(resumable.id, run_id)
+
+    def test_reconcile_releases_stale_lock_tied_to_orphaned_run(self):
+        """Regression test: a worker that dies mid-run (process kill, host
+        crash, forced container recreate) leaves the distributed lock held
+        for its run_id forever, since its `finally` release never runs. Once
+        reconcile proves that run is dead, the lock must be freed too -
+        otherwise every subsequent "Aggiorna" click fails instantly with
+        "Could not acquire distributed pipeline lock" until the TTL (hours)
+        expires on its own.
+        """
+        with self.Session() as session:
+            run = GlobalUpdateRun(
+                run_date=date.today(),
+                origin="manual",
+                status="running",
+                force="false",
+                created_at=datetime.now(),
+                started_at=datetime.now(),
+            )
+            session.add(run)
+            session.flush()
+            run_id = run.id
+            session.commit()
+
+            dead_token = new_owner_token()
+            self.assertTrue(
+                acquire_pipeline_lock(
+                    session, owner_token=dead_token, run_id=run_id, ttl_seconds=6 * 60 * 60
+                )
+            )
+
+            count = reconcile_orphaned_runs(session)
+            self.assertEqual(count, 1)
+
+            refreshed = session.get(GlobalUpdateRun, run_id)
+            assert refreshed is not None
+            self.assertEqual(refreshed.status, "interrupted")
+
+            lock = get_pipeline_lock(session)
+            assert lock is not None
+            self.assertIsNone(lock.owner_token)
+            self.assertIsNone(lock.run_id)
+
+            # A brand new run must now be able to acquire the lock immediately.
+            new_token = new_owner_token()
+            self.assertTrue(
+                acquire_pipeline_lock(
+                    session, owner_token=new_token, run_id=run_id + 1, ttl_seconds=60
+                )
+            )
+
+    def test_reconcile_does_not_touch_lock_of_still_active_run(self):
+        """A lock legitimately held by a run that is still genuinely running
+        (e.g. owned by the active in-process thread) must survive reconcile
+        of an *unrelated* orphaned run.
+        """
+        import backend.src.app.services.global_update as gu
+
+        with self.Session() as session:
+            orphaned = GlobalUpdateRun(
+                run_date=date.today(),
+                origin="manual",
+                status="running",
+                force="false",
+                created_at=datetime.now(),
+                started_at=datetime.now(),
+            )
+            active = GlobalUpdateRun(
+                run_date=date.today(),
+                origin="manual",
+                status="running",
+                force="false",
+                created_at=datetime.now(),
+                started_at=datetime.now(),
+            )
+            session.add_all([orphaned, active])
+            session.flush()
+            orphaned_id, active_id = orphaned.id, active.id
+            session.commit()
+
+            gu._active_run_id = active_id
+            try:
+                token = new_owner_token()
+                self.assertTrue(
+                    acquire_pipeline_lock(
+                        session, owner_token=token, run_id=active_id, ttl_seconds=6 * 60 * 60
+                    )
+                )
+
+                count = reconcile_orphaned_runs(session)
+                self.assertEqual(count, 1)
+
+                refreshed_orphaned = session.get(GlobalUpdateRun, orphaned_id)
+                assert refreshed_orphaned is not None
+                self.assertEqual(refreshed_orphaned.status, "interrupted")
+
+                lock = get_pipeline_lock(session)
+                assert lock is not None
+                self.assertEqual(lock.owner_token, token)
+                self.assertEqual(lock.run_id, active_id)
+            finally:
+                gu._active_run_id = None
+
+    def test_steal_stale_lock_if_orphaned_recovers_dead_worker(self):
+        with self.Session() as session:
+            dead_run = GlobalUpdateRun(
+                run_date=date.today(),
+                origin="manual",
+                status="interrupted",
+                force="false",
+                created_at=datetime.now(),
+            )
+            session.add(dead_run)
+            session.flush()
+            dead_run_id = dead_run.id
+            session.commit()
+
+            dead_token = new_owner_token()
+            self.assertTrue(
+                acquire_pipeline_lock(
+                    session, owner_token=dead_token, run_id=dead_run_id, ttl_seconds=6 * 60 * 60
+                )
+            )
+
+            new_run_id = dead_run_id + 1
+            new_token = new_owner_token()
+            stolen = _steal_stale_lock_if_orphaned(
+                session, owner_token=new_token, run_id=new_run_id, ttl_seconds=60
+            )
+            self.assertTrue(stolen)
+
+            lock = get_pipeline_lock(session)
+            assert lock is not None
+            self.assertEqual(lock.owner_token, new_token)
+            self.assertEqual(lock.run_id, new_run_id)
+
+    def test_steal_stale_lock_if_orphaned_refuses_genuinely_running_holder(self):
+        with self.Session() as session:
+            live_run = GlobalUpdateRun(
+                run_date=date.today(),
+                origin="manual",
+                status="running",
+                force="false",
+                created_at=datetime.now(),
+                started_at=datetime.now(),
+            )
+            session.add(live_run)
+            session.flush()
+            live_run_id = live_run.id
+            session.commit()
+
+            live_token = new_owner_token()
+            self.assertTrue(
+                acquire_pipeline_lock(
+                    session, owner_token=live_token, run_id=live_run_id, ttl_seconds=6 * 60 * 60
+                )
+            )
+
+            stolen = _steal_stale_lock_if_orphaned(
+                session,
+                owner_token=new_owner_token(),
+                run_id=live_run_id + 1,
+                ttl_seconds=60,
+            )
+            self.assertFalse(stolen)
+
+            lock = get_pipeline_lock(session)
+            assert lock is not None
+            self.assertEqual(lock.owner_token, live_token)
+            self.assertEqual(lock.run_id, live_run_id)
 
     @patch("backend.src.app.services.global_update.list_enabled_combinations")
     @patch("backend.src.app.services.global_update._execute_global_update")
