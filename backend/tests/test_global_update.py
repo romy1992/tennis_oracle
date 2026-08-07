@@ -69,6 +69,42 @@ class GlobalUpdateServiceTest(unittest.TestCase):
 
     @patch("backend.src.app.services.global_update.list_enabled_combinations")
     @patch("backend.src.app.services.global_update._execute_global_update")
+    def test_start_global_update_filters_by_versions(self, mock_execute, mock_combinations):
+        mock_combinations.return_value = [
+            type("C", (), {"model_version": "v2", "model_name": "logistic_regression"})(),
+            type("C", (), {"model_version": "v3", "model_name": "logistic_regression"})(),
+            type("C", (), {"model_version": "v4", "model_name": "voting_ensemble"})(),
+        ]
+
+        with self.Session() as session:
+            run, message = start_global_update(
+                session, origin="manual", force=True, versions=["v3", "v4"]
+            )
+            self.assertIsNotNone(run)
+            assert run is not None
+            self.assertEqual(len(run.items), 2)
+            self.assertEqual(
+                {item.model_version for item in run.items}, {"v3", "v4"}
+            )
+            self.assertIn("started", message.lower())
+
+    @patch("backend.src.app.services.global_update.list_enabled_combinations")
+    @patch("backend.src.app.services.global_update._execute_global_update")
+    def test_start_global_update_filters_by_versions_no_match(self, mock_execute, mock_combinations):
+        mock_combinations.return_value = [
+            type("C", (), {"model_version": "v2", "model_name": "logistic_regression"})(),
+        ]
+
+        with self.Session() as session:
+            run, message = start_global_update(
+                session, origin="manual", force=True, versions=["v4"]
+            )
+            self.assertIsNone(run)
+            self.assertIn("nessuna combinazione abilitata", message.lower())
+            mock_execute.assert_not_called()
+
+    @patch("backend.src.app.services.global_update.list_enabled_combinations")
+    @patch("backend.src.app.services.global_update._execute_global_update")
     def test_concurrent_run_blocked(self, mock_execute, mock_combinations):
         mock_combinations.return_value = [
             type("C", (), {"model_version": "v2", "model_name": "logistic_regression"})(),
@@ -122,6 +158,27 @@ class GlobalUpdateServiceTest(unittest.TestCase):
         payload = response.json()
         self.assertIn("run_id", payload)
         self.assertEqual(payload["status"], "pending")
+
+    @patch("backend.src.app.services.global_update.list_enabled_combinations")
+    def test_post_global_update_endpoint_with_versions_filter(self, mock_combinations):
+        mock_combinations.return_value = [
+            type("C", (), {"model_version": "v3", "model_name": "logistic_regression"})(),
+            type("C", (), {"model_version": "v4", "model_name": "voting_ensemble"})(),
+        ]
+        with patch("backend.src.app.services.global_update._execute_global_update"):
+            response = self.client.post(
+                "/api/global-update",
+                json={"force": True, "versions": ["v4"]},
+                headers=self.auth_headers,
+            )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("run_id", payload)
+        run = self.client.get(
+            f"/api/global-update/{payload['run_id']}", headers=self.auth_headers
+        ).json()
+        self.assertEqual(len(run["items"]), 1)
+        self.assertEqual(run["items"][0]["model_version"], "v4")
 
     def test_get_status_endpoint_empty(self):
         response = self.client.get("/api/global-update/status", headers=self.auth_headers)

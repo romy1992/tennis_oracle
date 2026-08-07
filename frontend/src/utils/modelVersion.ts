@@ -2,6 +2,7 @@ import type { MLModelName, MLModelVersion } from "../types/api";
 
 const VERSION_STORAGE_KEY = "tennis_oracle_selected_model_version";
 const NAME_STORAGE_KEY = "tennis_oracle_selected_model_name";
+const GLOBAL_UPDATE_VERSIONS_STORAGE_KEY = "tennis_oracle_global_update_versions";
 
 export const MODEL_VERSIONS: Array<{ value: MLModelVersion; label: string }> = [
   { value: "v1", label: "v1" },
@@ -65,3 +66,24 @@ export function readStoredModelName(): MLModelName {
 export function writeStoredModelName(value: MLModelName) {
   window.localStorage.setItem(NAME_STORAGE_KEY, value);
 }
+
+/** Versions selected for "Aggiorna tutto" / "Aggiorna selezionate". Defaults to all. */
+export function readStoredGlobalUpdateVersions(): MLModelVersion[] {
+  const raw = window.localStorage.getItem(GLOBAL_UPDATE_VERSIONS_STORAGE_KEY);
+  const allVersions = MODEL_VERSIONS.map((item) => item.value);
+  if (!raw) return allVersions;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isMLModelVersion)) {
+      return parsed;
+    }
+  } catch {
+    // malformed value: fall back to default below
+  }
+  return allVersions;
+}
+
+export function writeStoredGlobalUpdateVersions(values: MLModelVersion[]) {
+  window.localStorage.setItem(GLOBAL_UPDATE_VERSIONS_STORAGE_KEY, JSON.stringify(values));
+}
+

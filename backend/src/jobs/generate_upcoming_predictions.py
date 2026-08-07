@@ -14,7 +14,7 @@ from datetime import date, timedelta
 
 from backend.src.app.db.session import SessionLocal
 from backend.src.app.ml.model_selection import SelectedModel, select_best_model
-from backend.src.app.ml.model_versioning import ModelVersion
+from backend.src.app.ml.model_versioning import ODDS_REQUIRED_VERSIONS, ModelVersion
 from backend.src.app.ml.prediction.predictor import predict_upcoming_fixtures
 from backend.src.app.services.predictions import list_next_fixtures
 
@@ -70,7 +70,7 @@ def run_upcoming_prediction_generation(
             from_date=today,
             to_date=today + timedelta(days=days_forward),
             limit=500,
-            odds_required=model_version in ("v3", "v4"),
+            odds_required=model_version in ODDS_REQUIRED_VERSIONS,
         )
         try:
             predictions = predict_upcoming_fixtures(

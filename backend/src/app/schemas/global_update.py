@@ -23,6 +23,7 @@ class GlobalUpdateStartRequest(BaseModel):
     resume: bool = False
     resume_run_id: int | None = None
     sync_cloud: bool = False
+    versions: list[str] | None = None
 
 
 class GlobalUpdateStartResponse(BaseModel):

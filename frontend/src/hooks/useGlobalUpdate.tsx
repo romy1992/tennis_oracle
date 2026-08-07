@@ -7,7 +7,7 @@ type GlobalUpdateContextValue = {
   status: GlobalUpdateRunRead | null;
   isRunning: boolean;
   refreshStatus: () => Promise<GlobalUpdateRunRead | null>;
-  triggerUpdate: (force?: boolean) => Promise<GlobalUpdateRunRead | null>;
+  triggerUpdate: (force?: boolean, versions?: string[]) => Promise<GlobalUpdateRunRead | null>;
   cancelUpdate: () => Promise<GlobalUpdateRunRead | null>;
   lastCompletedAt: string | null;
   lastOrigin: string | null;
@@ -27,8 +27,8 @@ export function GlobalUpdateProvider({ children }: { children: React.ReactNode }
   }, []);
 
   const triggerUpdate = useCallback(
-    async (force = false) => {
-      await apiClient.startGlobalUpdate({ force });
+    async (force = false, versions?: string[]) => {
+      await apiClient.startGlobalUpdate({ force, versions });
       const next = await refreshStatus();
       return next;
     },

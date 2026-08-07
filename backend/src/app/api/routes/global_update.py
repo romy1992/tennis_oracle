@@ -52,6 +52,7 @@ def trigger_global_update(
             resume=payload.resume,
             resume_run_id=payload.resume_run_id,
             sync_cloud=payload.sync_cloud,
+            versions=payload.versions,
         )
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=503, detail="Database not available.") from exc
