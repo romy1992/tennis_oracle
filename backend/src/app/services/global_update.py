@@ -54,7 +54,7 @@ from backend.src.service.import_next_fixtures import run_daily_next_fixture_impo
 logger = logging.getLogger(__name__)
 
 
-MODEL_NAMES = ("logistic_regression", "random_forest")
+MODEL_NAMES = ("logistic_regression", "random_forest", "voting_ensemble")
 RUNNING_STATUSES = ("pending", "running")
 RESUMABLE_STATUSES = ("interrupted", "failed", "cancelled")
 PHASE_IMPORT_FIXTURES = "import_fixtures"
