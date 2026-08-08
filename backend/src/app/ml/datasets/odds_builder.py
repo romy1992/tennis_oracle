@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import pandas as pd
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from backend.src.entity import Fixture
 
@@ -36,6 +37,20 @@ class MatchWinnerOddsAverage:
     avg_player_1_odds: float
     avg_player_2_odds: float
     odds_bookmaker_count: int
+
+
+def has_real_odds(column: ColumnElement) -> ColumnElement:
+    """SQL predicate: column holds usable odds data, not SQL NULL nor a JSON 'null'.
+
+    SQLAlchemy's plain ``JSON`` type stores Python ``None`` as the JSON literal
+    ``null`` (not a true SQL NULL) unless declared with ``none_as_null=True``.
+    ``column.is_not(None)`` (``IS NOT NULL``) therefore wrongly matches rows whose
+    odds are actually empty, since the column is populated with the text ``"null"``
+    rather than a database NULL. Cast to text and also reject that literal so
+    fixtures without real bookmaker odds are correctly excluded (both for legacy
+    rows already stored this way and as a safety net going forward).
+    """
+    return column.is_not(None) & (cast(column, String) != "null")
 
 
 @dataclass(frozen=True)
@@ -357,7 +372,7 @@ def load_fixture_odds_records(db: Session) -> list[FixtureOddsRecord]:
             Fixture.event_second_player,
             Fixture.odds,
             Fixture.event_live,
-        ).where(Fixture.odds.is_not(None))
+        ).where(has_real_odds(Fixture.odds))
     ).all()
     return [
         FixtureOddsRecord(
@@ -386,7 +401,7 @@ def build_and_export_odds_dataset(
 
     fixture_total_rows = int(db.scalar(select(func.count()).select_from(Fixture)) or 0)
     fixture_rows_with_odds = int(
-        db.scalar(select(func.count()).select_from(Fixture).where(Fixture.odds.is_not(None))) or 0
+        db.scalar(select(func.count()).select_from(Fixture).where(has_real_odds(Fixture.odds))) or 0
     )
     records = load_fixture_odds_records(db)
     markets_available, bookmakers_available, usable_match_winner_rows = inspect_odds_payloads(records)

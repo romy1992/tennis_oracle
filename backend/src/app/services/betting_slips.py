@@ -13,6 +13,7 @@ from backend.src.app.ml.datasets.odds_builder import (
     FixtureOddsRecord,
     MatchWinnerOddsAverage,
     average_match_winner_odds_from_record,
+    has_real_odds,
     no_vig_market_probabilities,
 )
 from backend.src.app.ml.model_versioning import MODEL_VERSIONS, ModelVersion
@@ -295,7 +296,7 @@ def build_candidate_pool(
     fixture_filters = [
         NextFixture.is_completed.is_(False),
         NextFixture.event_date == slip_date,
-        NextFixture.odds.is_not(None),
+        has_real_odds(NextFixture.odds),
     ]
 
     fixtures = list(

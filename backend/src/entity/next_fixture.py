@@ -28,7 +28,7 @@ class NextFixture(Base):
     event_status = Column(String)
     event_type_type = Column(String)
 
-    odds = Column(JSON)
+    odds = Column(JSON(none_as_null=True))
 
     imported_at = Column(DateTime)
     week_start = Column(Date)
