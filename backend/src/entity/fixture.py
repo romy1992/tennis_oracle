@@ -40,7 +40,7 @@ class Fixture(Base):
     pointbypoint = Column(JSON)
     scores = Column(JSON)
     statistics = Column(JSON)
-    odds = Column(JSON)
+    odds = Column(JSON(none_as_null=True))
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}

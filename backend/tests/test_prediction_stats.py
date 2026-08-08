@@ -359,6 +359,60 @@ class PredictionStatsTest(unittest.TestCase):
         self.assertEqual(page_v3.total, 1)
         self.assertEqual([f.event_key for f in page_v3.items], [1])
 
+    def test_v4_excludes_fixture_with_explicit_none_odds(self):
+        """Regression: odds=None explicitly stored (as import_next_fixtures does when the
+        odds API returns nothing) must be treated as "no odds", not as a populated JSON blob.
+
+        SQLAlchemy's plain JSON type serializes Python None as the JSON literal ``null``
+        (not SQL NULL) unless declared with none_as_null=True, so a naive
+        ``odds.is_not(None)`` filter previously let these fixtures slip through
+        odds_required=True for v3/v4, producing fixtures with no prediction ("Da generare")
+        in the bot/frontend even though they were supposed to be excluded upfront.
+        """
+        today = date(2026, 6, 22)
+        with self.Session() as session:
+            session.add_all(
+                [
+                    NextFixture(
+                        event_key=1,
+                        event_date=today,
+                        event_first_player="A",
+                        event_second_player="B",
+                        odds={
+                            "1": {
+                                "Home/Away": {
+                                    "Home": {"Book A": "2.10"},
+                                    "Away": {"Book A": "1.70"},
+                                }
+                            }
+                        },
+                        is_completed=False,
+                    ),
+                    # Mirrors backend.src.service.import_next_fixtures: odds explicitly
+                    # set to None when the provider has no market for this fixture.
+                    NextFixture(
+                        event_key=2,
+                        event_date=today,
+                        event_first_player="C",
+                        event_second_player="D",
+                        odds=None,
+                        is_completed=False,
+                    ),
+                ]
+            )
+            session.commit()
+
+            page_v4 = get_next_fixtures_with_predictions(
+                db=session,
+                model_version="v4",
+                model_name="voting_ensemble",
+                from_date=today,
+                to_date=today,
+            )
+
+        self.assertEqual(page_v4.total, 1)
+        self.assertEqual([f.event_key for f in page_v4.items], [1])
+
 
 if __name__ == "__main__":
     unittest.main()

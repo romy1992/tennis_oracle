@@ -165,6 +165,47 @@ class BettingSlipsServiceTest(unittest.TestCase):
             self.assertEqual(candidates[0].value_decision, "PLAY")
             self.assertIsNotNone(candidates[0].void_odds)
 
+    def test_build_candidate_pool_excludes_explicit_none_odds(self):
+        """Regression: odds=None explicitly stored (e.g. provider returned no market for
+        this fixture) must behave like "no odds", not like a populated JSON blob.
+
+        SQLAlchemy's plain JSON type serializes Python None as the JSON literal ``null``
+        (not SQL NULL) unless declared with none_as_null=True, so a naive
+        ``odds.is_not(None)`` filter previously let these fixtures slip into the candidate
+        pool with unusable odds data.
+        """
+        with self.Session() as session:
+            self._seed_candidates(session, count=1)
+            session.add(
+                NextFixture(
+                    event_key=999,
+                    event_date=self.today,
+                    event_first_player="No Odds",
+                    event_second_player="Also None",
+                    odds=None,
+                    is_completed=False,
+                )
+            )
+            session.add(
+                MatchPrediction(
+                    event_key=999,
+                    model_version="v2",
+                    model_name="random_forest",
+                    predicted_at=datetime(2026, 6, 28, 8, 0, 0),
+                    prob_player_1_win=0.8,
+                    predicted_winner="First Player",
+                )
+            )
+            session.commit()
+
+            candidates = build_candidate_pool(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+            )
+            self.assertEqual([c.event_key for c in candidates], [100])
+
     def test_v3_candidate_pool_excludes_missing_odds(self):
         with self.Session() as session:
             self._seed_candidates(session, count=1)

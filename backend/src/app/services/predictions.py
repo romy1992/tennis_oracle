@@ -10,6 +10,7 @@ from backend.src.app.ml.datasets.odds_builder import (
     FixtureOddsRecord,
     MatchWinnerOddsAverage,
     average_match_winner_odds_from_record,
+    has_real_odds,
 )
 from backend.src.app.ml.model_selection import select_best_model
 from backend.src.app.ml.model_versioning import ODDS_REQUIRED_VERSIONS, ModelVersion
@@ -81,7 +82,7 @@ def _next_fixture_filters(
         )
     )
     if odds_required:
-        filters.append(NextFixture.odds.is_not(None))
+        filters.append(has_real_odds(NextFixture.odds))
     return filters
 
 
@@ -269,7 +270,7 @@ def _played_fixture_filters(
         )
     )
     if odds_required:
-        filters.append(Fixture.odds.is_not(None))
+        filters.append(has_real_odds(Fixture.odds))
     return filters
 
 
@@ -861,7 +862,7 @@ def _prediction_odds_context(
         fixture = db.scalar(
             select(Fixture).where(
                 Fixture.event_key == prediction.event_key,
-                Fixture.odds.is_not(None),
+                has_real_odds(Fixture.odds),
             )
         )
         if fixture is not None:
@@ -871,7 +872,7 @@ def _prediction_odds_context(
         next_fixture = db.scalar(
             select(NextFixture).where(
                 NextFixture.event_key == prediction.event_key,
-                NextFixture.odds.is_not(None),
+                has_real_odds(NextFixture.odds),
             )
         )
         odds_by_key[prediction.event_key] = (
