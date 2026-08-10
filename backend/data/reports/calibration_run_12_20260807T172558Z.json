@@ -20,8 +20,8 @@
       "random_state": 42
     }
   },
-  "started_at": "2026-08-08T05:12:34.273168+00:00",
-  "finished_at": "2026-08-08T05:40:25.182679+00:00",
+  "started_at": "2026-08-07T16:44:14.165216+00:00",
+  "finished_at": "2026-08-07T17:25:58.471685+00:00",
   "walk_forward_run_id": null,
   "models": [
     {
@@ -36885,8 +36885,8 @@
         "note": "Delta negativo su Brier/log_loss/ECE/MCE indica miglioramento rispetto alle probabilit\u00e0 grezze."
       },
       "artifacts": {
-        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v1_logistic_regression_platt.pkl",
-        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v1_logistic_regression_isotonic.pkl"
+        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v1_logistic_regression_platt.pkl",
+        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v1_logistic_regression_isotonic.pkl"
       },
       "leakage_flags": []
     },
@@ -73751,8 +73751,8 @@
         "note": "Delta negativo su Brier/log_loss/ECE/MCE indica miglioramento rispetto alle probabilit\u00e0 grezze."
       },
       "artifacts": {
-        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v1_random_forest_platt.pkl",
-        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v1_random_forest_isotonic.pkl"
+        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v1_random_forest_platt.pkl",
+        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v1_random_forest_isotonic.pkl"
       },
       "leakage_flags": []
     },
@@ -110617,8 +110617,8 @@
         "note": "Delta negativo su Brier/log_loss/ECE/MCE indica miglioramento rispetto alle probabilit\u00e0 grezze."
       },
       "artifacts": {
-        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v2_logistic_regression_platt.pkl",
-        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v2_logistic_regression_isotonic.pkl"
+        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v2_logistic_regression_platt.pkl",
+        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v2_logistic_regression_isotonic.pkl"
       },
       "leakage_flags": []
     },
@@ -147483,8 +147483,8 @@
         "note": "Delta negativo su Brier/log_loss/ECE/MCE indica miglioramento rispetto alle probabilit\u00e0 grezze."
       },
       "artifacts": {
-        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v2_random_forest_platt.pkl",
-        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v2_random_forest_isotonic.pkl"
+        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v2_random_forest_platt.pkl",
+        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v2_random_forest_isotonic.pkl"
       },
       "leakage_flags": []
     },
@@ -151323,8 +151323,8 @@
         "note": "Delta negativo su Brier/log_loss/ECE/MCE indica miglioramento rispetto alle probabilit\u00e0 grezze."
       },
       "artifacts": {
-        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v3_logistic_regression_platt.pkl",
-        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v3_logistic_regression_isotonic.pkl"
+        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v3_logistic_regression_platt.pkl",
+        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v3_logistic_regression_isotonic.pkl"
       },
       "leakage_flags": []
     },
@@ -155163,8 +155163,8 @@
         "note": "Delta negativo su Brier/log_loss/ECE/MCE indica miglioramento rispetto alle probabilit\u00e0 grezze."
       },
       "artifacts": {
-        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v3_random_forest_platt.pkl",
-        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v3_random_forest_isotonic.pkl"
+        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v3_random_forest_platt.pkl",
+        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v3_random_forest_isotonic.pkl"
       },
       "leakage_flags": []
     },
@@ -192029,8 +192029,8 @@
         "note": "Delta negativo su Brier/log_loss/ECE/MCE indica miglioramento rispetto alle probabilit\u00e0 grezze."
       },
       "artifacts": {
-        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v4_logistic_regression_platt.pkl",
-        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v4_logistic_regression_isotonic.pkl"
+        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v4_logistic_regression_platt.pkl",
+        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v4_logistic_regression_isotonic.pkl"
       },
       "leakage_flags": []
     },
@@ -228895,8 +228895,8 @@
         "note": "Delta negativo su Brier/log_loss/ECE/MCE indica miglioramento rispetto alle probabilit\u00e0 grezze."
       },
       "artifacts": {
-        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v4_random_forest_platt.pkl",
-        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_14_v4_random_forest_isotonic.pkl"
+        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v4_random_forest_platt.pkl",
+        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_12_v4_random_forest_isotonic.pkl"
       },
       "leakage_flags": []
     }
@@ -228913,5 +228913,5 @@
     ],
     "note": "Calibrazione su OOS walk-forward. Non attiva automaticamente il modello pubblico."
   },
-  "report_path": "/app/backend/data/reports/calibration_run_14_20260808T054025Z.json"
+  "report_path": "/app/backend/data/reports/calibration_run_12_20260807T172558Z.json"
 }

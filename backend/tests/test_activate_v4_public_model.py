@@ -72,4 +72,3 @@ def test_activates_v4_and_retires_previous_active(mock_metrics, mock_artifacts, 
 
 if __name__ == "__main__":
     pytest.main([__file__])
-

@@ -86,4 +86,3 @@ export function readStoredGlobalUpdateVersions(): MLModelVersion[] {
 export function writeStoredGlobalUpdateVersions(values: MLModelVersion[]) {
   window.localStorage.setItem(GLOBAL_UPDATE_VERSIONS_STORAGE_KEY, JSON.stringify(values));
 }
-
