@@ -130,6 +130,13 @@ class Settings(BaseSettings):
     public_model_version: str | None = None
     public_model_name: str | None = None
 
+    # Dedicated pre-kickoff closing-odds capture (job run_closing_odds_capture).
+    # Disabled by default: opt-in once a frequent cron (every 1-5 min) is configured.
+    # See docs/SCHEDULING.md#closing-odds-pre-kickoff-job.
+    closing_odds_job_enabled: bool = False
+    # How many minutes before scheduled kickoff a fixture enters the capture window.
+    closing_odds_capture_window_minutes: int = 60
+
     # --- Observability (provider-agnostic; see docs/MONITORING.md) ---
     # text | json
     log_format: str = "text"

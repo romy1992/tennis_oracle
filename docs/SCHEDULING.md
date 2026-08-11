@@ -257,8 +257,66 @@ python3 -m backend.src.jobs.run_db_restore --archive backups/<file>.dump --mode 
 python3 -m backend.src.jobs.run_db_restore --archive backups/<file>.dump --mode test
 ```
 
-## Closing odds (job futuro)
+## Closing odds (job dedicato pre-kickoff)
 
-L’import corrente cattura `opening`/`observed` e, a partita live, può etichettare come `closing` l’**ultimo** observed pre-kickoff (`seal_closing_from_last_prematch`). Non è un true closing di mercato affidabile senza polling frequente.
+L’import giornaliero cattura `opening`/`observed` e, a partita live, può etichettare come `closing` l’**ultimo** observed pre-kickoff (`seal_closing_from_last_prematch`). Da solo non è un true closing di mercato affidabile senza polling frequente (vedi analisi impatto sotto): da qui il job dedicato **`run_closing_odds_capture`**.
 
-**Job futuro consigliato:** cattura dedicata della quota nell’intervallo immediatamente precedente l’inizio partita (es. ogni 1–5 minuti nelle ultime 30–60 minuti), scrivendo `snapshot_type=closing` solo con `captured_at` pre-kickoff.
+### Cosa fa
+
+Ogni esecuzione è **un singolo passaggio** (nessun loop/sleep interno): trova le partite in `next_fixture` il cui orario di inizio (`event_date`/`event_time`, fuso Europe/Rome) cade entro `--window-minutes` da adesso (default `CLOSING_ODDS_CAPTURE_WINDOW_MINUTES`), richiede quote fresche al provider (`get_odds`) e le scrive **direttamente** con `snapshot_type=closing`. Partite senza `event_time` noto sono escluse (un orario sconosciuto non deve mai sembrare "imminente").
+
+Eseguendolo di frequente (cron ogni 1–5 minuti) durante la finestra pre-partita si accumulano più righe `closing` per fixture/bookmaker: `_resolve_clv` (in `published_live_stats.py`) sceglie già quella con `captured_at` più recente per bookmaker, quindi nessuna modifica lato consumer è necessaria.
+
+```bash
+# Dry-run: elenca solo le fixture attualmente in finestra, nessuna chiamata API/scrittura
+python3 -m backend.src.jobs.run_closing_odds_capture --dry-run
+
+# Esecuzione singola (rispetta CLOSING_ODDS_JOB_ENABLED)
+python3 -m backend.src.jobs.run_closing_odds_capture
+
+# Forza l'esecuzione anche con CLOSING_ODDS_JOB_ENABLED=false (test manuale)
+python3 -m backend.src.jobs.run_closing_odds_capture --force --json
+
+# Finestra personalizzata (minuti prima del kickoff)
+python3 -m backend.src.jobs.run_closing_odds_capture --window-minutes 45
+```
+
+Flag utili: `--window-minutes`, `--dry-run`, `--force`, `--json`. Exit code: `0` ok (anche a zero candidate), `1` se almeno una fixture ha fallito la cattura (le altre non sono bloccate: isolamento per-fixture).
+
+### Configurazione
+
+```env
+# Disabilitato di default: abilita solo insieme a un cron/Task Scheduler frequente.
+CLOSING_ODDS_JOB_ENABLED=false
+CLOSING_ODDS_CAPTURE_WINDOW_MINUTES=60
+```
+
+### Cron (ogni 2 minuti, tutti i giorni)
+
+```cron
+*/2 * * * * cd /percorso/tennis_oracle && .venv/bin/python -m backend.src.jobs.run_closing_odds_capture
+```
+
+Windows Task Scheduler: trigger ripetuto ogni 2 minuti, programma `python`, argomenti
+`-m backend.src.jobs.run_closing_odds_capture`, cartella iniziale la root del repository.
+
+Nota: senza un cron/scheduler frequente configurato, lasciare `CLOSING_ODDS_JOB_ENABLED=false`
+(il default) — un'esecuzione isolata o rara catturerebbe solo le fixture che casualmente si
+trovano in finestra in quel momento, senza la copertura "densa" che giustifica il job.
+
+### Impatto misurato sulla copertura CLV (2026-08-10, prima del job dedicato)
+
+Analisi one-off sul DB locale (92 tip pubblicati, 22 lug – 10 ago 2026, `settle_published_tips`):
+
+| Metrica | Valore |
+|---|---|
+| Tip pubblicati (ultima versione) | 92 |
+| Con `clv_pct` disponibile | **9 / 92 (9.8%)** |
+| Con `clv_prob_delta_pct` (no-vig) disponibile | **0 / 92 (0%)** |
+| Copertura per settimana | sett.30: 7/25 · sett.31: **0/48** · sett.32: 2/18 |
+
+La copertura non era solo bassa, era **irregolare** (una settimana intera a 0/48): confermava che il meccanismo opportunistico da solo non produce un flusso costante di `closing` utilizzabile, indipendentemente da quanto tempo passa. Restava **bloccante** per qualunque idea ML che usi il CLV come target o feature (vedi anche gli esperimenti v4 in `backend/src/app/ml/training/`): il campione utile sarebbe rimasto troppo piccolo (singole unità/settimana) per un training o anche solo per statistiche descrittive robuste (il progetto usa già `min_segment_samples=30` come soglia minima per un solo segmento ROI).
+
+**Prossimo passo per riprendere l'idea "target CLV"**: abilitare `CLOSING_ODDS_JOB_ENABLED=true` con il cron sopra, lasciar accumulare dati per settimane/mesi, solo dopo rivalutare volume e fattibilità con `check_clv_ml_readiness.py`.
+
+

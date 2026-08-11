@@ -12,6 +12,25 @@ DISCLAIMER = (
     "Avvertenza: contenuti a scopo informativo/statistico. "
     "Non sono consigli di scommessa né garanzia di risultato."
 )
+# Premessa estesa mostrata quando l'utente deve accettare le condizioni d'uso
+# (prima e durante /accetta_condizioni): a differenza di DISCLAIMER (breve, in coda
+# ai messaggi operativi), qui specifichiamo esplicitamente la fase beta e il rischio,
+# cosi' l'utente non "accetta al buio" senza aver letto nulla.
+BETA_TERMS_TEXT = (
+    "Condizioni d'uso (fase beta) — tennis_oracle\n\n"
+    "- Il servizio è in fase BETA: il modello di pronostico è in fase di validazione e il suo "
+    "storico di risultati reali è ancora limitato.\n"
+    "- I contenuti (pronostici, quote, schedine, statistiche) sono a scopo informativo/"
+    "statistico. Non sono consigli di scommessa né di investimento e non garantiscono alcun "
+    "risultato o profitto.\n"
+    "- Le scommesse comportano il rischio di perdere il denaro puntato: gioca solo ciò che puoi "
+    "permetterti di perdere, nel rispetto delle leggi del tuo paese e dei limiti di gioco "
+    "responsabile.\n"
+    "- I dati storici mostrati (backtest, walk-forward) si riferiscono a simulazioni passate: "
+    "risultati passati non garantiscono risultati futuri.\n"
+    "- tennis_oracle non è un bookmaker né un consulente di scommesse abilitato: resti l'unico "
+    "responsabile delle tue decisioni."
+)
 USER_ERROR_FALLBACK = "Si è verificato un problema temporaneo. Riprova tra poco."
 LOADING_PARTITE = "Caricamento partite in corso…"
 LOADING_SCHEDINE = "Caricamento schedine in corso…"
@@ -57,6 +76,11 @@ def build_welcome_text(
     lines.extend(["", "/help - guida rapida"])
     if include_terms:
         lines.append("/accetta_condizioni - condizioni d'uso (se richieste)")
+    # Sempre presente, indipendentemente dal flag TELEGRAM_TERMS_REQUIRED: quel flag
+    # governa solo il flusso di accettazione formale (/accetta_condizioni), non deve
+    # condizionare la visibilita' di questa premessa minima (fase beta, nessuna
+    # garanzia, rischio di perdita) che l'utente deve vedere comunque al primo /start.
+    lines.extend(["", BETA_TERMS_TEXT])
     return "\n".join(lines)
 
 

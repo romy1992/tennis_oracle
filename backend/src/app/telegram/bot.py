@@ -68,6 +68,7 @@ from .config import TelegramSettings, get_telegram_settings
 from .dates import parse_date_or_offset, prediction_window, today_rome
 from .images import render_betting_slip_png, render_bot_stats_png, render_fixtures_png
 from .messages import (
+    BETA_TERMS_TEXT,
     FEEDBACK_ASK_MESSAGE_TEXT,
     FEEDBACK_ASK_RATING_TEXT,
     FEEDBACK_CANCELLED_TEXT,
@@ -356,7 +357,10 @@ async def accetta_condizioni(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     settings = _settings(context)
     if not settings.telegram_terms_required:
-        await _reply(update, "Al momento non è richiesta l'accettazione delle condizioni.")
+        await _reply(
+            update,
+            f"{BETA_TERMS_TEXT}\n\nAl momento non è richiesta l'accettazione formale delle condizioni.",
+        )
         return
     try:
         accepted = accept_telegram_terms_safe(telegram_user_id=user.id)
@@ -368,6 +372,7 @@ async def accetta_condizioni(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     await _reply(
         update,
+        f"{BETA_TERMS_TEXT}\n\n"
         f"Condizioni accettate (versione {accepted.terms_version}). "
         f"Stato account: {account_status_label(accepted.status)}.",
         reply_markup=main_menu_keyboard(),

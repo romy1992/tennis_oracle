@@ -88,6 +88,46 @@ class TelegramCommandAuthorizationServiceTest(unittest.TestCase):
             "telegram_not_active",
         )
 
+    def test_denied_for_terms_required_shows_accept_instructions(self):
+        """TELEGRAM_TERMS_REQUIRED=true, utente attivo ma non ha ancora accettato:
+        /partite (premium) deve bloccarsi con le istruzioni per /accetta_condizioni,
+        PRIMA ancora di valutare l'entitlement del piano."""
+        gate = TelegramUserAccessResult(
+            allowed=False,
+            status="active",
+            reason="terms_required",
+            terms_required=True,
+            terms_accepted=False,
+            user=None,
+        )
+        with (
+            patch(
+                "backend.src.app.services.telegram_command_authorization.is_feature_enabled_safe",
+                return_value=True,
+            ),
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_access_safe",
+                return_value=gate,
+            ),
+            patch(
+                "backend.src.app.services.telegram_command_authorization.check_telegram_entitlement_safe",
+                return_value=_decision(allowed=True, reason=None, plan_code="pro"),
+            ) as entitlement_mock,
+        ):
+            result = authorize_telegram_command_safe(
+                telegram_user_id=99,
+                policy=command_policy(COMMAND_PARTITE),
+                resource="partite",
+            )
+
+        self.assertFalse(result.allowed)
+        self.assertIn("condizioni d'uso", (result.message or "").lower())
+        self.assertIn("/accetta_condizioni", result.message or "")
+        self.assertEqual(
+            entitlement_mock.call_args.kwargs.get("forced_denial_reason"),
+            "telegram_terms_required",
+        )
+
     def test_premium_denied_shows_upgrade_message(self):
         settings = make_test_settings(telegram_premium_upgrade_url="https://example.com/upgrade")
         override_settings(settings)
@@ -363,9 +403,80 @@ class TelegramCommandAccessDecoratorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "ok")
         update.effective_message.reply_text.assert_not_awaited()
 
+    async def test_partite_blocked_before_terms_accepted_then_unlocked_after(self):
+        """Simula esattamente il flusso richiesto: /partite (decoratore reale usato
+        da bot.py) blocca l'handler finche' le condizioni non sono accettate, poi lo
+        esegue normalmente subito dopo /accetta_condizioni — senza restart, stesso
+        processo, stessa richiesta successiva."""
+        update = MagicMock()
+        update.effective_user = MagicMock(id=900)
+        update.effective_message = MagicMock()
+        update.effective_message.reply_text = AsyncMock()
+        context = MagicMock()
+
+        handled = {"count": 0}
+
+        async def _partite_handler(_update, _context):
+            handled["count"] += 1
+            return "partite-content"
+
+        guarded = require_command_access(command_key=COMMAND_PARTITE, denied_return="denied")(
+            _partite_handler
+        )
+
+        denied_for_terms = TelegramAuthorizationResult(
+            allowed=False,
+            message=(
+                "Devi accettare le condizioni d'uso prima di continuare.\n"
+                "Invia /accetta_condizioni per confermare."
+            ),
+            command_key=COMMAND_PARTITE,
+            tier="premium",
+            reason="terms_required",
+            plan_code="pro",
+            subscription_status="active",
+            trial_ends_at=None,
+            expires_at=None,
+        )
+
+        # 1) Prima di /accetta_condizioni: bloccato, handler MAI chiamato.
+        with patch(
+            "backend.src.app.telegram.access.authorize_telegram_command_safe",
+            return_value=denied_for_terms,
+        ):
+            result_before = await guarded(update, context)
+
+        self.assertEqual(result_before, "denied")
+        self.assertEqual(handled["count"], 0)
+        update.effective_message.reply_text.assert_awaited_once_with(denied_for_terms.message)
+
+        # 2) Dopo /accetta_condizioni: consentito, handler eseguito e contenuto restituito.
+        allowed_after = TelegramAuthorizationResult(
+            allowed=True,
+            message=None,
+            command_key=COMMAND_PARTITE,
+            tier="premium",
+            reason=None,
+            plan_code="pro",
+            subscription_status="active",
+            trial_ends_at=None,
+            expires_at=None,
+        )
+        with patch(
+            "backend.src.app.telegram.access.authorize_telegram_command_safe",
+            return_value=allowed_after,
+        ):
+            result_after = await guarded(update, context)
+
+        self.assertEqual(result_after, "partite-content")
+        self.assertEqual(handled["count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
 
 
 

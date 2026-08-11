@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy import func, select
@@ -542,21 +542,36 @@ def _is_truthy_live(event_live: Any) -> bool:
     return False
 
 
-def _kickoff_utc_naive(db: Session, event_key: int) -> datetime | None:
-    """Scheduled kickoff in UTC-naive (Europe/Rome local date/time → UTC)."""
+def _kickoff_from_row(row: NextFixture | Fixture, *, require_event_time: bool = False) -> datetime | None:
+    """Scheduled kickoff in UTC-naive for an already-loaded row (no extra query).
+
+    ``require_event_time=True`` returns ``None`` instead of defaulting to
+    midnight when ``event_time`` is missing (used by the closing-odds capture
+    window, where an unknown kickoff time must never look "imminent").
+    """
     from zoneinfo import ZoneInfo
 
+    if row is None or row.event_date is None:
+        return None
+    if row.event_time is None:
+        if require_event_time:
+            return None
+        local_time = time(0, 0)
+    else:
+        local_time = row.event_time
     rome = ZoneInfo("Europe/Rome")
+    local_dt = datetime.combine(row.event_date, local_time, tzinfo=rome)
+    return local_dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _kickoff_utc_naive(db: Session, event_key: int) -> datetime | None:
+    """Scheduled kickoff in UTC-naive (Europe/Rome local date/time → UTC)."""
     next_row = db.scalar(select(NextFixture).where(NextFixture.event_key == event_key))
     fixture = None if next_row is not None else db.scalar(
         select(Fixture).where(Fixture.event_key == event_key)
     )
     row = next_row or fixture
-    if row is None or row.event_date is None:
-        return None
-    local_time = row.event_time or time(0, 0)
-    local_dt = datetime.combine(row.event_date, local_time, tzinfo=rome)
-    return local_dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return _kickoff_from_row(row)
 
 
 def seal_closing_from_last_prematch(
@@ -685,3 +700,137 @@ def capture_imported_odds(
             event_key,
         )
         return None
+
+
+# ---------------------------------------------------------------------------
+# Dedicated pre-kickoff closing-odds capture (job run_closing_odds_capture).
+#
+# The daily import only calls ``seal_closing_from_last_prematch`` opportunistically
+# (when the batch import happens to run while the match is already live), which
+# produces very low and irregular CLV coverage (see docs/SCHEDULING.md). Running
+# this on a frequent cron (every 1-5 minutes) in the last N minutes before kickoff
+# writes ``snapshot_type="closing"`` directly and repeatedly; ``_resolve_clv`` in
+# ``published_live_stats.py`` already picks the row with the latest ``captured_at``
+# per bookmaker, so multiple closing rows per fixture are expected and correctly
+# collapse to "the last quote seen before kickoff" without any consumer changes.
+# ---------------------------------------------------------------------------
+
+
+def find_fixtures_pending_closing_capture(
+    db: Session,
+    *,
+    window_minutes: int,
+    now_utc_naive: datetime | None = None,
+) -> list[tuple[int, datetime]]:
+    """Event keys whose scheduled kickoff falls within ``(now, now + window]``.
+
+    Only considers ``next_fixture`` rows with a known ``event_time`` (an
+    unknown/midnight-defaulted time must never look "imminent") and not yet
+    promoted to ``Fixture`` (``is_completed=False``). Returns
+    ``(event_key, kickoff_utc_naive)`` pairs sorted by nearest kickoff first.
+    """
+    now = now_utc_naive if now_utc_naive is not None else _utc_now_naive()
+    if window_minutes <= 0:
+        return []
+    horizon_date = (now + timedelta(minutes=window_minutes)).date()
+
+    candidates = db.scalars(
+        select(NextFixture).where(
+            NextFixture.is_completed.is_(False),
+            NextFixture.event_date.is_not(None),
+            NextFixture.event_time.is_not(None),
+            NextFixture.event_date >= (now.date() - timedelta(days=1)),
+            NextFixture.event_date <= horizon_date,
+        )
+    ).all()
+
+    pending: list[tuple[int, datetime]] = []
+    for row in candidates:
+        kickoff = _kickoff_from_row(row, require_event_time=True)
+        if kickoff is None:
+            continue
+        if now < kickoff <= now + timedelta(minutes=window_minutes):
+            pending.append((row.event_key, kickoff))
+    pending.sort(key=lambda item: item[1])
+    return pending
+
+
+def capture_closing_odds_for_fixture(
+    db: Session,
+    *,
+    event_key: int,
+    commit: bool = True,
+) -> PrematchOddsSnapshotIngestResponse | None:
+    """Fetch fresh odds from the provider and append ``closing`` snapshot rows.
+
+    Intended only for the dedicated pre-kickoff job (fixture must already be
+    inside its capture window). Returns ``None`` (never raises) when the
+    fixture is missing or the provider returns no odds, so one bad fixture
+    never blocks the rest of the batch.
+    """
+    # Local import: import_next_fixtures imports this module at module scope,
+    # so a top-level import here would be circular.
+    from backend.src.service.import_next_fixtures import fetch_odds_for_match
+
+    row = db.scalar(select(NextFixture).where(NextFixture.event_key == event_key))
+    if row is None:
+        return None
+    odds = fetch_odds_for_match(event_key)
+    if not odds:
+        return None
+    return record_odds_payload(
+        db,
+        PrematchOddsSnapshotFromPayload(
+            event_key=event_key,
+            odds=odds,
+            source="system",
+            snapshot_type="closing",
+            player_1_name=row.event_first_player,
+            player_2_name=row.event_second_player,
+            event_live=None,
+        ),
+        commit=commit,
+    )
+
+
+def run_closing_odds_capture_once(
+    db: Session,
+    *,
+    window_minutes: int,
+    commit: bool = True,
+) -> dict[str, Any]:
+    """One capture pass: find fixtures entering the window, fetch + append closing odds.
+
+    Meant to be invoked by ``backend.src.jobs.run_closing_odds_capture`` on a
+    frequent external cron; this function itself does not loop/sleep.
+    """
+    pending = find_fixtures_pending_closing_capture(db, window_minutes=window_minutes)
+    summary: dict[str, Any] = {
+        "window_minutes": window_minutes,
+        "candidates": len(pending),
+        "captured": 0,
+        "inserted_rows": 0,
+        "skipped_no_odds": 0,
+        "failed": 0,
+        "event_keys": [event_key for event_key, _kickoff in pending],
+    }
+    for event_key, _kickoff in pending:
+        try:
+            result = capture_closing_odds_for_fixture(db, event_key=event_key, commit=commit)
+        except Exception:
+            logger.exception(
+                "Closing odds capture failed event_key=%s",
+                event_key,
+            )
+            db.rollback()
+            summary["failed"] += 1
+            continue
+        if result is None:
+            summary["skipped_no_odds"] += 1
+            continue
+        summary["captured"] += 1
+        summary["inserted_rows"] += result.inserted
+    return summary
+
+
+
