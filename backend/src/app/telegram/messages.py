@@ -26,8 +26,6 @@ BETA_TERMS_TEXT = (
     "- Le scommesse comportano il rischio di perdere il denaro puntato: gioca solo ciò che puoi "
     "permetterti di perdere, nel rispetto delle leggi del tuo paese e dei limiti di gioco "
     "responsabile.\n"
-    "- I dati storici mostrati (backtest, walk-forward) si riferiscono a simulazioni passate: "
-    "risultati passati non garantiscono risultati futuri.\n"
     "- tennis_oracle non è un bookmaker né un consulente di scommesse abilitato: resti l'unico "
     "responsabile delle tue decisioni."
 )
@@ -462,6 +460,9 @@ def format_welcome_text(
             include_terms=include_terms,
         ),
         feedback_url=feedback_url,
+        # BETA_TERMS_TEXT (sempre incluso in build_welcome_text) copre gia' un
+        # disclaimer piu' dettagliato: il breve DISCLAIMER qui sarebbe ridondante.
+        include_disclaimer=False,
     )
 
 

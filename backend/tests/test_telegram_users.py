@@ -282,6 +282,10 @@ class TelegramStartRegistrationTest(unittest.IsolatedAsyncioTestCase):
                     terms_accepted=False,
                 ),
             ) as register_mock,
+            patch(
+                "backend.src.app.telegram.bot._telegram_feature_flags",
+                return_value={"telegram.authorizations_enabled": True},
+            ),
             patch("backend.src.app.telegram.bot._reply", new_callable=AsyncMock) as reply_mock,
         ):
             await bot_module.start(update, context)
@@ -292,7 +296,10 @@ class TelegramStartRegistrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["invite_origin"], "invite_from_link")
         reply_mock.assert_awaited()
         text = reply_mock.await_args.args[1]
-        self.assertIn("In lista di attesa", text)
+        # "Stato account: ..." non e' piu' mostrato su /start (rimosso su richiesta):
+        # lo stato "invited" e' comunque comunicato tramite il messaggio dedicato
+        # di lista d'attesa quando il gate whitelist e' attivo.
+        self.assertIn("Sei in lista di attesa", text)
         self.assertIn("invite_from_link", text)
         self.assertNotIn("logistic_regression", text)
         self.assertIsNotNone(reply_mock.await_args.kwargs.get("reply_markup"))
