@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -14,12 +15,15 @@ from backend.src.app.schemas.prematch_odds_snapshot import (
 )
 from backend.src.app.services.prematch_odds_snapshots import (
     PrematchOddsSnapshotError,
+    capture_closing_odds_for_fixture,
     compute_detection_hash,
+    find_fixtures_pending_closing_capture,
     get_snapshot,
     list_snapshots,
     record_odds_from_stored_fixture,
     record_odds_payload,
     record_snapshot,
+    run_closing_odds_capture_once,
 )
 from backend.src.entity.next_fixture import NextFixture
 from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
@@ -306,3 +310,185 @@ def test_api_ingest_and_list(client, auth_headers, db_session):
         },
     )
     assert dup.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Dedicated pre-kickoff closing-odds capture (find_fixtures_pending_closing_capture,
+# capture_closing_odds_for_fixture, run_closing_odds_capture_once).
+# ---------------------------------------------------------------------------
+
+
+def _seed_fixture_with_kickoff(
+    db_session,
+    *,
+    event_key: int,
+    minutes_from_now: float,
+    is_completed: bool = False,
+) -> NextFixture:
+    """Seed a NextFixture whose Rome-local event_date/event_time round-trips
+    (via the service's Rome->UTC conversion) back to ``minutes_from_now`` from
+    the current naive-UTC instant."""
+    from zoneinfo import ZoneInfo
+
+    kickoff_utc = datetime.utcnow() + timedelta(minutes=minutes_from_now)
+    rome = ZoneInfo("Europe/Rome")
+    local_dt = kickoff_utc.replace(tzinfo=timezone.utc).astimezone(rome)
+    row = NextFixture(
+        event_key=event_key,
+        event_date=local_dt.date(),
+        event_time=local_dt.time().replace(microsecond=0),
+        event_first_player="Alice",
+        event_second_player="Bob",
+        tournament_name="Test Open",
+        event_status="Not Started",
+        odds=SAMPLE_ODDS,
+        is_completed=is_completed,
+    )
+    db_session.add(row)
+    db_session.commit()
+    return row
+
+
+def test_find_fixtures_pending_closing_capture_within_window(db_session):
+    _seed_fixture_with_kickoff(db_session, event_key=6001, minutes_from_now=30)
+    _seed_fixture_with_kickoff(db_session, event_key=6002, minutes_from_now=500)
+    _seed_fixture_with_kickoff(db_session, event_key=6003, minutes_from_now=-5)
+
+    pending = find_fixtures_pending_closing_capture(db_session, window_minutes=60)
+
+    event_keys = [event_key for event_key, _kickoff in pending]
+    assert event_keys == [6001]
+
+
+def test_find_fixtures_pending_closing_capture_ignores_missing_event_time(db_session):
+    row = NextFixture(
+        event_key=6010,
+        event_date=(datetime.utcnow() + timedelta(minutes=30)).date(),
+        event_time=None,
+        event_first_player="Alice",
+        event_second_player="Bob",
+        odds=SAMPLE_ODDS,
+        is_completed=False,
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    pending = find_fixtures_pending_closing_capture(db_session, window_minutes=60)
+
+    assert pending == []
+
+
+def test_find_fixtures_pending_closing_capture_ignores_completed(db_session):
+    _seed_fixture_with_kickoff(
+        db_session, event_key=6020, minutes_from_now=15, is_completed=True
+    )
+
+    pending = find_fixtures_pending_closing_capture(db_session, window_minutes=60)
+
+    assert pending == []
+
+
+def test_capture_closing_odds_for_fixture_appends_closing_rows(db_session):
+    _seed_fixture_with_kickoff(db_session, event_key=6030, minutes_from_now=10)
+
+    with patch(
+        "backend.src.service.import_next_fixtures.fetch_odds_for_match",
+        return_value=SAMPLE_ODDS,
+    ) as fetch_mock:
+        result = capture_closing_odds_for_fixture(db_session, event_key=6030)
+
+    fetch_mock.assert_called_once_with(6030)
+    assert result is not None
+    assert result.inserted == 4
+    assert all(item.snapshot_type == "closing" for item in result.items)
+
+    # A second poll a few minutes later appends NEW closing rows (distinct
+    # captured_at): _resolve_clv later picks the latest one per bookmaker.
+    with patch(
+        "backend.src.service.import_next_fixtures.fetch_odds_for_match",
+        return_value=SAMPLE_ODDS,
+    ):
+        with patch(
+            "backend.src.app.services.prematch_odds_snapshots._utc_now_naive",
+            return_value=datetime.utcnow() + timedelta(minutes=5),
+        ):
+            second = capture_closing_odds_for_fixture(db_session, event_key=6030)
+    assert second is not None
+    assert second.inserted == 4
+
+    closing_rows = list(
+        db_session.scalars(
+            select(PrematchOddsSnapshot).where(
+                PrematchOddsSnapshot.event_key == 6030,
+                PrematchOddsSnapshot.snapshot_type == "closing",
+            )
+        ).all()
+    )
+    assert len(closing_rows) == 8
+
+
+def test_capture_closing_odds_for_fixture_returns_none_without_odds(db_session):
+    _seed_fixture_with_kickoff(db_session, event_key=6031, minutes_from_now=10)
+
+    with patch(
+        "backend.src.service.import_next_fixtures.fetch_odds_for_match",
+        return_value=None,
+    ):
+        result = capture_closing_odds_for_fixture(db_session, event_key=6031)
+
+    assert result is None
+
+
+def test_capture_closing_odds_for_fixture_missing_fixture_returns_none(db_session):
+    with patch(
+        "backend.src.service.import_next_fixtures.fetch_odds_for_match",
+        return_value=SAMPLE_ODDS,
+    ) as fetch_mock:
+        result = capture_closing_odds_for_fixture(db_session, event_key=999999)
+
+    fetch_mock.assert_not_called()
+    assert result is None
+
+
+def test_run_closing_odds_capture_once_summarizes_batch(db_session):
+    _seed_fixture_with_kickoff(db_session, event_key=6040, minutes_from_now=10)
+    _seed_fixture_with_kickoff(db_session, event_key=6041, minutes_from_now=20)
+    _seed_fixture_with_kickoff(db_session, event_key=6042, minutes_from_now=500)
+
+    def _fake_fetch(event_key: int):
+        return None if event_key == 6041 else SAMPLE_ODDS
+
+    with patch(
+        "backend.src.service.import_next_fixtures.fetch_odds_for_match",
+        side_effect=_fake_fetch,
+    ):
+        summary = run_closing_odds_capture_once(db_session, window_minutes=60)
+
+    assert summary["candidates"] == 2
+    assert summary["captured"] == 1
+    assert summary["skipped_no_odds"] == 1
+    assert summary["failed"] == 0
+    assert summary["inserted_rows"] == 4
+    assert set(summary["event_keys"]) == {6040, 6041}
+
+
+def test_run_closing_odds_capture_once_isolates_per_fixture_failures(db_session):
+    _seed_fixture_with_kickoff(db_session, event_key=6050, minutes_from_now=10)
+    _seed_fixture_with_kickoff(db_session, event_key=6051, minutes_from_now=20)
+
+    def _fake_fetch(event_key: int):
+        if event_key == 6050:
+            raise RuntimeError("boom")
+        return SAMPLE_ODDS
+
+    with patch(
+        "backend.src.service.import_next_fixtures.fetch_odds_for_match",
+        side_effect=_fake_fetch,
+    ):
+        summary = run_closing_odds_capture_once(db_session, window_minutes=60)
+
+    assert summary["failed"] == 1
+    assert summary["captured"] == 1
+
+
+
