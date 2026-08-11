@@ -284,12 +284,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             append_message_footer(
                 "\n".join(lines),
                 feedback_url=settings.telegram_feedback_url,
+                include_disclaimer=False,
             ),
             reply_markup=main_menu_keyboard(flags=flags),
         )
         return
 
-    lines.append(f"Stato account: {account_status_label(registered.status)}.")
     if registered.invite_origin:
         lines.append(f"Origine invito: {registered.invite_origin}.")
 
@@ -318,6 +318,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         append_message_footer(
             "\n".join(lines),
             feedback_url=settings.telegram_feedback_url,
+            # BETA_TERMS_TEXT (dentro build_welcome_text) copre gia' un disclaimer
+            # piu' dettagliato: il breve DISCLAIMER qui sarebbe ridondante.
+            include_disclaimer=False,
         ),
         reply_markup=main_menu_keyboard(flags=flags),
     )
