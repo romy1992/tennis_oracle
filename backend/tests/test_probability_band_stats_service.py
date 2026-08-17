@@ -59,8 +59,8 @@ def _publish_tip(
         PublishedPredictionCreate(
             event_key=event_key,
             selection=selection,
-            model_version="v2",
-            model_name="logistic_regression",
+            model_version="v4",
+            model_name="voting_ensemble",
             probability=probability,
             odds=2.0,
             edge=6.0,
@@ -109,6 +109,7 @@ def test_live_probability_band_analysis(db_session) -> None:
     )
 
     assert result.source == "live"
+    assert result.market == "match_winner"
     assert result.closed >= 2
     assert len(result.bands) == 5
     populated = [band for band in result.bands if band.closed > 0]

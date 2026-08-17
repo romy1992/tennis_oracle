@@ -1,0 +1,831 @@
+{
+  "generated_at": "2026-08-15T07:38:08.792019+00:00",
+  "phase": "extra_markets_ensemble_experiment",
+  "market": "first_set_winner",
+  "preparation_note": "first_set odds required",
+  "dataset_path": "/app/backend/data/processed/tennis_winner_dataset_with_odds_v3.csv",
+  "rows_total": 94153,
+  "date_min": "2021-10-07",
+  "date_max": "2026-06-21",
+  "quick_mode": false,
+  "grid_search": {
+    "results_path": "/app/backend/data/reports/first_set_winner_grid_search_results.json",
+    "algorithms": {
+      "logistic_regression": {
+        "cv_best_roc_auc": 0.743252,
+        "test_roc_auc": 0.742865,
+        "test_roi": -0.038051,
+        "best_params": {
+          "model__C": 0.01,
+          "model__class_weight": "balanced",
+          "model__l1_ratio": 0.0,
+          "model__max_iter": 3000,
+          "model__solver": "lbfgs"
+        },
+        "fit_seconds": 188.54
+      },
+      "random_forest": {
+        "cv_best_roc_auc": 0.743908,
+        "test_roc_auc": 0.743034,
+        "test_roi": -0.0372,
+        "best_params": {
+          "model__max_depth": 10,
+          "model__max_features": "log2",
+          "model__min_samples_leaf": 10,
+          "model__n_estimators": 200
+        },
+        "fit_seconds": 152.96
+      },
+      "hist_gradient_boosting": {
+        "cv_best_roc_auc": 0.743031,
+        "test_roc_auc": 0.742884,
+        "test_roi": -0.037436,
+        "best_params": {
+          "model__l2_regularization": 0.0,
+          "model__learning_rate": 0.05,
+          "model__max_depth": null,
+          "model__max_iter": 100
+        },
+        "fit_seconds": 66.78
+      },
+      "xgboost": {
+        "cv_best_roc_auc": 0.744333,
+        "test_roc_auc": 0.742883,
+        "test_roi": -0.040132,
+        "best_params": {
+          "model__colsample_bytree": 0.8,
+          "model__learning_rate": 0.05,
+          "model__max_depth": 3,
+          "model__n_estimators": 100,
+          "model__subsample": 1.0
+        },
+        "fit_seconds": 112.32
+      },
+      "lightgbm": {
+        "cv_best_roc_auc": 0.743075,
+        "test_roc_auc": 0.742789,
+        "test_roi": -0.035234,
+        "best_params": {
+          "model__learning_rate": 0.05,
+          "model__max_depth": -1,
+          "model__n_estimators": 100,
+          "model__num_leaves": 31
+        },
+        "fit_seconds": 105.64
+      }
+    },
+    "top_algorithms_for_ensemble": [
+      "random_forest",
+      "hist_gradient_boosting",
+      "xgboost"
+    ],
+    "winner": "random_forest",
+    "production_baseline": {
+      "model_name": "logistic_regression",
+      "source": "walk_forward._estimators (untuned production defaults)",
+      "test_metrics": {
+        "accuracy": 0.674579,
+        "precision": 0.67502,
+        "recall": 0.696414,
+        "f1": 0.68555,
+        "roc_auc": 0.742867,
+        "log_loss": 0.594294,
+        "brier_score": 0.204911,
+        "confusion_matrix": [
+          [
+            6023,
+            3216
+          ],
+          [
+            2912,
+            6680
+          ]
+        ],
+        "class_distribution": {
+          "1": 9592,
+          "0": 9239
+        },
+        "eval_rows": 18831,
+        "eval_rows_total": 18831,
+        "value_bet": {
+          "accuracy": 0.674579,
+          "log_loss": 0.594294,
+          "brier_score": 0.204911,
+          "roi": -0.039761,
+          "yield": -0.039761,
+          "max_drawdown": 759.430183,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 18831,
+          "total_profit": -748.731151,
+          "avg_odds": 1.46398
+        }
+      }
+    }
+  },
+  "ensembles": {
+    "stacking": {
+      "test_metrics": {
+        "accuracy": 0.675641,
+        "precision": 0.674374,
+        "recall": 0.702356,
+        "f1": 0.688081,
+        "roc_auc": 0.743043,
+        "log_loss": 0.595247,
+        "brier_score": 0.205151,
+        "confusion_matrix": [
+          [
+            5986,
+            3253
+          ],
+          [
+            2855,
+            6737
+          ]
+        ],
+        "class_distribution": {
+          "1": 9592,
+          "0": 9239
+        },
+        "eval_rows": 18831,
+        "eval_rows_total": 18831,
+        "value_bet": {
+          "accuracy": 0.675641,
+          "log_loss": 0.595247,
+          "brier_score": 0.205151,
+          "roi": -0.038478,
+          "yield": -0.038478,
+          "max_drawdown": 735.531871,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 18831,
+          "total_profit": -724.572303,
+          "avg_odds": 1.4626
+        }
+      },
+      "fit_seconds": 13.96,
+      "model_path": "/app/backend/data/reports/models_staging/first_set_winner_ensemble/stacking.pkl",
+      "base_algorithms": [
+        "random_forest",
+        "hist_gradient_boosting",
+        "xgboost"
+      ],
+      "meta_learner_coefficients": {
+        "random_forest": 1.811273,
+        "hist_gradient_boosting": -0.040114,
+        "xgboost": 2.985751
+      },
+      "meta_learner_intercept": -2.381192
+    },
+    "voting_soft": {
+      "test_metrics": {
+        "accuracy": 0.675323,
+        "precision": 0.673865,
+        "recall": 0.702669,
+        "f1": 0.687966,
+        "roc_auc": 0.743203,
+        "log_loss": 0.594213,
+        "brier_score": 0.204856,
+        "confusion_matrix": [
+          [
+            5977,
+            3262
+          ],
+          [
+            2852,
+            6740
+          ]
+        ],
+        "class_distribution": {
+          "1": 9592,
+          "0": 9239
+        },
+        "eval_rows": 18831,
+        "eval_rows_total": 18831,
+        "value_bet": {
+          "accuracy": 0.675323,
+          "log_loss": 0.594213,
+          "brier_score": 0.204856,
+          "roi": -0.038755,
+          "yield": -0.038755,
+          "max_drawdown": 740.754276,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 18831,
+          "total_profit": -729.794708,
+          "avg_odds": 1.463008
+        }
+      },
+      "fit_seconds": 5.19,
+      "model_path": "/app/backend/data/reports/models_staging/first_set_winner_ensemble/voting_soft.pkl",
+      "base_algorithms": [
+        "random_forest",
+        "hist_gradient_boosting",
+        "xgboost"
+      ]
+    }
+  },
+  "holdout_comparison": {
+    "candidates_roc_auc": {
+      "stacking": 0.743043,
+      "voting_soft": 0.743203,
+      "single:logistic_regression": 0.742865,
+      "single:random_forest": 0.743034,
+      "single:hist_gradient_boosting": 0.742884,
+      "single:xgboost": 0.742883,
+      "single:lightgbm": 0.742789,
+      "production:logistic_regression": 0.742867
+    },
+    "winner": "voting_soft",
+    "winner_roc_auc": 0.743203,
+    "beats_production": true
+  },
+  "walk_forward_comparison": {
+    "mode": "quick",
+    "folds_planned": 56,
+    "fold_overlap_warnings": [],
+    "folds_completed_per_model": {
+      "market_no_vig": 31,
+      "match_winner_no_vig": 31,
+      "logistic_regression": 31,
+      "random_forest": 31,
+      "voting_soft": 31,
+      "stacking": 31,
+      "market_favorite": 31,
+      "coin_flip": 31
+    },
+    "model_names": [
+      "logistic_regression",
+      "stacking",
+      "voting_soft",
+      "random_forest"
+    ],
+    "base_algorithms": [
+      "random_forest",
+      "hist_gradient_boosting",
+      "xgboost"
+    ],
+    "aggregate_metrics": {
+      "logistic_regression": {
+        "folds_completed": 31,
+        "accuracy": {
+          "mean": 0.662584,
+          "std": 0.04619,
+          "n": 31
+        },
+        "precision": {
+          "mean": 0.660095,
+          "std": 0.048691,
+          "n": 31
+        },
+        "recall": {
+          "mean": 0.695896,
+          "std": 0.092924,
+          "n": 31
+        },
+        "f1": {
+          "mean": 0.673088,
+          "std": 0.049097,
+          "n": 31
+        },
+        "roc_auc": {
+          "mean": 0.731975,
+          "std": 0.038124,
+          "n": 31
+        },
+        "log_loss": {
+          "mean": 0.639747,
+          "std": 0.154678,
+          "n": 31
+        }
+      },
+      "stacking": {
+        "folds_completed": 31,
+        "accuracy": {
+          "mean": 0.65519,
+          "std": 0.060069,
+          "n": 31
+        },
+        "precision": {
+          "mean": 0.65163,
+          "std": 0.070218,
+          "n": 31
+        },
+        "recall": {
+          "mean": 0.689016,
+          "std": 0.079686,
+          "n": 31
+        },
+        "f1": {
+          "mean": 0.666835,
+          "std": 0.063103,
+          "n": 31
+        },
+        "roc_auc": {
+          "mean": 0.726843,
+          "std": 0.045594,
+          "n": 31
+        },
+        "log_loss": {
+          "mean": 0.610411,
+          "std": 0.044731,
+          "n": 31
+        }
+      },
+      "voting_soft": {
+        "folds_completed": 31,
+        "accuracy": {
+          "mean": 0.658242,
+          "std": 0.051107,
+          "n": 31
+        },
+        "precision": {
+          "mean": 0.652906,
+          "std": 0.063177,
+          "n": 31
+        },
+        "recall": {
+          "mean": 0.690855,
+          "std": 0.068911,
+          "n": 31
+        },
+        "f1": {
+          "mean": 0.669345,
+          "std": 0.057963,
+          "n": 31
+        },
+        "roc_auc": {
+          "mean": 0.727166,
+          "std": 0.044584,
+          "n": 31
+        },
+        "log_loss": {
+          "mean": 0.612706,
+          "std": 0.052598,
+          "n": 31
+        }
+      },
+      "random_forest": {
+        "folds_completed": 31,
+        "accuracy": {
+          "mean": 0.661629,
+          "std": 0.047935,
+          "n": 31
+        },
+        "precision": {
+          "mean": 0.656079,
+          "std": 0.058191,
+          "n": 31
+        },
+        "recall": {
+          "mean": 0.685462,
+          "std": 0.068064,
+          "n": 31
+        },
+        "f1": {
+          "mean": 0.669477,
+          "std": 0.059428,
+          "n": 31
+        },
+        "roc_auc": {
+          "mean": 0.729716,
+          "std": 0.043561,
+          "n": 31
+        },
+        "log_loss": {
+          "mean": 0.607136,
+          "std": 0.037369,
+          "n": 31
+        }
+      },
+      "coin_flip": {
+        "folds_completed": 31,
+        "accuracy": {
+          "mean": 0.503767,
+          "std": 0.028013,
+          "n": 31
+        },
+        "precision": {
+          "mean": 0.503767,
+          "std": 0.028013,
+          "n": 31
+        },
+        "recall": {
+          "mean": 1.0,
+          "std": 0.0,
+          "n": 31
+        },
+        "f1": {
+          "mean": 0.669516,
+          "std": 0.026354,
+          "n": 31
+        },
+        "roc_auc": {
+          "mean": 0.5,
+          "std": 0.0,
+          "n": 31
+        },
+        "log_loss": {
+          "mean": 0.693147,
+          "std": 0.0,
+          "n": 31
+        }
+      },
+      "market_favorite": {
+        "folds_completed": 31,
+        "accuracy": {
+          "mean": 0.664889,
+          "std": 0.04805,
+          "n": 31
+        },
+        "precision": {
+          "mean": 0.66099,
+          "std": 0.05423,
+          "n": 31
+        },
+        "recall": {
+          "mean": 0.680715,
+          "std": 0.067445,
+          "n": 31
+        },
+        "f1": {
+          "mean": 0.670163,
+          "std": 0.058943,
+          "n": 31
+        },
+        "roc_auc": {
+          "mean": 0.665137,
+          "std": 0.04833,
+          "n": 31
+        },
+        "log_loss": {
+          "mean": 4.612135,
+          "std": 0.665747,
+          "n": 31
+        }
+      },
+      "market_no_vig": {
+        "folds_completed": 31,
+        "accuracy": {
+          "mean": 0.664889,
+          "std": 0.04805,
+          "n": 31
+        },
+        "precision": {
+          "mean": 0.66099,
+          "std": 0.05423,
+          "n": 31
+        },
+        "recall": {
+          "mean": 0.680715,
+          "std": 0.067445,
+          "n": 31
+        },
+        "f1": {
+          "mean": 0.670163,
+          "std": 0.058943,
+          "n": 31
+        },
+        "roc_auc": {
+          "mean": 0.735809,
+          "std": 0.033889,
+          "n": 31
+        },
+        "log_loss": {
+          "mean": 0.601868,
+          "std": 0.023953,
+          "n": 31
+        }
+      },
+      "match_winner_no_vig": {
+        "folds_completed": 31,
+        "accuracy": {
+          "mean": 0.664301,
+          "std": 0.047502,
+          "n": 31
+        },
+        "precision": {
+          "mean": 0.660054,
+          "std": 0.05534,
+          "n": 31
+        },
+        "recall": {
+          "mean": 0.681666,
+          "std": 0.067637,
+          "n": 31
+        },
+        "f1": {
+          "mean": 0.670018,
+          "std": 0.058986,
+          "n": 31
+        },
+        "roc_auc": {
+          "mean": 0.735545,
+          "std": 0.03393,
+          "n": 31
+        },
+        "log_loss": {
+          "mean": 0.602492,
+          "std": 0.030886,
+          "n": 31
+        }
+      }
+    },
+    "aggregate_value_bet_metrics": {
+      "logistic_regression": {
+        "folds_completed": 31,
+        "roi": {
+          "mean": -0.048928,
+          "std": 0.064675,
+          "n": 31
+        },
+        "yield": {
+          "mean": -0.048928,
+          "std": 0.064675,
+          "n": 31
+        },
+        "max_drawdown": {
+          "mean": 145.481189,
+          "std": 87.20451,
+          "n": 31
+        },
+        "bets_settled": {
+          "mean": 3030.870968,
+          "std": 1360.224359,
+          "n": 31
+        },
+        "total_profit": {
+          "mean": -133.728832,
+          "std": 87.793437,
+          "n": 31
+        },
+        "avg_odds": {
+          "mean": 1.488993,
+          "std": 0.087733,
+          "n": 31
+        }
+      },
+      "stacking": {
+        "folds_completed": 31,
+        "roi": {
+          "mean": -0.06809,
+          "std": 0.085006,
+          "n": 31
+        },
+        "yield": {
+          "mean": -0.06809,
+          "std": 0.085006,
+          "n": 31
+        },
+        "max_drawdown": {
+          "mean": 144.607705,
+          "std": 88.101974,
+          "n": 31
+        },
+        "bets_settled": {
+          "mean": 3030.870968,
+          "std": 1360.224359,
+          "n": 31
+        },
+        "total_profit": {
+          "mean": -132.691086,
+          "std": 88.190369,
+          "n": 31
+        },
+        "avg_odds": {
+          "mean": 1.478296,
+          "std": 0.081166,
+          "n": 31
+        }
+      },
+      "voting_soft": {
+        "folds_completed": 31,
+        "roi": {
+          "mean": -0.064344,
+          "std": 0.075803,
+          "n": 31
+        },
+        "yield": {
+          "mean": -0.064344,
+          "std": 0.075803,
+          "n": 31
+        },
+        "max_drawdown": {
+          "mean": 146.48849,
+          "std": 87.923596,
+          "n": 31
+        },
+        "bets_settled": {
+          "mean": 3030.870968,
+          "std": 1360.224359,
+          "n": 31
+        },
+        "total_profit": {
+          "mean": -134.637292,
+          "std": 87.818216,
+          "n": 31
+        },
+        "avg_odds": {
+          "mean": 1.470637,
+          "std": 0.031547,
+          "n": 31
+        }
+      },
+      "random_forest": {
+        "folds_completed": 31,
+        "roi": {
+          "mean": -0.060964,
+          "std": 0.072479,
+          "n": 31
+        },
+        "yield": {
+          "mean": -0.060964,
+          "std": 0.072479,
+          "n": 31
+        },
+        "max_drawdown": {
+          "mean": 144.065808,
+          "std": 87.987112,
+          "n": 31
+        },
+        "bets_settled": {
+          "mean": 3030.870968,
+          "std": 1360.224359,
+          "n": 31
+        },
+        "total_profit": {
+          "mean": -132.657929,
+          "std": 88.306883,
+          "n": 31
+        },
+        "avg_odds": {
+          "mean": 1.463147,
+          "std": 0.017766,
+          "n": 31
+        }
+      },
+      "coin_flip": {
+        "folds_completed": 31,
+        "roi": {
+          "mean": -0.104336,
+          "std": 0.062528,
+          "n": 31
+        },
+        "yield": {
+          "mean": -0.104336,
+          "std": 0.062528,
+          "n": 31
+        },
+        "max_drawdown": {
+          "mean": 297.799683,
+          "std": 145.698164,
+          "n": 31
+        },
+        "bets_settled": {
+          "mean": 3030.870968,
+          "std": 1360.224359,
+          "n": 31
+        },
+        "total_profit": {
+          "mean": -286.91383,
+          "std": 145.882857,
+          "n": 31
+        },
+        "avg_odds": {
+          "mean": 2.223818,
+          "std": 0.049459,
+          "n": 31
+        }
+      },
+      "market_favorite": {
+        "folds_completed": 31,
+        "roi": {
+          "mean": -0.056577,
+          "std": 0.072104,
+          "n": 31
+        },
+        "yield": {
+          "mean": -0.056577,
+          "std": 0.072104,
+          "n": 31
+        },
+        "max_drawdown": {
+          "mean": 145.260734,
+          "std": 87.06997,
+          "n": 31
+        },
+        "bets_settled": {
+          "mean": 3030.870968,
+          "std": 1360.224359,
+          "n": 31
+        },
+        "total_profit": {
+          "mean": -132.793411,
+          "std": 87.884712,
+          "n": 31
+        },
+        "avg_odds": {
+          "mean": 1.458875,
+          "std": 0.014574,
+          "n": 31
+        }
+      },
+      "market_no_vig": {
+        "folds_completed": 31,
+        "roi": {
+          "mean": -0.056577,
+          "std": 0.072104,
+          "n": 31
+        },
+        "yield": {
+          "mean": -0.056577,
+          "std": 0.072104,
+          "n": 31
+        },
+        "max_drawdown": {
+          "mean": 145.260734,
+          "std": 87.06997,
+          "n": 31
+        },
+        "bets_settled": {
+          "mean": 3030.870968,
+          "std": 1360.224359,
+          "n": 31
+        },
+        "total_profit": {
+          "mean": -132.793411,
+          "std": 87.884712,
+          "n": 31
+        },
+        "avg_odds": {
+          "mean": 1.458875,
+          "std": 0.014574,
+          "n": 31
+        }
+      },
+      "match_winner_no_vig": {
+        "folds_completed": 31,
+        "roi": {
+          "mean": -0.05756,
+          "std": 0.071345,
+          "n": 31
+        },
+        "yield": {
+          "mean": -0.05756,
+          "std": 0.071345,
+          "n": 31
+        },
+        "max_drawdown": {
+          "mean": 142.503414,
+          "std": 84.81366,
+          "n": 31
+        },
+        "bets_settled": {
+          "mean": 3030.870968,
+          "std": 1360.224359,
+          "n": 31
+        },
+        "total_profit": {
+          "mean": -129.780064,
+          "std": 85.664834,
+          "n": 31
+        },
+        "avg_odds": {
+          "mean": 1.459124,
+          "std": 0.014543,
+          "n": 31
+        }
+      }
+    },
+    "ranking_by_roc_auc": [
+      "market_no_vig",
+      "match_winner_no_vig",
+      "logistic_regression",
+      "random_forest",
+      "voting_soft",
+      "stacking",
+      "market_favorite",
+      "coin_flip"
+    ],
+    "best_model": "market_no_vig",
+    "beats_production": false,
+    "production_baseline": "logistic_regression",
+    "production_roc_auc_mean": 0.731975
+  },
+  "recommendation": {
+    "verdict": "mixed_evidence",
+    "detail": "Segnale misto vs logistic_regression: holdout_beats=True, walk_forward_beats=False. Non promuovere ancora.",
+    "best_ensemble_holdout": "voting_soft",
+    "best_ensemble_holdout_roc_auc": 0.743203,
+    "production_baseline": "logistic_regression",
+    "search_winner": "random_forest",
+    "walk_forward_best": "market_no_vig"
+  },
+  "production_gate": {
+    "promote_now": false,
+    "reason": "Promozione bloccata di proposito: serve conferma esplicita dopo lettura del resoconto metriche."
+  }
+}

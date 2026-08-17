@@ -23,7 +23,12 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.src.app.core.config import get_settings
 from backend.src.app.db.session import SessionLocal
-from backend.src.app.ml.model_versioning import MODEL_VERSIONS, ODDS_REQUIRED_VERSIONS, ModelVersion
+from backend.src.app.ml.model_versioning import (
+    ACTIVE_MATCH_WINNER_VERSIONS,
+    MODEL_VERSIONS,
+    ODDS_REQUIRED_VERSIONS,
+    ModelVersion,
+)
 from backend.src.app.ml.prediction.predictor import (
     PredictUpcomingCancelled,
     clear_model_cache,
@@ -31,6 +36,9 @@ from backend.src.app.ml.prediction.predictor import (
 )
 from backend.src.app.models import Fixture
 from backend.src.app.services.betting_slips import get_daily_betting_slips
+from backend.src.app.services.extra_market_predictions import (
+    run_extra_market_predictions_generation,
+)
 from backend.src.app.services.import_state import get_import_status, record_fixture_import
 from backend.src.app.services.imports import purge_future_incomplete_fixtures
 from backend.src.app.services.live_publication_service import (
@@ -61,6 +69,7 @@ RESUMABLE_STATUSES = ("interrupted", "failed", "cancelled")
 PHASE_IMPORT_FIXTURES = "import_fixtures"
 PHASE_IMPORT_NEXT = "import_next_fixtures"
 PHASE_COMBINATIONS = "predict_combinations"
+PHASE_EXTRA_MARKETS = "extra_market_predictions"
 PHASE_SYNC_CLOUD = "sync_cloud"
 PHASE_WALK_FORWARD = "walk_forward_observe"
 PHASE_REPORT = "finalize_report"
@@ -101,9 +110,18 @@ def _json_dumps(value: Any) -> str:
 
 
 def list_enabled_combinations() -> list[ModelCombination]:
-    """Return all version/model pairs whose artifact exists on disk."""
+    """Return all version/model pairs whose artifact exists on disk.
+
+    Only ``ACTIVE_MATCH_WINNER_VERSIONS`` are considered: archived versions
+    (v1-v3, see model_versioning.py) are intentionally excluded here so they
+    stop being triggered by "Aggiorna tutto"/cron and stop showing up in the
+    FE catalog (``GET /global-update/results``), without deleting any code,
+    model artifact or historical data.
+    """
     combinations: list[ModelCombination] = []
     for version in MODEL_VERSIONS:
+        if version not in ACTIVE_MATCH_WINNER_VERSIONS:
+            continue
         models_dir = MODEL_VERSIONS[version].models_dir
         for model_name in MODEL_NAMES:
             if (models_dir / f"{model_name}.pkl").exists():
@@ -409,7 +427,7 @@ def _run_with_retry_timeout(
             with ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(fn)
                 return future.result(timeout=timeout_seconds)
-        except FuturesTimeoutError as exc:
+        except FuturesTimeoutError:
             last_exc = GlobalUpdateStepTimeout(
                 f"{label} timed out after {timeout_seconds}s (attempt {attempt}/{attempts})"
             )
@@ -894,6 +912,63 @@ def _execute_global_update(
 
             clear_model_cache()
 
+            # Extra markets must exist before the combination loop builds the
+            # daily slips. They are independent of the match-winner prediction
+            # pass and are idempotently published into the ledger read by the
+            # mixed candidate pool. A soft failure keeps match-winner updates
+            # operational and simply produces mono-market slips for this run.
+            extra_markets_summary: dict[str, Any] = {"available": False}
+            if not _phase_completed(phases, PHASE_EXTRA_MARKETS):
+                phase_start = time.perf_counter()
+                _update_run_phase(
+                    db,
+                    run,
+                    phase="Mercati extra (1° set, O/U games)",
+                    progress_pct=10.0,
+                    owner_token=owner_token,
+                )
+                try:
+                    extra_markets_summary = run_extra_market_predictions_generation(
+                        days_forward=days_forward,
+                        publication_source="system",
+                    )
+                    extra_markets_summary["available"] = True
+                    phases = _upsert_phase(
+                        phases,
+                        {
+                            "phase": PHASE_EXTRA_MARKETS,
+                            "duration_seconds": round(time.perf_counter() - phase_start, 2),
+                            "status": "completed",
+                            "extra_markets": extra_markets_summary,
+                        },
+                    )
+                except GlobalUpdateCancelled:
+                    raise
+                except Exception as exc:
+                    msg = f"Extra market predictions generation failed: {exc}"
+                    run_warnings.append(msg)
+                    extra_markets_summary = {"available": False, "error": str(exc)}
+                    phases = _upsert_phase(
+                        phases,
+                        {
+                            "phase": PHASE_EXTRA_MARKETS,
+                            "duration_seconds": round(time.perf_counter() - phase_start, 2),
+                            "status": "failed",
+                            "error": str(exc),
+                            "extra_markets": extra_markets_summary,
+                        },
+                    )
+                    logger.exception(msg)
+                _persist_phases(db, run, phases)
+            else:
+                stored_extra_phase = next(
+                    (p for p in phases if p.get("phase") == PHASE_EXTRA_MARKETS), None
+                )
+                if stored_extra_phase and isinstance(
+                    stored_extra_phase.get("extra_markets"), dict
+                ):
+                    extra_markets_summary = stored_extra_phase["extra_markets"]
+
             for index, combo in enumerate(combinations):
                 if is_cancel_requested(run_id):
                     raise GlobalUpdateCancelled()
@@ -1257,6 +1332,12 @@ def _execute_global_update(
             )
             if stored_phase and isinstance(stored_phase.get("walk_forward"), dict):
                 walk_forward_summary = stored_phase["walk_forward"]
+            stored_extra_phase = next(
+                (p for p in phases if p.get("phase") == PHASE_EXTRA_MARKETS),
+                None,
+            )
+            if stored_extra_phase and isinstance(stored_extra_phase.get("extra_markets"), dict):
+                extra_markets_summary = stored_extra_phase["extra_markets"]
             report = {
                 "run_id": run.id,
                 "run_date": run.run_date.isoformat(),
@@ -1284,6 +1365,7 @@ def _execute_global_update(
                         "public_model_name": public_cfg.model_name,
                     },
                     "walk_forward": walk_forward_summary,
+                    "extra_markets": extra_markets_summary,
                     "import_status": {
                         "next_fixtures_imported_today": import_status[
                             "next_fixtures_imported_today"

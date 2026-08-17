@@ -18,7 +18,7 @@ const navSections: Array<{
 }> = [
   {
     items: [
-      { to: "/live-beta-dashboard", label: "Dashboard beta live" },
+      { to: "/live-beta-dashboard", label: "Dashboard live" },
       { to: "/predictions", label: "Partite" },
       { to: "/betting-slips", label: "Consiglio schedina" }
     ]
@@ -27,7 +27,6 @@ const navSections: Array<{
     label: "LIVE",
     items: [
       { to: "/published-predictions", label: "Storico pubblicazioni" },
-      { to: "/public-model-registry", label: "Registro modello pubblico" },
       { to: "/published-live-stats", label: "Statistiche live" },
       { to: "/subscriptions-dashboard", label: "Dashboard abbonamenti" },
       { to: "/global-update-report", label: "Report aggiornamento" },

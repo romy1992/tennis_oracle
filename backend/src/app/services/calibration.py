@@ -16,7 +16,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.src.app.core.config import Settings, get_settings
 from backend.src.app.db.session import SessionLocal
-from backend.src.app.ml.model_versioning import MODEL_VERSIONS, REPORTS_DIR
+from backend.src.app.ml.model_versioning import (
+    ACTIVE_MATCH_WINNER_VERSIONS,
+    MODEL_VERSIONS,
+    REPORTS_DIR,
+)
 from backend.src.app.ml.training.calibration import (
     CALIBRATION_METHODS,
     CalibrationConfig,
@@ -100,9 +104,13 @@ def config_from_settings(
 
 
 def resolve_versions(overrides: CalibrationTriggerRequest | None = None) -> tuple[str, ...]:
+    """Default: live match-winner versions only (not archived v1–v3)."""
     if overrides and overrides.versions:
+        unknown = [item for item in overrides.versions if item not in MODEL_VERSIONS]
+        if unknown:
+            raise ValueError(f"Versioni calibrazione sconosciute: {unknown}")
         return tuple(overrides.versions)
-    return tuple(MODEL_VERSIONS.keys())
+    return tuple(sorted(ACTIVE_MATCH_WINNER_VERSIONS))
 
 
 def result_to_read(result: CalibrationResult) -> CalibrationResultRead:

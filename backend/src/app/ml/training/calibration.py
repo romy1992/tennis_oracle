@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from backend.src.app.ml.model_versioning import (
+    ACTIVE_MATCH_WINNER_VERSIONS,
     MODEL_VERSIONS,
     PROCESSED_DATA_DIR,
     REPORTS_DIR,
@@ -753,7 +754,7 @@ def run_calibration_validation(
 ) -> CalibrationRunResult:
     config.validate()
     started = datetime.now(timezone.utc).isoformat()
-    selected_versions = versions or tuple(MODEL_VERSIONS.keys())
+    selected_versions = versions or tuple(sorted(ACTIVE_MATCH_WINNER_VERSIONS))
     models: list[ModelCalibrationResult] = []
     if prepare_progress_callback:
         prepare_progress_callback("Conteggio unità calibrazione…")

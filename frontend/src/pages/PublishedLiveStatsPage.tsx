@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
 
+import { MarketTabs } from "../components/MarketTabs";
 import { MetricCard } from "../components/MetricCard";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
-import type { PublishedLiveStatsBucket, PublishedLiveStatsSummary } from "../types/api";
-import { MODEL_VERSIONS } from "../utils/modelVersion";
+import type {
+  LiveDashboardMarket,
+  PublishedLiveStatsBucket,
+  PublishedLiveStatsSummary
+} from "../types/api";
+import { DEFAULT_LIVE_MARKET, marketLabel } from "../utils/markets";
 import { todayLocalISODate } from "../utils/tennis";
 
 function daysAgoIso(days: number) {
@@ -93,7 +98,7 @@ export function PublishedLiveStatsPage() {
   const [stats, setStats] = useState<PublishedLiveStatsSummary | null>(null);
   const [fromDate, setFromDate] = useState(() => daysAgoIso(90));
   const [toDate, setToDate] = useState(() => todayLocalISODate());
-  const [modelVersion, setModelVersion] = useState("");
+  const [market, setMarket] = useState<LiveDashboardMarket>(DEFAULT_LIVE_MARKET);
   const [latestOnly, setLatestOnly] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +110,8 @@ export function PublishedLiveStatsPage() {
         const response = await apiClient.getPublishedLiveStats({
           from: fromDate,
           to: toDate,
-          model_version: modelVersion || undefined,
+          market,
+          include_archived: false,
           latest_only: latestOnly
         });
         setStats(response);
@@ -117,13 +123,34 @@ export function PublishedLiveStatsPage() {
       }
     }
     void load();
-  }, [fromDate, toDate, modelVersion, latestOnly]);
+  }, [fromDate, toDate, market, latestOnly]);
 
-  if (loading) {
+  const filters = (
+    <div className="filters-grid compact">
+      <label>
+        Da
+        <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+      </label>
+      <label>
+        A
+        <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={latestOnly}
+          onChange={(e) => setLatestOnly(e.target.checked)}
+        />{" "}
+        Solo versione più recente
+      </label>
+    </div>
+  );
+
+  if (loading && !stats) {
     return <LoadingState title="Caricamento statistiche live..." />;
   }
 
-  if (error) {
+  if (error && !stats) {
     return <ErrorState title="Statistiche live non disponibili" message={error} />;
   }
 
@@ -134,43 +161,16 @@ export function PublishedLiveStatsPage() {
           <div>
             <h2>Statistiche live pubblicazioni</h2>
             <p>
-              KPI dal registro immutabile (non da training, backtest o previsioni operative).
+              KPI dal registro immutabile per un mercato alla volta (non training/backtest).
             </p>
           </div>
         </header>
 
-        <div className="filters-grid compact">
-          <label>
-            Da
-            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-          </label>
-          <label>
-            A
-            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-          </label>
-          <label>
-            Versione modello
-            <select value={modelVersion} onChange={(e) => setModelVersion(e.target.value)}>
-              <option value="">Tutte</option>
-              {MODEL_VERSIONS.map((entry) => (
-                <option key={entry.value} value={entry.value}>
-                  {entry.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={latestOnly}
-              onChange={(e) => setLatestOnly(e.target.checked)}
-            />{" "}
-            Solo versione più recente
-          </label>
-        </div>
+        <MarketTabs value={market} onChange={setMarket} ariaLabel="Mercato statistiche live" />
+        {filters}
 
         <EmptyState
-          title="Nessuna pubblicazione"
+          title={`Nessuna pubblicazione · ${marketLabel(market)}`}
           message="Pubblica tip nel registro immutabile per vedere hit rate, ROI, drawdown e distribuzioni."
         />
       </section>
@@ -183,41 +183,21 @@ export function PublishedLiveStatsPage() {
         <div>
           <h2>Statistiche live pubblicazioni</h2>
           <p>
-            Solo tip pubblicati nel ledger immutabile. Settlement a lettura; void esclusi da hit
-            rate / ROI / yield.
+            Solo tip del mercato selezionato. Settlement a lettura; void esclusi da hit rate /
+            ROI / yield.
           </p>
         </div>
+        <span className={`market-badge market-${market}`}>{marketLabel(market)}</span>
       </header>
 
-      <div className="filters-grid compact">
-        <label>
-          Da
-          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-        </label>
-        <label>
-          A
-          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-        </label>
-        <label>
-          Versione modello
-          <select value={modelVersion} onChange={(e) => setModelVersion(e.target.value)}>
-            <option value="">Tutte</option>
-            {MODEL_VERSIONS.map((entry) => (
-              <option key={entry.value} value={entry.value}>
-                {entry.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={latestOnly}
-            onChange={(e) => setLatestOnly(e.target.checked)}
-          />{" "}
-          Solo versione più recente
-        </label>
-      </div>
+      <MarketTabs
+        value={market}
+        onChange={setMarket}
+        ariaLabel="Mercato statistiche live"
+        disabled={loading}
+      />
+      {filters}
+      {error ? <ErrorState title="Aggiornamento parziale" message={error} /> : null}
 
       <div className="metrics-grid">
         <MetricCard label="Pronostici totali" value={String(stats.predictions_total)} />

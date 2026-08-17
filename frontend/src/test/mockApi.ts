@@ -137,7 +137,7 @@ export function stubDefaultApi(apiMocks: {
     status: "reviewing"
   });
   apiMocks.getPredictionSummary.mockResolvedValue({
-    model_version: "v3",
+    model_version: "v4",
     predictions_total: 0,
     predictions_resolved: 0,
     predictions_correct: 0,
@@ -152,7 +152,7 @@ export function stubDefaultApi(apiMocks: {
     breakdown: []
   });
   apiMocks.getDailyPredictionStats.mockResolvedValue({
-    model_version: "v3",
+    model_version: "v4",
     days: []
   });
   apiMocks.getBettingSlipModelStats.mockResolvedValue({

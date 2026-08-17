@@ -22,6 +22,10 @@ class PrematchOddsSnapshot(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_key = Column(Integer, nullable=False, index=True)
+    market = Column(
+        String, nullable=False, default="match_winner", server_default="match_winner"
+    )
+    market_line = Column(Float, nullable=True)
     selection = Column(String, nullable=False)
     bookmaker = Column(String, nullable=False)
     odds = Column(Float, nullable=False)
@@ -37,4 +41,6 @@ class PrematchOddsSnapshot(Base):
     player_2_name = Column(String, nullable=True)
 
     def to_dict(self):
-        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+        return {
+            column.name: getattr(self, column.name) for column in self.__table__.columns
+        }

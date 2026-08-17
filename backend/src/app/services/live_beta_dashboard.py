@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -53,12 +54,28 @@ CLOSING_NOTE = (
     "il closing è best-effort (ultimo observed pre-match etichettato a partita live). "
     "Un job futuro dovrà acquisire la quota immediatamente prima dell'inizio."
 )
+LIVE_MARKETS = frozenset({"match_winner", "first_set_winner", "over_under_games"})
+_OVER_UNDER_LINE_RE = re.compile(r"^(?:Over|Under)\s+([\d.]+)$", re.IGNORECASE)
 
 
 def _pct(numerator: int, denominator: int) -> float | None:
     if denominator <= 0:
         return None
     return round_metric((numerator / denominator) * 100.0, 4)
+
+
+def _tip_snapshot_identity(tip) -> tuple[int, str, float | None, str]:
+    line = None
+    if tip.tip.market == "over_under_games":
+        match = _OVER_UNDER_LINE_RE.match((tip.tip.selection or "").strip())
+        if match is not None:
+            line = float(match.group(1))
+    return (
+        int(tip.tip.event_key),
+        str(tip.tip.market),
+        line,
+        str(tip.tip.selection),
+    )
 
 
 def _run_read(run) -> GlobalUpdateRunRead | None:
@@ -126,16 +143,69 @@ def _parse_live_publication_from_run(run) -> dict[str, Any]:
     return {}
 
 
-def _validation_started_at(db: Session) -> datetime | None:
-    return db.scalar(select(func.min(PublishedPrediction.published_at)))
+def _validation_started_at(
+    db: Session,
+    *,
+    model_version: str | None,
+    model_name: str | None,
+) -> datetime | None:
+    """First official PLAY for the currently configured public MW model."""
+    if model_version is None or model_name is None:
+        return None
+    return db.scalar(
+        select(func.min(PublishedPrediction.published_at)).where(
+            PublishedPrediction.market == "match_winner",
+            PublishedPrediction.model_version == model_version,
+            PublishedPrediction.model_name == model_name,
+            PublishedPrediction.initial_status == "published",
+            PublishedPrediction.value_decision == "PLAY",
+            PublishedPrediction.official_play.is_(True),
+        )
+    )
+
+
+def _official_public_tip_count(
+    db: Session,
+    *,
+    model_version: str | None,
+    model_name: str | None,
+) -> int:
+    if model_version is None or model_name is None:
+        return 0
+    return int(
+        db.scalar(
+            select(func.count()).select_from(PublishedPrediction).where(
+                PublishedPrediction.market == "match_winner",
+                PublishedPrediction.model_version == model_version,
+                PublishedPrediction.model_name == model_name,
+                PublishedPrediction.initial_status == "published",
+                PublishedPrediction.value_decision == "PLAY",
+                PublishedPrediction.official_play.is_(True),
+            )
+        )
+        or 0
+    )
 
 
 def _publication_health(
     db: Session,
     *,
-    tips_total: int,
     pipeline: LiveBetaPipelineStatus,
 ) -> LiveBetaPublicationHealth:
+    if not _table_available(db, "published_prediction"):
+        public = resolve_public_model_config(db=None)
+        return LiveBetaPublicationHealth(
+            empty_reason="table_unavailable",
+            message=(
+                "La tabella published_prediction non è disponibile. "
+                "Esegui le migrazioni Alembic prima di usare il registro live."
+            ),
+            live_publication_enabled=public.enabled,
+            public_model_version=public.model_version,
+            public_model_name=public.model_name,
+            last_run_publication_errors=[],
+        )
+
     public = resolve_public_model_config(db=db)
     latest = pipeline.latest_run
     live_from_run = _parse_live_publication_from_run(
@@ -149,60 +219,55 @@ def _publication_health(
     if not isinstance(pub_errors, list):
         pub_errors = [str(pub_errors)]
 
-    validation_started = None
-    if _table_available(db, "published_prediction"):
-        validation_started = _validation_started_at(db)
-    else:
-        return LiveBetaPublicationHealth(
-            empty_reason="table_unavailable",
-            message=(
-                "La tabella published_prediction non è disponibile. "
-                "Esegui le migrazioni Alembic (fino a 0015) prima di usare il registro live."
-            ),
-            live_publication_enabled=public.enabled,
-            public_model_version=public.model_version,
-            public_model_name=public.model_name,
-            last_run_publication_errors=[],
-        )
+    validation_started = _validation_started_at(
+        db,
+        model_version=public.model_version,
+        model_name=public.model_name,
+    )
+    official_tip_count = _official_public_tip_count(
+        db,
+        model_version=public.model_version,
+        model_name=public.model_name,
+    )
 
     reason: LivePublicationEmptyReason = "ok"
     message = "Registro live operativo."
 
-    if tips_total == 0:
-        if public.status == "disabled":
-            reason = "publication_disabled"
-            message = (
-                "Nessuna pubblicazione: LIVE_PUBLICATION_ENABLED=false. "
-                "La pipeline genera previsioni/schedine ma non scrive il registro live."
-            )
-        elif public.status == "incomplete":
-            reason = "public_model_unconfigured"
-            message = (
-                "Pubblicazione live abilitata ma nessun modello attivo nel registro ML-07 "
-                "e PUBLIC_MODEL_* non configurati. Nessun fallback automatico."
-            )
-        elif public.status == "invalid":
-            reason = "public_model_invalid"
-            message = public.warning or "Configurazione modello pubblico non valida."
-        elif latest is None:
-            reason = "pipeline_never_run"
-            message = (
-                "Nessun aggiornamento globale eseguito ancora. "
-                "Avvia l'aggiornamento globale dopo aver abilitato la pubblicazione live."
-            )
-        elif pub_errors or live_from_run.get("config_status") == "error":
-            reason = "publication_errors"
-            message = (
-                "L'ultimo aggiornamento ha riportato errori di pubblicazione live. "
-                "Controlla il report global-update e gli errori qui sotto."
-            )
-        else:
-            reason = "pipeline_run_no_qualified_plays"
-            message = (
-                "Pipeline eseguita, ma nessuna giocata PLAY qualificata è stata "
-                "pubblicata per il modello pubblico (edge insufficiente, quote "
-                "mancanti, partite già iniziate o duplicati)."
-            )
+    # Configuration health is global and must not be masked by historical or
+    # manually/system-published rows selected by dashboard filters.
+    if public.status == "disabled":
+        reason = "publication_disabled"
+        message = (
+            "Pubblicazione automatica disabilitata: LIVE_PUBLICATION_ENABLED=false. "
+            "Le pubblicazioni storiche restano consultabili."
+        )
+    elif public.status == "incomplete":
+        reason = "public_model_unconfigured"
+        message = (
+            "Pubblicazione live abilitata ma nessun modello attivo nel registro ML-07 "
+            "e PUBLIC_MODEL_* non configurati. Nessun fallback automatico."
+        )
+    elif public.status == "invalid":
+        reason = "public_model_invalid"
+        message = public.warning or "Configurazione modello pubblico non valida."
+    elif pub_errors or live_from_run.get("config_status") == "error":
+        reason = "publication_errors"
+        message = (
+            "L'ultimo aggiornamento ha riportato errori di pubblicazione live. "
+            "Controlla il report global-update e gli errori qui sotto."
+        )
+    elif official_tip_count == 0 and latest is None:
+        reason = "pipeline_never_run"
+        message = (
+            "Nessun aggiornamento globale eseguito ancora. "
+            "Avvia l'aggiornamento globale dopo aver abilitato la pubblicazione live."
+        )
+    elif official_tip_count == 0:
+        reason = "pipeline_run_no_qualified_plays"
+        message = (
+            "Pipeline eseguita, ma nessuna giocata PLAY ufficiale è stata pubblicata "
+            "per il modello pubblico attivo."
+        )
 
     return LiveBetaPublicationHealth(
         empty_reason=reason,
@@ -244,24 +309,33 @@ def _data_completeness_from_settled(
     tips_with_match_context = sum(1 for tip in settled if tip.tip.event_key in match_keys)
 
     snapshot_keys: set[int] = set()
-    closing_keys: set[int] = set()
+    closing_identities: set[tuple[int, str, float | None, str]] = set()
+    tip_identities = {_tip_snapshot_identity(tip) for tip in settled}
     type_counts = {"opening": 0, "observed": 0, "publication": 0, "closing": 0}
     if event_keys:
         snapshot_rows = db.execute(
             select(
                 PrematchOddsSnapshot.event_key,
+                PrematchOddsSnapshot.market,
+                PrematchOddsSnapshot.market_line,
+                PrematchOddsSnapshot.selection,
                 PrematchOddsSnapshot.snapshot_type,
             ).where(PrematchOddsSnapshot.event_key.in_(event_keys))
         ).all()
-        for event_key, snapshot_type in snapshot_rows:
+        for event_key, market, market_line, selection, snapshot_type in snapshot_rows:
+            identity = (int(event_key), str(market), market_line, str(selection))
+            if identity not in tip_identities:
+                continue
             snapshot_keys.add(int(event_key))
             key = str(snapshot_type or "")
             if key in type_counts:
                 type_counts[key] += 1
             if key == "closing":
-                closing_keys.add(int(event_key))
+                closing_identities.add(identity)
 
-    tips_with_closing = sum(1 for tip in settled if tip.tip.event_key in closing_keys)
+    tips_with_closing = sum(
+        1 for tip in settled if _tip_snapshot_identity(tip) in closing_identities
+    )
     closing_pct = _pct(tips_with_closing, tips_total)
     if tips_total == 0:
         closing_status = "unknown"
@@ -358,7 +432,15 @@ def compute_live_beta_dashboard(
     odds_band: str | None = None,
     latest_only: bool = True,
     tip_limit: int = 25,
+    market: str = "match_winner",
+    include_archived: bool = False,
+    official_only: bool = False,
 ) -> LiveBetaDashboardResponse:
+    market_key = market.strip()
+    if market_key not in LIVE_MARKETS:
+        raise ValueError(
+            f"market non valido: {market!r}. Valori ammessi: {', '.join(sorted(LIVE_MARKETS))}."
+        )
     today = date.today()
     range_from = from_date or (today - timedelta(days=89))
     range_to = to_date or today
@@ -371,6 +453,10 @@ def compute_live_beta_dashboard(
         "surface": surface,
         "odds_band": odds_band,
         "latest_only": latest_only,
+        "market": market_key,
+        "include_archived": include_archived,
+        "official_only": official_only,
+        "initial_status": "published",
     }
 
     if not _table_available(db, "published_prediction"):
@@ -387,6 +473,9 @@ def compute_live_beta_dashboard(
             odds_band=odds_band,  # type: ignore[arg-type]
             publication_source=None,
             latest_only=latest_only,
+            market=market_key,
+            include_archived=include_archived,
+            official_only=official_only,
             predictions_total=0,
             closed=0,
             open=0,
@@ -409,7 +498,7 @@ def compute_live_beta_dashboard(
             by_surface=[],
             by_period=[],
         )
-        health = _publication_health(db, tips_total=0, pipeline=pipeline)
+        health = _publication_health(db, pipeline=pipeline)
         return LiveBetaDashboardResponse(
             generated_at=datetime.now(),
             from_date=range_from,
@@ -420,9 +509,15 @@ def compute_live_beta_dashboard(
             surface=surface,
             odds_band=None,
             latest_only=latest_only,
+            market=market_key,
+            include_archived=include_archived,
+            official_only=official_only,
             pipeline=pipeline,
             publication_health=health,
             live_stats=empty_stats,
+            official_live_stats=empty_stats.model_copy(
+                update={"official_only": True}
+            ),
             published_today=[],
             open_predictions=[],
             closed_predictions=[],
@@ -444,6 +539,13 @@ def compute_live_beta_dashboard(
         from_date=range_from,
         to_date=range_to,
         **filter_kwargs,
+    )
+    official_filter_kwargs = {**filter_kwargs, "official_only": True}
+    official_live_stats = compute_published_live_stats(
+        db,
+        from_date=range_from,
+        to_date=range_to,
+        **official_filter_kwargs,
     )
     settled = settle_published_tips(
         db,
@@ -478,11 +580,7 @@ def compute_live_beta_dashboard(
 
     bot_usage = compute_telegram_stats(db, from_date=range_from, to_date=range_to)
     completeness = _data_completeness_from_settled(db, settled)
-    health = _publication_health(
-        db,
-        tips_total=live_stats.predictions_total,
-        pipeline=pipeline,
-    )
+    health = _publication_health(db, pipeline=pipeline)
 
     return LiveBetaDashboardResponse(
         generated_at=datetime.now(),
@@ -494,9 +592,13 @@ def compute_live_beta_dashboard(
         surface=surface,
         odds_band=live_stats.odds_band,
         latest_only=latest_only,
+        market=market_key,
+        include_archived=include_archived,
+        official_only=official_only,
         pipeline=pipeline,
         publication_health=health,
         live_stats=live_stats,
+        official_live_stats=official_live_stats,
         published_today=_reads(today_settled),
         open_predictions=_reads(open_items),
         closed_predictions=_reads(closed_items),

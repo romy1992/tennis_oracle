@@ -8,6 +8,7 @@ import type {
   MLModelVersion,
   MatchPrediction,
   ModelsVersionsResultsResponse,
+  ExtraMarketPrediction,
   NextFixtureWithPrediction,
   SingleMatchValueDecision,
   SingleMatchValueResponse
@@ -15,6 +16,7 @@ import type {
 import { classifySingleBetValue } from "../utils/minEdge";
 import {
   DEFAULT_MODEL_VERSION,
+  modelVersionLabel,
   resolvePreferredModelVersion,
   writeStoredModelVersion
 } from "../utils/modelVersion";
@@ -23,6 +25,7 @@ import { formatDate } from "../utils/tennis";
 
 type FixtureStatusFilter = "upcoming" | "played" | "all";
 type OutcomeFilter = "all" | "won" | "lost";
+type MarketTab = "match_winner" | "first_set_winner" | "over_under_games";
 
 const PAGE_SIZE = 50;
 
@@ -38,6 +41,12 @@ const outcomeTabs: Array<{ value: OutcomeFilter; label: string }> = [
   { value: "lost", label: "Perse" }
 ];
 
+const marketTabs: Array<{ value: MarketTab; label: string }> = [
+  { value: "match_winner", label: "Vincitore partita" },
+  { value: "first_set_winner", label: "Vincitore 1° set" },
+  { value: "over_under_games", label: "Over/Under Games" }
+];
+
 function formatProb(value: number | null | undefined) {
   if (value === null || value === undefined) return "-";
   return `${(value * 100).toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
@@ -49,11 +58,17 @@ function formatTime(value: string | null | undefined) {
 }
 
 function formatOdds(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return "—";
   return value.toLocaleString("it-IT", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });
+}
+
+function formatSignedPct(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
 }
 
 function formatDateTime(value: string | null | undefined) {
@@ -134,6 +149,30 @@ function resolveValueItem(
   };
 }
 
+type ExtraMarketValue = {
+  void_odds: number | null;
+  decision: SingleMatchValueDecision | null;
+  expected_roi: number | null;
+};
+
+/** Void odds is always computable from the model probability alone; odds/edge
+ * (and therefore PLAY/BORDERLINE/NO BET + expected ROI) require a real market
+ * quote for this exact selection (only over_under_games has one so far). */
+function resolveExtraMarketValue(
+  item: ExtraMarketPrediction | undefined,
+  globalMinEdge: number
+): ExtraMarketValue {
+  if (!item) {
+    return { void_odds: null, decision: null, expected_roi: null };
+  }
+  if (item.odds == null || item.void_odds == null) {
+    return { void_odds: item.void_odds, decision: null, expected_roi: null };
+  }
+  const decision = classifySingleBetValue(item.odds, item.void_odds, globalMinEdge);
+  const expectedRoi = item.probability != null ? item.odds * item.probability - 1 : null;
+  return { void_odds: item.void_odds, decision, expected_roi: expectedRoi };
+}
+
 function PaginationControls({
   page,
   totalPages,
@@ -182,6 +221,24 @@ function modelLabel(name: string) {
   return name;
 }
 
+function extraMarketLabel(market: string) {
+  if (market === "first_set_winner") return "1° Set";
+  if (market === "over_under_games") return "O/U Games";
+  return market;
+}
+
+/** "First Player"/"Second Player" → nome giocatore reale; altre selection (es.
+ * "Over 20.5") passano invariate. Riusa winnerLabel gia' definita sopra. */
+function extraMarketSelectionLabel(
+  fixture: NextFixtureWithPrediction,
+  item: ExtraMarketPrediction
+) {
+  if (item.selection === "First Player" || item.selection === "Second Player") {
+    return winnerLabel(fixture, item.selection);
+  }
+  return item.selection;
+}
+
 export function PredictionsPage() {
   const { status: globalStatus, isRunning: globalUpdating, lastCompletedAt } = useGlobalUpdate();
   const [availableVersions, setAvailableVersions] = useState<ModelsVersionsResultsResponse["versions"]>([]);
@@ -193,6 +250,7 @@ export function PredictionsPage() {
   const [importStatus, setImportStatus] = useState<ImportStatusResponse | null>(null);
   const [statusFilter, setStatusFilter] = useState<FixtureStatusFilter>("upcoming");
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
+  const [marketTab, setMarketTab] = useState<MarketTab>("match_winner");
   const [page, setPage] = useState(1);
   const [daysBack, setDaysBack] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -227,7 +285,7 @@ export function PredictionsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, outcomeFilter, playerQuery, activeVersion]);
+  }, [statusFilter, outcomeFilter, playerQuery, activeVersion, marketTab]);
 
   const activeModels = useMemo(
     () =>
@@ -247,7 +305,10 @@ export function PredictionsPage() {
           model_version: activeVersion,
           model_name: modelName,
           status: statusFilter,
-          outcome: statusFilter === "played" ? outcomeFilter : undefined,
+          outcome:
+            statusFilter === "played" && marketTab === "match_winner"
+              ? outcomeFilter
+              : undefined,
           limit: PAGE_SIZE,
           offset,
           player: trimmedPlayer || undefined
@@ -262,7 +323,10 @@ export function PredictionsPage() {
           model_version: activeVersion,
           model_name: modelName,
           status: statusFilter,
-          outcome: statusFilter === "played" ? outcomeFilter : undefined,
+          outcome:
+            statusFilter === "played" && marketTab === "match_winner"
+              ? outcomeFilter
+              : undefined,
           limit: 200,
           offset: 0,
           player: trimmedPlayer || undefined,
@@ -292,23 +356,34 @@ export function PredictionsPage() {
     setTotalFixtures(base?.total ?? 0);
     setSingleValueByModel(values);
     setImportStatus(statusData);
-  }, [statusFilter, outcomeFilter, page, playerQuery, activeVersion, activeModels]);
+  }, [statusFilter, outcomeFilter, page, playerQuery, activeVersion, activeModels, marketTab]);
 
   const decisionCounts = useMemo(() => {
     const counts = { PLAY: 0, BORDERLINE: 0, "NO BET": 0, missing: 0 };
-    const primaryModel = modelNames[0];
-    const analysis = primaryModel ? singleValueByModel[primaryModel] : undefined;
     for (const fixture of fixtures) {
-      const prediction = primaryModel ? fixture.predictionsByModel[primaryModel] : null;
-      const value = resolveValueItem(analysis, fixture.event_key, minEdgePercent, prediction);
-      if (!value) {
+      let decision: SingleMatchValueDecision | null = null;
+      if (marketTab === "match_winner") {
+        const primaryModel = modelNames[0];
+        const analysis = primaryModel ? singleValueByModel[primaryModel] : undefined;
+        const prediction = primaryModel ? fixture.predictionsByModel[primaryModel] : null;
+        decision = resolveValueItem(
+          analysis,
+          fixture.event_key,
+          minEdgePercent,
+          prediction
+        )?.decision ?? null;
+      } else {
+        const item = fixture.extra_markets?.find((entry) => entry.market === marketTab);
+        decision = resolveExtraMarketValue(item, minEdgePercent).decision;
+      }
+      if (!decision) {
         counts.missing += 1;
         continue;
       }
-      counts[value.decision] += 1;
+      counts[decision] += 1;
     }
     return counts;
-  }, [fixtures, singleValueByModel, modelNames, minEdgePercent]);
+  }, [fixtures, singleValueByModel, modelNames, minEdgePercent, marketTab]);
 
   useEffect(() => {
     if (!catalogLoaded) {
@@ -402,8 +477,9 @@ export function PredictionsPage() {
             />
             <small>% sopra quota void (default 2). A 0% solo BORDERLINE → PLAY.</small>
             <small>
-              Pagina: PLAY {decisionCounts.PLAY} · BORDERLINE {decisionCounts.BORDERLINE} · NO BET{" "}
-              {decisionCounts["NO BET"]}
+              {marketTab === "first_set_winner"
+                ? `Pagina: PLAY ${decisionCounts.PLAY} · BORDERLINE ${decisionCounts.BORDERLINE} · NO BET ${decisionCounts["NO BET"]} · senza quota ${decisionCounts.missing}`
+                : `Pagina: PLAY ${decisionCounts.PLAY} · BORDERLINE ${decisionCounts.BORDERLINE} · NO BET ${decisionCounts["NO BET"]}`}
             </small>
           </label>
           {globalStatus ? (
@@ -415,7 +491,7 @@ export function PredictionsPage() {
         </div>
       </header>
 
-      {availableVersions.length ? (
+      {availableVersions.length > 1 ? (
         <div className="tab-list" aria-label="Versioni modello">
           {availableVersions.map((entry) => (
             <button
@@ -428,7 +504,7 @@ export function PredictionsPage() {
                 setActiveVersion(next);
               }}
             >
-              {entry.version}
+              {modelVersionLabel(entry.version)}
             </button>
           ))}
         </div>
@@ -522,7 +598,7 @@ export function PredictionsPage() {
           ))}
         </div>
 
-        {statusFilter === "played" ? (
+        {statusFilter === "played" && marketTab === "match_winner" ? (
           <div className="tab-list outcome-tabs" aria-label="Filtro esito previsione">
             {outcomeTabs.map((tab) => (
               <button
@@ -545,6 +621,39 @@ export function PredictionsPage() {
               </button>
             ))}
           </div>
+        ) : null}
+
+        <div className="tab-list" aria-label="Filtro mercato">
+          {marketTabs.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              className={marketTab === tab.value ? "active" : undefined}
+              onClick={() => {
+                setMarketTab(tab.value);
+                if (tab.value !== "match_winner") {
+                  setOutcomeFilter("all");
+                }
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {marketTab === "first_set_winner" ? (
+          <p className="note">
+            Vincitore 1° set: quota media bookmaker sul mercato Home/Away (1st Set). Edge/ROI/Valore
+            calcolati come per il vincitore partita (stesso margine di sicurezza in alto).
+            Senza quella quota la selezione resta visibile solo come probabilità (nessun PLAY).
+          </p>
+        ) : null}
+        {marketTab === "over_under_games" ? (
+          <p className="note">
+            Over/Under Games: linea 20.5, quota media bookmaker sulla selezione scelta. Edge/ROI/
+            Valore calcolati come per il vincitore partita (stesso margine di sicurezza impostato
+            in alto).
+          </p>
         ) : null}
 
         {calendarCoverageNote && statusFilter !== "played" ? (
@@ -600,7 +709,7 @@ export function PredictionsPage() {
           </div>
         </div>
 
-        {showResultDots ? (
+        {showResultDots && marketTab === "match_winner" ? (
           <p className="note result-legend">
             <span className="result-dot win" aria-hidden="true" /> Previsione corretta
             <span className="result-dot loss" aria-hidden="true" /> Previsione errata
@@ -608,9 +717,18 @@ export function PredictionsPage() {
         ) : null}
 
         <p className="note">
-          Per ogni modello: quota void e stato PLAY / BORDERLINE / NO BET in base al margine di
-          sicurezza impostato in alto nella pagina.
-          {statusFilter === "played"
+          {marketTab === "match_winner" ? (
+            <>
+              Per ogni modello: quota void e stato PLAY / BORDERLINE / NO BET in base al margine di
+              sicurezza impostato in alto nella pagina.
+            </>
+          ) : (
+            <>
+              Mercato: {extraMarketLabel(marketTab)}. Stessa logica PLAY / BORDERLINE / NO BET del
+              vincitore partita, quando la quota è disponibile.
+            </>
+          )}
+          {statusFilter === "played" && marketTab === "match_winner"
             ? " In Giocate compaiono prima le partite con pronostico salvato; senza previsione restano vuote (usa Aggiorna tutto prima che finiscano)."
             : null}
         </p>
@@ -629,102 +747,171 @@ export function PredictionsPage() {
               onNext={() => setPage((current) => Math.min(totalPages, current + 1))}
             />
 
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    {showResultDots ? <th /> : null}
-                    <th>Data</th>
-                    <th>Ora</th>
-                    <th>Torneo</th>
-                    <th>Surface</th>
-                    <th>Match</th>
-                    {modelNames.map((name) => (
-                      <th key={name} colSpan={4}>
-                        {modelLabel(name)}
-                      </th>
-                    ))}
-                    <th>Stato</th>
-                  </tr>
-                  <tr>
-                    <th colSpan={showResultDots ? 6 : 5} />
-                    {modelNames.map((name) => (
-                      <Fragment key={name}>
-                        <th>Predetto</th>
-                        <th>Conf.</th>
-                        <th>Void</th>
-                        <th>Valore</th>
-                      </Fragment>
-                    ))}
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {fixtures.map((fixture) => {
-                    const dot = resultDot(fixture, showResultDots);
-                    const hasAnyPrediction = Object.values(fixture.predictionsByModel).some(Boolean);
-                    return (
-                      <tr key={fixture.event_key}>
-                        {showResultDots ? (
-                          <td className="result-dot-cell">
-                            {dot ? (
-                              <span
-                                className={`result-dot ${dot}`}
-                                title={dot === "win" ? "Previsione corretta" : "Previsione errata"}
-                              />
-                            ) : null}
+            {marketTab === "match_winner" ? (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      {showResultDots ? <th /> : null}
+                      <th>Data</th>
+                      <th>Ora</th>
+                      <th>Torneo</th>
+                      <th>Surface</th>
+                      <th>Match</th>
+                      {modelNames.map((name) => (
+                        <th key={name} colSpan={4}>
+                          {modelLabel(name)}
+                        </th>
+                      ))}
+                      <th>Stato</th>
+                    </tr>
+                    <tr>
+                      <th colSpan={showResultDots ? 6 : 5} />
+                      {modelNames.map((name) => (
+                        <Fragment key={name}>
+                          <th>Predetto</th>
+                          <th>Conf.</th>
+                          <th>Void</th>
+                          <th>Valore</th>
+                        </Fragment>
+                      ))}
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fixtures.map((fixture) => {
+                      const dot = resultDot(fixture, showResultDots);
+                      const hasAnyPrediction = Object.values(fixture.predictionsByModel).some(Boolean);
+                      return (
+                        <tr key={fixture.event_key}>
+                          {showResultDots ? (
+                            <td className="result-dot-cell">
+                              {dot ? (
+                                <span
+                                  className={`result-dot ${dot}`}
+                                  title={dot === "win" ? "Previsione corretta" : "Previsione errata"}
+                                />
+                              ) : null}
+                            </td>
+                          ) : null}
+                          <td>{formatDate(fixture.event_date)}</td>
+                          <td>{formatTime(fixture.event_time)}</td>
+                          <td>{fixture.tournament_name ?? "-"}</td>
+                          <td>{fixture.surface ?? "-"}</td>
+                          <td>
+                            {fixture.event_first_player ?? "?"} vs{" "}
+                            {fixture.event_second_player ?? "?"}
                           </td>
-                        ) : null}
-                        <td>{formatDate(fixture.event_date)}</td>
-                        <td>{formatTime(fixture.event_time)}</td>
-                        <td>{fixture.tournament_name ?? "-"}</td>
-                        <td>{fixture.surface ?? "-"}</td>
-                        <td>
-                          {fixture.event_first_player ?? "?"} vs{" "}
-                          {fixture.event_second_player ?? "?"}
-                        </td>
-                        {modelNames.map((name) => {
-                          const prediction = fixture.predictionsByModel[name];
-                          const valueItem = resolveValueItem(
-                            singleValueByModel[name],
-                            fixture.event_key,
-                            minEdgePercent,
-                            prediction
-                          );
-                          return (
-                            <Fragment key={`${fixture.event_key}-${name}`}>
-                              <td>{winnerLabel(fixture, prediction?.predicted_winner)}</td>
-                              <td>{formatProb(prediction?.confidence)}</td>
-                              <td>{formatOdds(valueItem?.void_odds)}</td>
-                              <td>
-                                {valueItem ? (
-                                  <span
-                                    className={`value-decision-badge ${decisionClass(valueItem.decision)}`}
-                                  >
-                                    {valueItem.decision}
-                                  </span>
-                                ) : (
-                                  "-"
-                                )}
-                              </td>
-                            </Fragment>
-                          );
-                        })}
-                        <td>
-                          {fixture.match_lifecycle_label
-                            ? fixture.match_lifecycle_label
-                            : fixture.is_completed
-                              ? "Giocata"
-                              : hasAnyPrediction
-                                ? "Da giocare"
-                                : "Da generare"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          {modelNames.map((name) => {
+                            const prediction = fixture.predictionsByModel[name];
+                            const valueItem = resolveValueItem(
+                              singleValueByModel[name],
+                              fixture.event_key,
+                              minEdgePercent,
+                              prediction
+                            );
+                            return (
+                              <Fragment key={`${fixture.event_key}-${name}`}>
+                                <td>{winnerLabel(fixture, prediction?.predicted_winner)}</td>
+                                <td>{formatProb(prediction?.confidence)}</td>
+                                <td>{formatOdds(valueItem?.void_odds)}</td>
+                                <td>
+                                  {valueItem ? (
+                                    <span
+                                      className={`value-decision-badge ${decisionClass(valueItem.decision)}`}
+                                    >
+                                      {valueItem.decision}
+                                    </span>
+                                  ) : (
+                                    "-"
+                                  )}
+                                </td>
+                              </Fragment>
+                            );
+                          })}
+                          <td>
+                            {fixture.match_lifecycle_label
+                              ? fixture.match_lifecycle_label
+                              : fixture.is_completed
+                                ? "Giocata"
+                                : hasAnyPrediction
+                                  ? "Da giocare"
+                                  : "Da generare"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>Ora</th>
+                      <th>Torneo</th>
+                      <th>Surface</th>
+                      <th>Match</th>
+                      <th>Selezione</th>
+                      <th>Probabilita</th>
+                      <th>Quota</th>
+                      <th>Void</th>
+                      <th>Edge</th>
+                      <th>ROI atteso</th>
+                      <th>Valore</th>
+                      <th>Stato</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fixtures.map((fixture) => {
+                      const item = fixture.extra_markets?.find((entry) => entry.market === marketTab);
+                      const value = resolveExtraMarketValue(item, minEdgePercent);
+                      const hasSelectedPrediction = Boolean(item);
+                      return (
+                        <tr key={fixture.event_key}>
+                          <td>{formatDate(fixture.event_date)}</td>
+                          <td>{formatTime(fixture.event_time)}</td>
+                          <td>{fixture.tournament_name ?? "-"}</td>
+                          <td>{fixture.surface ?? "-"}</td>
+                          <td>
+                            {fixture.event_first_player ?? "?"} vs{" "}
+                            {fixture.event_second_player ?? "?"}
+                          </td>
+                          <td>{item ? extraMarketSelectionLabel(fixture, item) : "-"}</td>
+                          <td>{formatProb(item?.probability)}</td>
+                          <td>{formatOdds(item?.odds)}</td>
+                          <td>{formatOdds(value.void_odds)}</td>
+                          <td>{item?.edge != null ? formatSignedPct(item.edge) : "—"}</td>
+                          <td>
+                            {value.expected_roi != null ? formatSignedPct(value.expected_roi * 100) : "—"}
+                          </td>
+                          <td>
+                            {value.decision ? (
+                              <span className={`value-decision-badge ${decisionClass(value.decision)}`}>
+                                {value.decision}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td>
+                            {fixture.match_lifecycle_label
+                              ? fixture.match_lifecycle_label
+                              : fixture.is_completed
+                                ? "Giocata"
+                                : hasSelectedPrediction
+                                  ? "Da giocare"
+                                  : "Da generare"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <PaginationControls
               page={page}

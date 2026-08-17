@@ -190,12 +190,24 @@ def _command_usage(db: Session, *, week_start: date, week_end: date) -> WeeklyBe
     )
 
 
-def _live_tips(db: Session, *, week_start: date, week_end: date) -> WeeklyBetaLiveTipsMetrics:
+LIVE_TIP_MARKETS = ("match_winner", "first_set_winner", "over_under_games")
+DEFAULT_LIVE_TIP_MARKET = "match_winner"
+
+
+def _live_tips_for_market(
+    db: Session,
+    *,
+    week_start: date,
+    week_end: date,
+    market: str,
+) -> WeeklyBetaLiveTipsMetrics:
     summary = compute_published_live_stats(
         db,
         from_date=week_start,
         to_date=week_end,
         latest_only=True,
+        market=market,
+        include_archived=False,
     )
     return WeeklyBetaLiveTipsMetrics(
         predictions_published=summary.predictions_total,
@@ -210,7 +222,21 @@ def _live_tips(db: Session, *, week_start: date, week_end: date) -> WeeklyBetaLi
         roi_pct=summary.roi_pct,
         yield_pct=summary.yield_pct,
         max_drawdown=summary.max_drawdown,
+        market=market,
+        by_market=[],
     )
+
+
+def _live_tips(db: Session, *, week_start: date, week_end: date) -> WeeklyBetaLiveTipsMetrics:
+    by_market = [
+        _live_tips_for_market(db, week_start=week_start, week_end=week_end, market=market)
+        for market in LIVE_TIP_MARKETS
+    ]
+    headline = next(
+        (row for row in by_market if row.market == DEFAULT_LIVE_TIP_MARKET),
+        by_market[0],
+    )
+    return headline.model_copy(update={"by_market": by_market})
 
 
 def _pipeline_metrics(db: Session, *, week_start: date, week_end: date) -> WeeklyBetaPipelineMetrics:
@@ -406,7 +432,8 @@ def compute_weekly_beta_report_payload(
         "Settimana ISO (lunedì–domenica) in calendario Europe/Rome.",
         "Utenti attivi: last_access_at nella settimana.",
         "Retention: utenti con first_access nella settimana precedente e last_access in quella corrente.",
-        "ROI / yield / drawdown: tipbook live (published_prediction), latest version only.",
+        "ROI / yield / drawdown: tipbook live match_winner (published_prediction), "
+        "latest version only; by_market breaks out 1° set and O/U without mixing KPIs.",
     ]
     return WeeklyBetaReportPayload(
         current=current,
@@ -526,12 +553,21 @@ def format_admin_telegram_summary(payload: WeeklyBetaReportPayload) -> str:
         f"Comandi: eventi={cur.command_usage.total_events} "
         f"({_fmt_delta(wow.total_events)}), utenti unici={cur.command_usage.unique_users}",
         f"Top azioni: {top_actions}",
-        f"Pronostici pubblicati: {cur.live_tips.predictions_published} "
+        f"Pronostici pubblicati (match): {cur.live_tips.predictions_published} "
         f"({_fmt_delta(wow.predictions_published)})",
-        f"Live tipbook: ROI={roi} ({_fmt_delta(wow.roi_pct, pct=True, digits=2)}), "
+        f"Live tipbook match: ROI={roi} ({_fmt_delta(wow.roi_pct, pct=True, digits=2)}), "
         f"yield={yld} ({_fmt_delta(wow.yield_pct, pct=True, digits=2)}), "
         f"drawdown={cur.live_tips.max_drawdown:.2f} "
         f"({_fmt_delta(wow.max_drawdown, digits=2)})",
+        *[
+            (
+                f"  · {row.market}: n={row.predictions_published}, "
+                f"ROI={'n/d' if row.roi_pct is None else f'{row.roi_pct:.2f}%'}, "
+                f"hit={'n/d' if row.hit_rate_pct is None else f'{row.hit_rate_pct:.1f}%'}"
+            )
+            for row in cur.live_tips.by_market
+            if row.market != DEFAULT_LIVE_TIP_MARKET
+        ],
         f"Pipeline errori: {pipe_err} ({_fmt_delta(wow.pipeline_errors)}) "
         f"[failed={cur.pipeline.runs_failed}, with_errors={cur.pipeline.runs_completed_with_errors}, "
         f"interrupted={cur.pipeline.runs_interrupted}]",

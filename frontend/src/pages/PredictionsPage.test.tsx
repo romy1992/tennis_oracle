@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { PredictionsPage } from "./PredictionsPage";
 import { ApiError } from "../services/apiClient";
@@ -58,7 +59,7 @@ describe("PredictionsPage", () => {
     stubDefaultApi(apiMocks);
   });
 
-  it("shows loading then fixture rows with model version controls", async () => {
+  it("shows loading then fixture rows for the active v4 market", async () => {
     const pending = deferred<ReturnType<typeof makeFixturesPage>>();
     apiMocks.getUpcomingPredictions.mockReturnValue(pending.promise);
 
@@ -69,9 +70,8 @@ describe("PredictionsPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Partite" })).toBeInTheDocument();
     expect(screen.getByText(/Player A vs/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Versioni modello")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "v3" })).toHaveClass("active");
-    expect(screen.getByRole("button", { name: "v2" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Versioni modello")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vincitore partita" })).toHaveClass("active");
   });
 
   it("shows empty state when there are no fixtures", async () => {
@@ -98,7 +98,7 @@ describe("PredictionsPage", () => {
     expect(screen.getByText("backend down")).toBeInTheDocument();
   });
 
-  it("loads predictions for each available model of the active version", async () => {
+  it("loads predictions for the active v4 model", async () => {
     apiMocks.getUpcomingPredictions.mockResolvedValue(makeFixturesPage([]));
 
     renderWithProviders(<PredictionsPage />);
@@ -111,7 +111,83 @@ describe("PredictionsPage", () => {
       (call) => call[0]?.model_version
     );
     const names = apiMocks.getUpcomingPredictions.mock.calls.map((call) => call[0]?.model_name);
-    expect(versions.every((v) => v === "v3")).toBe(true);
-    expect(names).toEqual(expect.arrayContaining(["logistic_regression", "random_forest"]));
+    expect(versions.every((v) => v === "v4")).toBe(true);
+    expect(new Set(names)).toEqual(new Set(["voting_ensemble"]));
+  });
+
+  it("renders first-set fallbacks and over/under value metrics in their market tabs", async () => {
+    const user = userEvent.setup();
+    apiMocks.getUpcomingPredictions.mockResolvedValue(
+      makeFixturesPage([
+        makeFixture({
+          extra_markets: [
+            {
+              market: "first_set_winner",
+              model_version: "first_set_winner_v2",
+              model_name: "random_forest",
+              selection: "Second Player",
+              probability: 0.64,
+              odds: 1.9,
+              void_odds: 1.5625,
+              edge: 21.6,
+              published_at: "2026-07-21T09:00:00Z"
+            },
+            {
+              market: "over_under_games",
+              model_version: "over_under_games_v1",
+              model_name: "random_forest",
+              selection: "Over 20.5",
+              probability: 0.6,
+              odds: 1.8,
+              void_odds: 1.6667,
+              edge: 8,
+              published_at: "2026-07-21T09:00:00Z"
+            }
+          ]
+        })
+      ])
+    );
+
+    renderWithProviders(<PredictionsPage />);
+    await screen.findByRole("heading", { name: "Partite" });
+
+    await user.click(screen.getByRole("button", { name: "Vincitore 1° set" }));
+    expect(screen.getByText(/Pagina: PLAY 1 · BORDERLINE 0 · NO BET 0 · senza quota 0/)).toBeInTheDocument();
+    let cells = within(screen.getByRole("table")).getAllByRole("cell");
+    expect(cells[5]).toHaveTextContent("Player B");
+    expect(cells[6]).toHaveTextContent("64%");
+    expect(cells[7]).toHaveTextContent("1,90");
+    expect(cells[8]).toHaveTextContent("1,56");
+    expect(cells[9]).toHaveTextContent("+21,6%");
+    expect(cells[11]).toHaveTextContent("PLAY");
+
+    await user.click(screen.getByRole("button", { name: "Over/Under Games" }));
+    cells = within(screen.getByRole("table")).getAllByRole("cell");
+    expect(cells[5]).toHaveTextContent("Over 20.5");
+    expect(cells[7]).toHaveTextContent("1,80");
+    expect(cells[8]).toHaveTextContent("1,67");
+    expect(cells[9]).toHaveTextContent("+8%");
+    expect(cells[10]).toHaveTextContent("+8%");
+    expect(cells[11]).toHaveTextContent("PLAY");
+    expect(screen.getByText(/Pagina: PLAY 1 · BORDERLINE 0 · NO BET 0/)).toBeInTheDocument();
+  });
+
+  it("does not reuse match-winner outcome filters or result legend on extra markets", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PredictionsPage />);
+    await screen.findByRole("heading", { name: "Partite" });
+
+    await user.click(screen.getByRole("button", { name: "Giocate" }));
+    expect(await screen.findByLabelText("Filtro esito previsione")).toBeInTheDocument();
+    expect(document.querySelector(".result-legend")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Vincitore 1° set" }));
+    expect(screen.queryByLabelText("Filtro esito previsione")).not.toBeInTheDocument();
+    expect(document.querySelector(".result-legend")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(apiMocks.getUpcomingPredictions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "played", outcome: undefined })
+      );
+    });
   });
 });

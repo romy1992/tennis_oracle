@@ -27,6 +27,7 @@ from backend.src.app.services.telegram_command_authorization import (
     COMMAND_NOTIFICHE,
     COMMAND_PARTITE,
     COMMAND_PIANO,
+    COMMAND_SCALATE,
     COMMAND_SCHEDINE,
     COMMAND_STATISTICHE,
 )
@@ -78,6 +79,7 @@ from .messages import (
     FEEDBACK_SAVE_FAILED_TEXT,
     FEEDBACK_START_TEXT,
     LOADING_PARTITE,
+    LOADING_SCALATE,
     LOADING_SCHEDINE,
     LOADING_STATISTICHE,
     account_status_label,
@@ -87,6 +89,7 @@ from .messages import (
     format_betting_slip_text,
     format_betting_slips,
     format_betting_slips_intro,
+    filter_slips_by_kind,
     format_bot_stats_empty,
     format_bot_stats_intro,
     format_bot_stats_text,
@@ -105,7 +108,7 @@ from .messages import (
     format_user_error,
     split_message,
 )
-from .fixture_value import enrich_fixtures_with_value
+from .fixture_value import enrich_fixtures_with_value, expand_fixtures_by_market
 from .public_labels import (
     accuracy_by_model_name,
     build_public_labels,
@@ -119,6 +122,7 @@ logger = logging.getLogger(__name__)
 
 MENU_PARTITE = "menu:partite"
 MENU_SCHEDINE = "menu:schedine"
+MENU_SCALATE = "menu:scalate"
 MENU_STATISTICHE = "menu:statistiche"
 MENU_HELP = "menu:help"
 
@@ -152,6 +156,7 @@ def main_menu_keyboard(*, flags: dict[str, bool] | None = None) -> InlineKeyboar
         first_row.append(InlineKeyboardButton("Partite", callback_data=MENU_PARTITE))
     if _flag_enabled(active, FEATURE_TELEGRAM_SLIPS):
         first_row.append(InlineKeyboardButton("Schedine", callback_data=MENU_SCHEDINE))
+        first_row.append(InlineKeyboardButton("Scalate", callback_data=MENU_SCALATE))
     if first_row:
         rows.append(first_row)
 
@@ -174,6 +179,7 @@ def _public_bot_commands(*, flags: dict[str, bool]) -> list[BotCommand]:
         commands.append(BotCommand("partite", "partite di oggi"))
     if _flag_enabled(flags, FEATURE_TELEGRAM_SLIPS):
         commands.append(BotCommand("schedine", "schedine di oggi"))
+        commands.append(BotCommand("scalate", "scalate di oggi"))
     if _flag_enabled(flags, FEATURE_TELEGRAM_STATISTICS):
         commands.append(BotCommand("statistiche", "andamento"))
     if _flag_enabled(flags, FEATURE_TELEGRAM_NOTIFICATIONS):
@@ -978,6 +984,13 @@ async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @rate_limited(expensive=True)
+@tracked(action="/scalate", event_type="command")
+@require_command_access(command_key=COMMAND_SCALATE)
+async def scalate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _run_with_loading(update, LOADING_SCALATE, _scalate_body, context)
+
+
+@rate_limited(expensive=True)
 @tracked(action="/partite", event_type="command")
 @require_command_access(command_key=COMMAND_PARTITE)
 async def partite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1024,6 +1037,44 @@ async def _schedine_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         public_labels=public_labels,
         last_updated=last_updated,
         feedback_url=settings.telegram_feedback_url,
+        slip_kind="parlay",
+    )
+
+
+async def _scalate_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    target_date = today_rome()
+    settings = _settings(context)
+    api = _api(context)
+    try:
+        model_version, model_name = await _resolve_active_public_model(context)
+        versions_payload = await api.models_versions_results(target_date=target_date)
+        last_updated = versions_payload.get("last_updated_at")
+        payload = await api.daily_betting_slips(
+            slip_date=target_date,
+            model_version=model_version,
+            model_name=model_name,
+            stake=settings.telegram_default_stake,
+            slip_count=settings.telegram_slip_count,
+            min_edge_percent=settings.telegram_min_edge_percent,
+        )
+    except BackendApiError as exc:
+        await _reply(update, format_user_error(exc.message))
+        return
+
+    public_labels = await _public_labels_for_models(
+        api,
+        model_version=model_version,
+        model_names=[model_name],
+    )
+    await _reply_betting_slips(
+        update,
+        [payload],
+        min_edge_percent=settings.telegram_min_edge_percent,
+        slip_date=str(target_date),
+        public_labels=public_labels,
+        last_updated=last_updated,
+        feedback_url=settings.telegram_feedback_url,
+        slip_kind="ladder",
     )
 
 
@@ -1062,7 +1113,11 @@ async def _partite_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             min_edge_percent=settings.telegram_min_edge_percent,
             smva_items=smva_items,
         )
-        model_items = [(model_name, enriched)]
+        expanded = expand_fixtures_by_market(
+            enriched,
+            min_edge_percent=settings.telegram_min_edge_percent,
+        )
+        model_items = [(model_name, expanded)]
     except BackendApiError as exc:
         await _reply(update, format_user_error(exc.message))
         return
@@ -1223,6 +1278,7 @@ async def _reply_betting_slips(
     public_labels: dict[str, str] | None = None,
     last_updated: Any = None,
     feedback_url: str | None = None,
+    slip_kind: str = "parlay",
 ) -> None:
     message = _effective_message(update)
     if message is None:
@@ -1231,6 +1287,7 @@ async def _reply_betting_slips(
     if isinstance(payloads, dict):
         payloads = [payloads]
 
+    payloads = [filter_slips_by_kind(payload, slip_kind=slip_kind) for payload in payloads]
     non_empty = [payload for payload in payloads if payload.get("slips")]
     if not non_empty:
         empty_payload = payloads[0] if payloads else {"date": slip_date, "slips": []}
@@ -1241,6 +1298,7 @@ async def _reply_betting_slips(
                 min_edge_percent=min_edge_percent,
                 last_updated=last_updated,
                 feedback_url=feedback_url,
+                slip_kind=slip_kind,
             ),
         )
         return
@@ -1255,6 +1313,7 @@ async def _reply_betting_slips(
             min_edge_percent=min_edge_percent,
             last_updated=last_updated,
             feedback_url=feedback_url,
+            slip_kind=slip_kind,
         ),
     )
 
@@ -1499,6 +1558,7 @@ def build_application(settings: TelegramSettings | None = None) -> Application:
     # ConversationHandler must be registered before the catch-all message handler.
     application.add_handler(build_feedback_conversation())
     application.add_handler(CommandHandler("schedine", schedine))
+    application.add_handler(CommandHandler("scalate", scalate))
     application.add_handler(CommandHandler("partite", partite))
     application.add_handler(CommandHandler("statistiche", statistiche))
     # Inline menu buttons reuse the same guarded handlers as slash commands.
@@ -1507,6 +1567,9 @@ def build_application(settings: TelegramSettings | None = None) -> Application:
     )
     application.add_handler(
         CallbackQueryHandler(_with_callback_answer(schedine), pattern=rf"^{MENU_SCHEDINE}$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(_with_callback_answer(scalate), pattern=rf"^{MENU_SCALATE}$")
     )
     application.add_handler(
         CallbackQueryHandler(

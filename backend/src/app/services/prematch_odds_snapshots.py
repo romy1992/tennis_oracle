@@ -28,6 +28,13 @@ from backend.src.app.ml.datasets.odds_builder import (
     implied_probability,
     match_winner_rows_from_record,
 )
+from backend.src.app.ml.datasets.first_set_winner_odds_builder import (
+    first_set_winner_rows_from_record,
+)
+from backend.src.app.ml.datasets.over_under_games_odds_builder import (
+    DEFAULT_LINE as OVER_UNDER_GAMES_DEFAULT_LINE,
+    over_under_games_rows_from_record,
+)
 from backend.src.app.schemas.prematch_odds_snapshot import (
     PrematchOddsSnapshotCreate,
     PrematchOddsSnapshotFromPayload,
@@ -80,10 +87,14 @@ def compute_detection_hash(
     snapshot_type: str,
     source: str,
     captured_at: datetime,
+    market: str = "match_winner",
+    market_line: float | None = None,
 ) -> str:
     """Fingerprint of one detection; identical detections must share this hash."""
     payload = {
         "event_key": event_key,
+        "market": market,
+        "market_line": market_line,
         "selection": selection.strip(),
         "bookmaker": bookmaker.strip(),
         "odds": round(float(odds), ODDS_ROUND),
@@ -107,11 +118,17 @@ def _latest_odds_for_selection(
     event_key: int,
     selection: str,
     bookmaker: str,
+    market: str = "match_winner",
+    market_line: float | None = None,
 ) -> float | None:
     row = db.scalar(
         select(PrematchOddsSnapshot)
         .where(
             PrematchOddsSnapshot.event_key == event_key,
+            PrematchOddsSnapshot.market == market,
+            PrematchOddsSnapshot.market_line.is_(None)
+            if market_line is None
+            else PrematchOddsSnapshot.market_line == market_line,
             PrematchOddsSnapshot.selection == selection,
             PrematchOddsSnapshot.bookmaker == bookmaker,
         )
@@ -130,12 +147,18 @@ def _has_any_snapshot(
     event_key: int,
     selection: str,
     bookmaker: str,
+    market: str = "match_winner",
+    market_line: float | None = None,
 ) -> bool:
     return (
         db.scalar(
             select(PrematchOddsSnapshot.id)
             .where(
                 PrematchOddsSnapshot.event_key == event_key,
+                PrematchOddsSnapshot.market == market,
+                PrematchOddsSnapshot.market_line.is_(None)
+                if market_line is None
+                else PrematchOddsSnapshot.market_line == market_line,
                 PrematchOddsSnapshot.selection == selection,
                 PrematchOddsSnapshot.bookmaker == bookmaker,
             )
@@ -152,10 +175,19 @@ def resolve_snapshot_type(
     selection: str,
     bookmaker: str,
     requested: SnapshotTypeOrAuto,
+    market: str = "match_winner",
+    market_line: float | None = None,
 ) -> SnapshotType:
     if requested != "auto":
         return requested
-    if _has_any_snapshot(db, event_key=event_key, selection=selection, bookmaker=bookmaker):
+    if _has_any_snapshot(
+        db,
+        event_key=event_key,
+        selection=selection,
+        bookmaker=bookmaker,
+        market=market,
+        market_line=market_line,
+    ):
         return "observed"
     return "opening"
 
@@ -172,6 +204,8 @@ def _should_skip_unchanged(
     bookmaker: str,
     odds: float,
     snapshot_type: SnapshotType,
+    market: str = "match_winner",
+    market_line: float | None = None,
 ) -> bool:
     """Skip observed/opening when the latest stored odds for the selection are unchanged.
 
@@ -179,7 +213,12 @@ def _should_skip_unchanged(
     A second ``opening`` for the same bookmaker/selection is always skipped.
     """
     if snapshot_type == "opening" and _has_any_snapshot(
-        db, event_key=event_key, selection=selection, bookmaker=bookmaker
+        db,
+        event_key=event_key,
+        selection=selection,
+        bookmaker=bookmaker,
+        market=market,
+        market_line=market_line,
     ):
         return True
 
@@ -187,7 +226,12 @@ def _should_skip_unchanged(
         return False
 
     latest = _latest_odds_for_selection(
-        db, event_key=event_key, selection=selection, bookmaker=bookmaker
+        db,
+        event_key=event_key,
+        selection=selection,
+        bookmaker=bookmaker,
+        market=market,
+        market_line=market_line,
     )
     if latest is None:
         return False
@@ -212,6 +256,8 @@ def record_snapshot(
 
     selection = payload.selection.strip()
     bookmaker = payload.bookmaker.strip()
+    market = payload.market.strip()
+    market_line = payload.market_line
     snapshot_type = payload.snapshot_type
 
     if _should_skip_unchanged(
@@ -221,6 +267,8 @@ def record_snapshot(
         bookmaker=bookmaker,
         odds=odd,
         snapshot_type=snapshot_type,
+        market=market,
+        market_line=market_line,
     ):
         return None
 
@@ -242,6 +290,8 @@ def record_snapshot(
         snapshot_type=snapshot_type,
         source=payload.source,
         captured_at=when,
+        market=market,
+        market_line=market_line,
     )
     existing = db.scalar(
         select(PrematchOddsSnapshot).where(
@@ -253,6 +303,8 @@ def record_snapshot(
 
     row = PrematchOddsSnapshot(
         event_key=payload.event_key,
+        market=market,
+        market_line=market_line,
         selection=selection,
         bookmaker=bookmaker,
         odds=round(odd, ODDS_ROUND),
@@ -358,11 +410,13 @@ def record_odds_payload(
                 selection=selection,
                 bookmaker=bookmaker,
                 requested=payload.snapshot_type,
+                market="match_winner",
             )
             created = record_snapshot(
                 db,
                 PrematchOddsSnapshotCreate(
                     event_key=payload.event_key,
+                    market="match_winner",
                     selection=selection,
                     bookmaker=bookmaker,
                     odds=odd,
@@ -372,6 +426,117 @@ def record_odds_payload(
                     snapshot_type=snapshot_type,
                     captured_at=when,
                     market_side=market_side,
+                    player_1_name=payload.player_1_name,
+                    player_2_name=payload.player_2_name,
+                ),
+                commit=False,
+            )
+            if created is None:
+                skipped += 1
+            else:
+                inserted_items.append(created)
+
+    # Dedicated 1st-set winner market. Selection labels match the published
+    # extra-market tip ("First Player"/"Second Player") so CLV can pair them
+    # without colliding with match-winner player-name selections.
+    for market_row in first_set_winner_rows_from_record(record):
+        bookmaker = str(market_row["bookmaker"])
+        margin = round(float(market_row["bookmaker_margin"]), MARGIN_ROUND)
+        sides: list[tuple[str, str, float, float]] = [
+            (
+                HOME_SELECTION,
+                "First Player",
+                float(market_row["player_1_odds"]),
+                float(market_row["implied_prob_player_1_raw"]),
+            ),
+            (
+                AWAY_SELECTION,
+                "Second Player",
+                float(market_row["player_2_odds"]),
+                float(market_row["implied_prob_player_2_raw"]),
+            ),
+        ]
+        for market_side, selection, odd, implied_raw in sides:
+            snapshot_type = resolve_snapshot_type(
+                db,
+                event_key=payload.event_key,
+                selection=selection,
+                bookmaker=bookmaker,
+                requested=payload.snapshot_type,
+                market="first_set_winner",
+            )
+            created = record_snapshot(
+                db,
+                PrematchOddsSnapshotCreate(
+                    event_key=payload.event_key,
+                    market="first_set_winner",
+                    selection=selection,
+                    bookmaker=bookmaker,
+                    odds=odd,
+                    implied_probability=implied_raw,
+                    margin=margin,
+                    source=payload.source,
+                    snapshot_type=snapshot_type,
+                    captured_at=when,
+                    market_side=market_side,
+                    player_1_name=payload.player_1_name,
+                    player_2_name=payload.player_2_name,
+                ),
+                commit=False,
+            )
+            if created is None:
+                skipped += 1
+            else:
+                inserted_items.append(created)
+
+    # The provider payload also contains a dedicated O/U-by-games market. Keep
+    # it in the same append-only ledger, but with an explicit market + line so
+    # it can never be paired with match-winner or first-set prices by CLV.
+    for market_row in over_under_games_rows_from_record(
+        record,
+        line=OVER_UNDER_GAMES_DEFAULT_LINE,
+    ):
+        bookmaker = str(market_row["bookmaker"])
+        line = float(market_row["line"])
+        margin = round(float(market_row["bookmaker_margin"]), MARGIN_ROUND)
+        sides: list[tuple[str, float, float]] = [
+            (
+                "Over",
+                float(market_row["over_odds"]),
+                float(market_row["implied_prob_over_raw"]),
+            ),
+            (
+                "Under",
+                float(market_row["under_odds"]),
+                float(market_row["implied_prob_under_raw"]),
+            ),
+        ]
+        for side, odd, implied_raw in sides:
+            selection = f"{side} {line:g}"
+            snapshot_type = resolve_snapshot_type(
+                db,
+                event_key=payload.event_key,
+                selection=selection,
+                bookmaker=bookmaker,
+                requested=payload.snapshot_type,
+                market="over_under_games",
+                market_line=line,
+            )
+            created = record_snapshot(
+                db,
+                PrematchOddsSnapshotCreate(
+                    event_key=payload.event_key,
+                    market="over_under_games",
+                    market_line=line,
+                    selection=selection,
+                    bookmaker=bookmaker,
+                    odds=odd,
+                    implied_probability=implied_raw,
+                    margin=margin,
+                    source=payload.source,
+                    snapshot_type=snapshot_type,
+                    captured_at=when,
+                    market_side=side,
                     player_1_name=payload.player_1_name,
                     player_2_name=payload.player_2_name,
                 ),
@@ -607,21 +772,25 @@ def seal_closing_from_last_prematch(
         ).all()
     )
 
-    latest_by_key: dict[tuple[str, str], PrematchOddsSnapshot] = {}
+    latest_by_key: dict[tuple[str, float | None, str, str], PrematchOddsSnapshot] = {}
     for row in rows:
         if kickoff is not None and _as_utc_naive(row.captured_at) > kickoff:
             continue
-        key = (row.selection, row.bookmaker)
+        key = (row.market, row.market_line, row.selection, row.bookmaker)
         if key not in latest_by_key:
             latest_by_key[key] = row
 
     inserted_items: list[PrematchOddsSnapshotRead] = []
     skipped = 0
-    for (selection, bookmaker), source_row in latest_by_key.items():
+    for (market, market_line, selection, bookmaker), source_row in latest_by_key.items():
         already = db.scalar(
             select(PrematchOddsSnapshot.id)
             .where(
                 PrematchOddsSnapshot.event_key == event_key,
+                PrematchOddsSnapshot.market == market,
+                PrematchOddsSnapshot.market_line.is_(None)
+                if market_line is None
+                else PrematchOddsSnapshot.market_line == market_line,
                 PrematchOddsSnapshot.selection == selection,
                 PrematchOddsSnapshot.bookmaker == bookmaker,
                 PrematchOddsSnapshot.snapshot_type == "closing",
@@ -635,6 +804,8 @@ def seal_closing_from_last_prematch(
             db,
             PrematchOddsSnapshotCreate(
                 event_key=event_key,
+                market=market,
+                market_line=market_line,
                 selection=selection,
                 bookmaker=bookmaker,
                 odds=float(source_row.odds),

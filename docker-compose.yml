@@ -138,6 +138,8 @@ services:
     volumes: *backend-credential-mounts
     working_dir: /app
     command: ["python", "-m", "backend.src.app.telegram.bot"]
+    healthcheck:
+      disable: true
     depends_on:
       api:
         condition: service_healthy

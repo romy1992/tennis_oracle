@@ -363,5 +363,14 @@ class CalibrationArtifactResilienceTest(unittest.TestCase):
         self.assertIsNone(path)
 
 
+class ResolveVersionsDefaultTests(unittest.TestCase):
+    def test_service_default_is_active_match_winner_only(self) -> None:
+        from backend.src.app.ml.model_versioning import ACTIVE_MATCH_WINNER_VERSIONS
+        from backend.src.app.services.calibration import resolve_versions
+
+        self.assertEqual(resolve_versions(None), tuple(sorted(ACTIVE_MATCH_WINNER_VERSIONS)))
+        self.assertEqual(resolve_versions(None), ("v4",))
+
+
 if __name__ == "__main__":
     unittest.main()

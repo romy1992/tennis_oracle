@@ -39,22 +39,23 @@ Nel menu laterale trovi:
 
 | Voce | A cosa serve |
 |------|----------------|
-| **Dashboard beta live** | Panoramica operativa LIVE: stato pipeline, tip pubblicati oggi, aperti/chiusi, KPI e drawdown, utilizzo bot, errori recenti e completezza dati. Filtri per periodo, modello, torneo, superficie e fascia di quota. Le metriche di training/backtest restano in sezioni separate |
+| **Dashboard live** | Panoramica operativa LIVE sui tre mercati (vincitore partita, 1° set, over/under games): stato pipeline, tip pubblicati, hit rate di tutti i pronostici e ROI solo dei PLAY ufficiali. Filtri per periodo, torneo, superficie e fascia di quota. Le metriche di training/backtest restano in sezioni separate |
 | **Partite** | Elenco partite con pronostico, quota void e stato valore (PLAY / BORDERLINE / NO BET) e stato partita (da giocare, rinviata, annullata, …) |
-| **Consiglio schedina** | Fino a 9 schedine per giorno a difficoltà crescente: 3 solo Play, 3 Play+Borderline, 3 miste |
-| **Statistiche schedine** | Confronto risultati delle schedine tra modelli/versioni |
-| **Statistiche previsioni** | Accuratezza e metriche delle previsioni operative nel tempo (non il registro pubblicazioni) |
-| **Walk-forward** | Validazione temporale multi-periodo (expanding/rolling) su tutti i modelli/versioni: fold, metriche, copertura, fold saltati e possibili segnali di leakage. Include benchmark ufficiali confrontabili (favorito mercato, mercato no-vig, ranking ATP, Elo, logistic regression, random forest) su stesso campione e stesse regole; se i campioni non coincidono la pagina mostra warning espliciti con dettaglio righe escluse. La tabella fold è paginata per **versione** e per **giorno test** per rendere leggibili run lunghe. Durante l'esecuzione compare una barra di avanzamento con fase corrente e pulsante **Annulla**; run interrotte da restart del backend vengono chiuse automaticamente all'avvio. Separata dalle metriche live; non cambia il modello pubblico |
-| **Calibrazione** | Verifica se le probabilità del modello corrispondono alle frequenze osservate (reliability curve, ECE/MCE, Brier, log loss). Confronto grezzo vs Platt scaling vs isotonic regression su dati out-of-sample del walk-forward. Barra di avanzamento e **Annulla** come per walk-forward. Non attiva automaticamente la calibrazione sulle previsioni live |
-| **Fasce probabilità** | Analisi per fasce di probabilità o edge: hit rate, gap di calibrazione, quota/edge medi, profitto, ROI/yield e intervallo di confidenza. Scegli sorgente **Live** (tip pubblicati), **Walk-forward** o **Backtest** (dati OOS offline). Filtri per modello, versione, periodo; confronto probabilità grezza vs calibrata; le fasce con pochi pronostici sono evidenziate |
-| **ROI per segmento** | Prestazioni per segmento (superficie, torneo, circuito, livello, turno, favorito/sfavorito, fascia quota, bookmaker, modello, versione, periodo): hit rate, ROI, yield, drawdown e intervalli di confidenza. Sorgente Live, Walk-forward o Backtest; soglia minima campione configurabile; segmenti con pochi pronostici evidenziati |
-| **Storico pubblicazioni** | Registro immutabile dei pronostici pubblicati (versione, hash, fonte); dopo l’inizio partita non si modifica, le correzioni creano una nuova versione |
-| **Statistiche live** | Performance dei tip pubblicati: hit rate, stake, profitto, ROI/yield, drawdown, serie e distribuzioni. Solo registro immutabile; non confondere con training o backtest |
+| **Consiglio schedina** | Fino a 10 schedine/giorno: Play · Doppia (2 pick), poi 3 Play, 3 Play+Borderline, 3 miste |
+| **Statistiche previsioni** | Prestazioni per mercato (tab Match / 1° set / O/U) |
+| **Statistiche schedine** | Hit rate pick per mercato + esito delle schedine |
+| **Report aggiornamento** | Esito “Aggiorna tutto”: mercati aggiornati (non versioni v*) |
+| **Fasce probabilità** | Analisi per fasce di probabilità o edge: in Live usa i tab mercato (Match / 1° set / O/U); Walk-forward/Backtest restano sul Vincitore partita |
+| **ROI per segmento** | Prestazioni per segmento con tab mercato in sorgente Live; OOS solo match-winner |
+| **Walk-forward** | Validazione temporale multi-periodo sul **Vincitore partita** (modello live; archivio opzionale). Separata dalle metriche live |
+| **Calibrazione** | Calibrazione probabilità OOS del Vincitore partita. Non attiva automaticamente la calibrazione sulle previsioni live |
+| **Storico pubblicazioni** | Registro immutabile dei tip pubblicati per mercato (Match / 1° set / O/U): hash, fonte, versioni; dopo l’inizio partita non si modifica, le correzioni creano una nuova versione |
+| **Statistiche live** | Performance dei tip pubblicati per mercato: hit rate, stake, profitto, ROI/yield, drawdown, serie e distribuzioni. Solo registro immutabile; non confondere con training o backtest |
 | **Report aggiornamento** | Esito dell’ultima run “Aggiorna tutto”: errori, warning, fasi e combo modello |
 | **Bot Telegram** | Solo admin: accessi e comandi usati sul bot (KPI, filtri per data/utente/comando, breakdown giornaliero, storico) |
 | **Utenti beta Telegram** | Solo admin: whitelist utenti del bot (ricerca, invito, attivazione, sospensione, blocco; stato termini, origine invito e preferenze notifiche) |
 | **Feedback Telegram** | Solo admin: inbox dei feedback inviati dal bot (categoria, voto, messaggio; stati new / reviewing / resolved / rejected) |
-| **Report settimanale beta** | Solo admin: snapshot KPI della settimana (utenti, retention, comandi, tip live, ROI/drawdown, errori pipeline, notifiche fallite, feedback) con confronto rispetto alla settimana precedente; generazione manuale o job del lunedì |
+| **Report settimanale beta** | Solo admin: snapshot KPI della settimana (utenti, bot, tip live match-winner + breakdown mercati, ROI/drawdown, pipeline, notifiche, feedback) con confronto WoW |
 
 In alto nella sidebar c’è anche il controllo **Aggiornamento globale**: importa partite, genera previsioni per tutti i modelli disponibili e aggiorna le schedine. Se compaiono errori (es. “4 errori”), il conteggio è cliccabile e apre **Report aggiornamento**.
 
@@ -62,17 +63,14 @@ In alto nella sidebar c’è anche il controllo **Aggiornamento globale**: impor
 
 ### Come scegliere modello e versione
 
-Nelle pagine puoi scegliere:
-
-- **Versione modello**: `v1`, `v2`, `v3` (default in interfaccia e bot: **v3**); la scelta resta salvata nel browser
-- **Tipo modello**: regressione logistica o random forest
+Nelle pagine **operative/backtest** puoi ancora filtrare versioni storiche (v1–v4). In LIVE si sceglie il **mercato** (Match / 1° set / O/U), non il modello: il match-winner attivo è **v4** (ensemble).
 
 In sintesi:
 
-- **v1 / v2**: il modello **non usa le quote** per predire; le quote servono dopo per edge e value bet
-- **v3**: modello **consapevole delle quote** (solo partite con quote disponibili)
+- **v1 / v2** (archiviate): non usano le quote per predire
+- **v3 / v4**: consapevoli delle quote; **v4** è l’unico match-winner attivo in produzione
 
-Nota: il job giornaliero da riga di comando, se non specifichi altrimenti, usa ancora **v2**. L’**aggiornamento globale** dalla UI aggiorna invece tutte le combo modello presenti su disco.
+L’**aggiornamento globale** aggiorna le combo attive (v4 + mercati extra).
 
 ### Margine di sicurezza e stati valore
 
@@ -112,9 +110,9 @@ La **quota void** (break-even del modello) non cambia con lo stato partita: è s
 
 Guida dettagliata (filtri, distribuzioni, interpretazione ROI): [GUIDA_DASHBOARD.md](GUIDA_DASHBOARD.md) (sezione *Statistiche live*).
 
-La pagina **Statistiche live** misura solo i tip salvati nello storico pubblicazioni (non le previsioni operative, non le schedine, non i report di training).
+La pagina **Statistiche live** misura solo i tip salvati nello storico pubblicazioni (non le previsioni operative, non le schedine, non i report di training). Scegli un mercato alla volta con i tab in alto: le metriche di Match, 1° set e Over/Under non vengono mischiate.
 
-La **Dashboard beta live** riunisce in un’unica vista lo stato della pipeline, i tip di oggi, aperti/chiusi, gli stessi KPI live (incluso drawdown), l’uso del bot, gli errori recenti e indicatori di completezza dati. Se il registro è vuoto, mostra una diagnosi operativa (pubblicazione disabilitata, modello pubblico non configurato, pipeline mai eseguita, nessuna giocata qualificata, errori di pubblicazione). Nel menu e in pagina le aree **LIVE** e **BACKTEST** restano distinte.
+La **Dashboard live** riunisce in un’unica vista lo stato della pipeline, i tip di oggi, aperti/chiusi, hit rate e KPI finanziari, l’uso essenziale del bot, gli errori recenti e indicatori di completezza dati. I mercati restano separati: Vincitore partita, Vincitore 1° set e Over/Under Games. Per ogni mercato distingui **tutti i pronostici pubblicati** (accuratezza) dai **PLAY ufficiali** (profitto/ROI, solo con quota reale). Il Primo set usa le quote `Home/Away (1st Set)` per void/edge/ROI/CLV, come gli altri mercati. Se il registro è vuoto, compare una diagnosi operativa (pubblicazione disabilitata, modello pubblico non configurato, pipeline mai eseguita, nessuna giocata qualificata, errori di pubblicazione). Nel menu e in pagina le aree **LIVE** e **BACKTEST** restano distinte.
 
 Le pubblicazioni automatiche nel registro live avvengono solo per la combinazione modello/versione configurata come pubblica e solo per giocate con decisione **PLAY** (stessi criteri value delle schedine). Di default la scrittura automatica è disabilitata.
 
@@ -141,15 +139,22 @@ Regole sulle schedine:
 
 Guida dettagliata (calendario, profili, colonne pick, rigenerazione): [GUIDA_DASHBOARD.md](GUIDA_DASHBOARD.md) (sezione *Consiglio schedina*).
 
-Alla generazione/rigenerazione compaiono tipicamente **9 schedine**:
+Alla generazione/rigenerazione compaiono tipicamente **10 schedine**:
 
-- **3 Play** — solo pick classificate PLAY
+- **1 Play · Doppia** — solo PLAY, 2 pick (ordinati per score; profilo corto dal replay storico)
+- **3 Play** — solo pick classificate PLAY (4–5 gambe)
 - **3 Play+Border** — mix di PLAY e BORDERLINE
 - **3 Miste** — possono includere anche NO BET (più aggressive / rischiose)
 
-Dentro ogni gruppo ci sono varianti (sicura / bilanciata / value). Se i candidati del giorno non bastano, alcune schedine possono mancare o avere meno pick: controlla i messaggi di avviso in pagina.
+Dentro i gruppi lunghi ci sono varianti (sicura / bilanciata / value). Se i candidati del giorno non bastano, alcune schedine possono mancare o avere meno pick: controlla i messaggi di avviso in pagina.
 
-Usa i tab in alto (versione e modello) per passare da un modello all’altro: vedi una sola lista di schedine alla volta, non entrambe insieme.
+Alla generazione (o dopo un aggiornamento che ha già lo stato aggiornato) **non entrano** partite annullate, rinviate, abbandonate, con esito mancante/errore, né già iniziate: restano fuori dal pool candidati. Se una partita era già in schedina e poi viene annullata, il pick diventa **Annullato** (come sopra).
+
+Nella stessa pagina, tab **Scalate**: sequenze di 3–4 step singoli (PLAY o PLAY+Border). La puntata iniziale si reinveste step per step in ordine di orario; alla prima persa la catena si interrompe. Le statistiche (giorno/overall e pagina Statistiche schedine) separano **Schedine** e **Scalate**.
+
+Le schedine mescolano mercati diversi (vincitore partita, vincitore 1° set e over/under) anche sulla stessa partita. Il modello Match Winner attivo è selezionato automaticamente; non compare un selettore tecnico in pagina.
+
+Su ogni scheda puoi **copiare** il testo o **scaricare l’immagine** PNG (come sul bot). In alto, **Scarica immagini** scarica in ZIP tutte le schedine del giorno selezionato.
 
 ### Aggiornamento globale
 
@@ -157,8 +162,10 @@ Il pulsante di aggiornamento globale (se disponibile) fa in sequenza:
 
 1. Import delle partite giocate recenti
 2. Import delle prossime partite
-3. Generazione previsioni per ogni combinazione modello/versione presente su disco
-4. Generazione/aggiornamento delle schedine
+3. Generazione pronostici extra (primo set e over/under)
+4. Generazione pronostici Match Winner per i modelli attivi (`v4`)
+5. Generazione/aggiornamento delle schedine multi-mercato
+6. Pubblicazione dei PLAY ufficiali, se abilitata
 
 Puoi anche **annullare** un aggiornamento in corso. Se è già in esecuzione un altro aggiornamento, di solito ne viene accettato solo uno alla volta.
 
@@ -248,11 +255,11 @@ cd backend
 python -m src.app.telegram.bot
 ```
 
-Comandi attivi: `/start`, `/help`, `/accetta_condizioni`, `/notifiche`, `/feedback`, `/piano`, `/abbonati`, `/gestisci_abbonamento`, `/schedine`, `/partite`, `/statistiche`.
+Comandi attivi: `/start`, `/help`, `/accetta_condizioni`, `/notifiche`, `/feedback`, `/piano`, `/abbonati`, `/gestisci_abbonamento`, `/schedine`, `/scalate`, `/partite`, `/statistiche`.
 
-Al primo `/start` l’utente viene registrato (con `chat_id` per eventuali notifiche push) e riceve un **menu a pulsanti** (Partite, Schedine, Statistiche, Aiuto). Con whitelist attiva (default) resta in attesa finché un admin non lo **attiva** dalla pagina **Utenti beta Telegram**. Se sono richieste le condizioni d’uso, l’utente deve inviare `/accetta_condizioni` prima di usare i comandi autorizzati. Il controllo accessi del bot e centralizzato: per ogni comando con gate verifica utente, stato account, piano, abbonamento attivo (inclusi prova/scadenza) ed entitlement.
+Al primo `/start` l’utente viene registrato (con `chat_id` per eventuali notifiche push) e riceve un **menu a pulsanti** (Partite, Schedine, Scalate, Statistiche, Aiuto). Con whitelist attiva (default) resta in attesa finché un admin non lo **attiva** dalla pagina **Utenti beta Telegram**. Se sono richieste le condizioni d’uso, l’utente deve inviare `/accetta_condizioni` prima di usare i comandi autorizzati. Il controllo accessi del bot e centralizzato: per ogni comando con gate verifica utente, stato account, piano, abbonamento attivo (inclusi prova/scadenza) ed entitlement.
 
-I comandi sono classificati in `free` e `premium`: `/help`, `/notifiche`, `/feedback`, `/piano`, `/abbonati` e `/gestisci_abbonamento` sono free (sempre soggetti allo stato account), mentre `/schedine`, `/partite` e `/statistiche` sono premium. Se il piano non include un comando premium (o prova/abbonamento non e attivo), il bot risponde con un messaggio unico di upgrade.
+I comandi sono classificati in `free` e `premium`: `/help`, `/notifiche`, `/feedback`, `/piano`, `/abbonati` e `/gestisci_abbonamento` sono free (sempre soggetti allo stato account), mentre `/schedine`, `/scalate`, `/partite` e `/statistiche` sono premium. Se il piano non include un comando premium (o prova/abbonamento non e attivo), il bot risponde con un messaggio unico di upgrade.
 
 Con `/piano` vedi piano corrente, stato (attivo/in prova/sospeso/scaduto), fine prova, rinnovo o scadenza e cancellazione programmata (se presente), senza identificativi tecnici.
 
@@ -268,9 +275,9 @@ Con `/feedback` puoi segnalare un problema o un suggerimento: scegli una categor
 
 Se invii troppi comandi in poco tempo, il bot ti chiede di attendere qualche secondo (protezione anti-abuso). Lo stesso tipo di limite vale anche per le API del server.
 
-Con `/schedine` ricevi le stesse schedine della pagina **Consiglio schedina** (fino a 9, con Void/Edge/ROI/Valore e stato pick). Se i due motori del giorno producono schedine diverse, il bot le mostra entrambe etichettate con l’accuratezza storica (senza nomi tecnici); se sono uguali ne manda una sola. Il primo messaggio indica data, legenda esiti (verde = Presa, rosso = Persa, grigio = In corso, grigio scuro = Annullata) e legenda valore.
+Con `/schedine` ricevi le stesse schedine multi-leg della pagina **Consiglio schedina** (fino a 10, con Play · Doppia in cima e mercati misti Match / 1° set / O/U). Con `/scalate` ricevi le scalate progressive (reinvestimento step per step in ordine di orario), come nel tab **Scalate** della dashboard. Se i due motori del giorno producono contenuti diversi, il bot li mostra entrambi etichettati con l’accuratezza storica (senza nomi tecnici); se sono uguali ne manda una sola. Il primo messaggio indica data, legenda esiti (verde = Presa, rosso = Persa, grigio = In corso, grigio scuro = Annullata) e i tre mercati. Nelle immagini: **Mercato** e **Predizione** colorati come sul web (Match grigio, 1° set viola, O/U blu); sulle scalate compare anche la **puntata dello step**.
 
-Con `/partite` ricevi le partite di oggi come in pagina **Partite** (Predetto, Conf., Void, Valore, Stato). Anche qui, se i motori danno pronostici diversi li vedi entrambi con etichetta accuratezza; l’intro include data, legende e ultimo aggiornamento.
+Con `/partite` ricevi le partite di oggi con **una riga per mercato** (Match, 1° set, O/U Games quando pubblicati): Superficie (in italiano: Cemento/Terra/Erba/Sintetico), Mercato, Predizione, Percentuale di riuscita, Quota, Stato. Anche qui, se i motori danno pronostici diversi li vedi entrambi con etichetta accuratezza; l’intro include data, legende e ultimo aggiornamento.
 
 Con `/statistiche` vedi un riepilogo immagine dell’andamento (partite singole e schedine, con profitto sulle schedine), sempre senza nomi modello.
 

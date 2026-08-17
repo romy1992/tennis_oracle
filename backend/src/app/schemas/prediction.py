@@ -47,9 +47,32 @@ class MatchPredictionRead(BaseModel):
     warnings: list[str] = []
 
 
+class ExtraMarketPredictionRead(BaseModel):
+    """Prediction for a market other than match-winner (e.g. first set winner,
+    over/under games). Sourced from the generic ``PublishedPrediction``
+    ledger (see ``app/services/extra_market_predictions.py``), never from
+    ``MatchPrediction`` which stays match-winner-only.
+
+    ``odds``/``edge`` are ``None`` when the dedicated bookmaker market was
+    missing at publication time (legacy first-set v1 rows). ``void_odds``
+    (fair/break-even odds, ``1/probability``) stays always computable from
+    the model alone."""
+
+    market: str
+    model_version: str
+    model_name: str | None = None
+    selection: str
+    probability: float | None = None
+    odds: float | None = None
+    void_odds: float | None = None
+    edge: float | None = None
+    published_at: datetime | None = None
+
+
 class NextFixtureWithPrediction(NextFixtureRead):
     prediction: MatchPredictionRead | None = None
     prediction_warning: str | None = None
+    extra_markets: list[ExtraMarketPredictionRead] = []
 
 
 class FixturesWithPredictionsPage(BaseModel):

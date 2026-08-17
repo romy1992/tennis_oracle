@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from backend.src.app.api.deps import require_admin, require_admin_or_service
 from backend.src.app.db.session import get_db
-from backend.src.app.ml.model_versioning import ModelVersion
+from backend.src.app.ml.model_versioning import DEFAULT_ACTIVE_MATCH_WINNER_VERSION, ModelVersion
 from backend.src.app.schemas.prediction import (
     DailyPredictionStatsResponse,
     FixturesWithPredictionsPage,
@@ -54,7 +54,7 @@ def read_next_fixtures(
     dependencies=[Depends(require_admin_or_service)],
 )
 def read_next_fixtures_predictions(
-    model_version: ModelVersion = Query(default="v2"),
+    model_version: ModelVersion = Query(default=DEFAULT_ACTIVE_MATCH_WINNER_VERSION),
     model_name: str | None = Query(default=None),
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
@@ -91,7 +91,7 @@ def read_next_fixtures_predictions(
     dependencies=[Depends(require_admin)],
 )
 def read_daily_prediction_stats(
-    model_version: ModelVersion = Query(default="v2"),
+    model_version: ModelVersion = Query(default=DEFAULT_ACTIVE_MATCH_WINNER_VERSION),
     model_name: str | None = Query(default=None),
     from_day: int = Query(default=0, ge=0),
     to_day: int | None = Query(default=None, ge=0),
@@ -120,7 +120,7 @@ def read_daily_prediction_stats(
     dependencies=[Depends(require_admin_or_service)],
 )
 def read_prediction_summary(
-    model_version: ModelVersion = Query(default="v2"),
+    model_version: ModelVersion = Query(default=DEFAULT_ACTIVE_MATCH_WINNER_VERSION),
     model_name: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> PredictionSummaryResponse:

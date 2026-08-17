@@ -35,7 +35,10 @@ class WalkForwardConfigSchema(BaseModel):
     embargo_days: int = Field(default=0, ge=0)
     edge_threshold: float = Field(default=0.03, ge=0.0)
     random_state: int = 42
-    versions: list[Literal["v1", "v2", "v3"]] | None = None
+    # Match-winner tags (v1-v4) or extra-market labels (e.g. first_set_winner_v2,
+    # over_under_games_v1, see walk_forward_markets.ALL_WALK_FORWARD_VERSIONS).
+    # Left as free-form str: this schema module must not import the ML layer.
+    versions: list[str] | None = None
 
 
 class WalkForwardFoldRead(BaseModel):

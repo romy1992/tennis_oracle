@@ -10,14 +10,17 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.src.app.ml.model_selection import _read_metrics
-from backend.src.app.ml.model_versioning import MODEL_VERSIONS, REPORTS_DIR, ModelVersion
+from backend.src.app.ml.model_versioning import (
+    ACTIVE_MATCH_WINNER_VERSIONS,
+    MODEL_VERSIONS,
+    REPORTS_DIR,
+)
 from backend.src.app.schemas.public_model_registry import (
     PublicModelRegistryArtifacts,
     PublicModelRegistryEntryRead,
@@ -26,7 +29,11 @@ from backend.src.entity.public_model_registry import PublicModelRegistryEntry
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_PUBLIC_MODEL_VERSIONS = frozenset({"v1", "v2", "v3", "v4"})
+# Solo le versioni match-winner ATTIVE possono diventare NUOVI candidati (v1-v3
+# sono archiviate, vedi model_versioning.py). Non influisce sulla lettura di
+# voci storiche già "retired"/"active" per v1-v3: register_candidate() è
+# l'unico chiamante di _validate_combo, list/get_registry_entry non lo sono.
+ALLOWED_PUBLIC_MODEL_VERSIONS = ACTIVE_MATCH_WINNER_VERSIONS
 ALLOWED_PUBLIC_MODEL_NAMES = frozenset({"logistic_regression", "random_forest", "voting_ensemble"})
 OPEN_STATUSES = frozenset({"candidate", "active"})
 PublicModelRegistryStatus = Literal["candidate", "active", "retired"]

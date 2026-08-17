@@ -33,8 +33,8 @@ class WalkForwardRun(Base):
     embargo_days = Column(Integer, nullable=False, default=0)
     edge_threshold = Column(Float, nullable=False)
     random_state = Column(Integer, nullable=False, default=42)
-    # Comma-separated versions e.g. v1,v2,v3
-    versions_requested = Column(String(64), nullable=False)
+    # Comma-separated versions/market labels e.g. v4,first_set_winner_v2,over_under_games_v1
+    versions_requested = Column(String(128), nullable=False)
     origin = Column(String(32), nullable=False, default="manual")
     current_phase = Column(String(256), nullable=True)
     progress_pct = Column(Float, nullable=True)
@@ -78,7 +78,7 @@ class WalkForwardFold(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     run_id = Column(Integer, ForeignKey("walk_forward_run.id", ondelete="CASCADE"), nullable=False, index=True)
     fold_index = Column(Integer, nullable=False)
-    model_version = Column(String(8), nullable=False, index=True)
+    model_version = Column(String(32), nullable=False, index=True)
     model_name = Column(String(64), nullable=False, index=True)
     dataset_path = Column(String(512), nullable=False)
     # completed | skipped_insufficient_data | skipped_single_class | error

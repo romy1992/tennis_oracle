@@ -251,6 +251,7 @@ def _play_slip_pick_id(
         .join(BettingSlip, BettingSlip.id == BettingSlipPick.betting_slip_id)
         .where(
             BettingSlipPick.event_key == event_key,
+            BettingSlipPick.market == "match_winner",
             BettingSlip.model_version == model_version,
             BettingSlip.model_name == model_name,
             BettingSlip.slip_date == slip_date,
@@ -314,6 +315,7 @@ def _record_publication_snapshot(
         db,
         PrematchOddsSnapshotCreate(
             event_key=event_key,
+            market="match_winner",
             selection=selection,
             bookmaker=PUBLICATION_BOOKMAKER,
             odds=float(odds),
@@ -375,6 +377,11 @@ def publish_official_plays_for_day(
         model_version=version,  # type: ignore[arg-type]
         model_name=name,
         min_edge_percent=min_edge_percent,
+        # The official live ledger represents the configured match-winner
+        # model. Extra markets have their own model_version and are published
+        # by ``run_extra_market_predictions_generation``; relabelling one as
+        # v4 here would corrupt both lineage and settlement.
+        include_markets=("match_winner",),
     )
     report.candidates_evaluated = len(candidates)
 
@@ -397,6 +404,9 @@ def publish_official_plays_for_day(
 
         payload = PublishedPredictionCreate(
             event_key=candidate.event_key,
+            market="match_winner",
+            value_decision="PLAY",
+            official_play=True,
             selection=selection,
             model_version=version,
             model_name=name,

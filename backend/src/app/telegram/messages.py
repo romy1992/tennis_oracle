@@ -32,6 +32,7 @@ BETA_TERMS_TEXT = (
 USER_ERROR_FALLBACK = "Si è verificato un problema temporaneo. Riprova tra poco."
 LOADING_PARTITE = "Caricamento partite in corso…"
 LOADING_SCHEDINE = "Caricamento schedine in corso…"
+LOADING_SCALATE = "Caricamento scalate in corso…"
 LOADING_STATISTICHE = "Caricamento statistiche in corso…"
 
 def build_welcome_text(
@@ -54,6 +55,7 @@ def build_welcome_text(
         lines.append("/partite - partite di oggi")
     if include_slips:
         lines.append("/schedine - schedine di oggi")
+        lines.append("/scalate - scalate progressive di oggi")
     if include_statistics:
         lines.append("/statistiche - andamento")
 
@@ -100,6 +102,9 @@ def build_help_text(
         lines.append("/partite - partite e pronostici di oggi (con indicazione di valore)")
     if include_slips:
         lines.append("/schedine - schedine proposte di oggi")
+        lines.append(
+            "/scalate - scalate progressive (reinvestimento step per step in ordine di orario)"
+        )
     if include_statistics:
         lines.append("/statistiche - andamento storico (partite e schedine)")
 
@@ -467,6 +472,8 @@ def format_welcome_text(
 
 
 def predicted_winner_name(item: dict[str, Any]) -> str | None:
+    if item.get("predicted_winner_label"):
+        return str(item["predicted_winner_label"])
     prediction = item.get("prediction") or {}
     raw_winner = prediction.get("predicted_winner")
     player_1 = item.get("event_first_player") or item.get("player_1")
@@ -491,6 +498,49 @@ def slip_pick_winner_name(pick: dict[str, Any]) -> str | None:
     )
 
 
+def market_label(market: str | None) -> str:
+    """Etichetta pubblica corta per i tre mercati del bot/dashboard."""
+    if market == "first_set_winner":
+        return "1° set"
+    if market == "over_under_games":
+        return "O/U Games"
+    if market in (None, "", "match_winner"):
+        return "Match"
+    return str(market)
+
+
+def market_text_color(market: str | None) -> str:
+    """Colori testo mercato/predizione allineati ai badge del web."""
+    if market == "first_set_winner":
+        return "#5b21b6"
+    if market == "over_under_games":
+        return "#1e40af"
+    return "#334155"
+
+
+def surface_label(surface: str | None) -> str:
+    """Etichetta superficie in italiano per il bot Telegram."""
+    if surface is None or str(surface).strip() in ("", "-"):
+        return "-"
+    raw = str(surface).strip()
+    key = raw.lower()
+    mapping = {
+        "hard": "Cemento",
+        "clay": "Terra",
+        "grass": "Erba",
+        "carpet": "Sintetico",
+    }
+    if key in mapping:
+        return mapping[key]
+    for eng, ita in mapping.items():
+        if eng in key:
+            return ita
+    return raw
+
+
+MARKETS_LEGEND = "Mercati: Match · 1° set · O/U Games"
+
+
 def _match_title(item: dict[str, Any]) -> str:
     player_1 = item.get("event_first_player") or item.get("player_1") or "Giocatore 1"
     player_2 = item.get("event_second_player") or item.get("player_2") or "Giocatore 2"
@@ -502,7 +552,7 @@ def format_prediction(item: dict[str, Any], *, compact: bool = False) -> str:
     tournament_parts = [
         item.get("tournament_name"),
         item.get("tournament_round"),
-        item.get("surface"),
+        surface_label(item.get("surface")) if item.get("surface") else None,
     ]
     tournament = " / ".join(str(part) for part in tournament_parts if part) or "Torneo n.d."
 
@@ -593,7 +643,7 @@ def format_fixtures_intro(
     resolved = target_date or "oggi"
     body = (
         f"Partite di oggi ({resolved})\n\n"
-        f"{STATUS_LEGEND}\n{VALUE_LEGEND}"
+        f"{STATUS_LEGEND}\n{MARKETS_LEGEND}"
     )
     return append_message_footer(
         body,
@@ -613,7 +663,7 @@ def format_fixture_group_text(
         lines.append(series_label)
     for index, item in enumerate(items, start=start_index):
         tournament = item.get("tournament_name") or "-"
-        surface = item.get("surface") or "-"
+        surface = surface_label(item.get("surface"))
         lines.append(
             f"{index}. {_format_event_time(item.get('event_time'))} | {tournament} | {surface}\n"
             f"{_match_title(item)}\n"
@@ -644,11 +694,13 @@ def format_fixture_prediction(item: dict[str, Any]) -> str:
 
     winner = predicted_winner_name(item) or "n.d."
     confidence = prediction.get("confidence")
-    void_odds = item.get("void_odds")
-    value = item.get("value_decision") or "-"
+    odds = item.get("market_odds")
+    if odds is None:
+        odds = prediction.get("predicted_winner_odds")
+    market = market_label(item.get("market") or prediction.get("market"))
     return (
-        f"Predetto: {winner} | Conf. {_format_percent(confidence)} | "
-        f"Void {_format_decimal(void_odds)} | Valore {value}"
+        f"{market}: {winner} | Percentuale di riuscita {_format_percent(confidence)} | "
+        f"Quota {_format_decimal(odds)}"
     )
 
 
@@ -667,13 +719,21 @@ def format_betting_slips_empty(
     warnings: list[str] | None = None,
     last_updated: Any = None,
     feedback_url: str | None = None,
+    slip_kind: str = "parlay",
 ) -> str:
     suffix = f"\n\nNote: {'; '.join(warnings)}" if warnings else ""
-    body = (
-        f"Nessuna schedina disponibile per {slip_date}.{suffix}\n\n"
-        "Può dipendere da margini insufficienti o da dati non ancora aggiornati. "
-        "Riprova più tardi."
-    )
+    if slip_kind == "ladder":
+        body = (
+            f"Nessuna scalata disponibile per {slip_date}.{suffix}\n\n"
+            "Servono almeno due step PLAY (o PLAY+Border) con orari distinti. "
+            "Riprova dopo l'aggiornamento giornaliero."
+        )
+    else:
+        body = (
+            f"Nessuna schedina disponibile per {slip_date}.{suffix}\n\n"
+            "Può dipendere da margini insufficienti o da dati non ancora aggiornati. "
+            "Riprova più tardi."
+        )
     return append_message_footer(
         body,
         last_updated=last_updated,
@@ -688,10 +748,19 @@ def format_betting_slips_intro(
     min_edge_percent: float = 2.0,
     last_updated: Any = None,
     feedback_url: str | None = None,
+    slip_kind: str = "parlay",
 ) -> str:
     del min_edge_percent  # kept for call-site compatibility; not shown in intro
     resolved_date = slip_date or (payload or {}).get("date") or "oggi"
-    body = f"Schedine di oggi ({resolved_date})\n\n{STATUS_LEGEND}\n{VALUE_LEGEND}"
+    if slip_kind == "ladder":
+        body = (
+            f"Scalate di oggi ({resolved_date})\n\n"
+            "Ogni step è una singola: se vinci, il ritorno viene reinvestito nello step "
+            "successivo (ordine di orario). Alla prima persa la catena si interrompe.\n\n"
+            f"{STATUS_LEGEND}\n{MARKETS_LEGEND}"
+        )
+    else:
+        body = f"Schedine di oggi ({resolved_date})\n\n{STATUS_LEGEND}\n{MARKETS_LEGEND}"
     return append_message_footer(
         body,
         last_updated=last_updated,
@@ -699,16 +768,39 @@ def format_betting_slips_intro(
     )
 
 
+def slip_kind_of(slip: dict[str, Any]) -> str:
+    kind = slip.get("slip_kind")
+    if kind in {"parlay", "ladder"}:
+        return str(kind)
+    key = str(slip.get("slip_key") or "")
+    return "ladder" if key.startswith("ladder_") else "parlay"
+
+
+def filter_slips_by_kind(payload: dict[str, Any], *, slip_kind: str) -> dict[str, Any]:
+    """Return a shallow copy of the daily slips payload with only one kind."""
+    slips = [
+        slip
+        for slip in (payload.get("slips") or [])
+        if slip_kind_of(slip) == slip_kind
+    ]
+    filtered = dict(payload)
+    filtered["slips"] = slips
+    return filtered
+
+
 def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None = None) -> str:
+    is_ladder = slip_kind_of(slip) == "ladder"
     status = slip_status_label(slip.get("slip_status"))
     picks_won = slip.get("picks_won")
     picks_total = slip.get("picks_total") or len(slip.get("picks") or [])
+    noun = "Scalata" if is_ladder else "Schedina"
     lines = [
-        f"Schedina: {slip.get('label') or slip.get('slip_key') or 'Schedina'}",
+        f"{noun}: {slip.get('label') or slip.get('slip_key') or noun}",
     ]
     if series_label:
         lines.append(series_label)
-    lines.append(f"Stato: {status} | {picks_won}/{picks_total} pick corrette")
+    step_word = "step ok" if is_ladder else "pick corrette"
+    lines.append(f"Stato: {status} | {picks_won}/{picks_total} {step_word}")
     picks_void = slip.get("picks_void") or 0
     if picks_void:
         lines.append(f"Pick annullate: {picks_void} (escluse dalla quota effettiva)")
@@ -723,7 +815,11 @@ def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None =
             f"Quota effettiva: {_format_decimal(effective)}"
         )
     else:
-        odds_line = f"Quota combinata: {_format_decimal(combined)}"
+        odds_line = (
+            f"Moltiplicatore catena: {_format_decimal(combined)}"
+            if is_ladder
+            else f"Quota combinata: {_format_decimal(combined)}"
+        )
     lines.extend(
         [
             odds_line,
@@ -734,16 +830,20 @@ def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None =
 
     picks = slip.get("picks") or []
     if not picks:
-        lines.append("Nessun pick disponibile.")
+        lines.append("Nessun step disponibile." if is_ladder else "Nessun pick disponibile.")
         return "\n".join(lines)
 
-    lines.append(
-        "Pick (Ora | Torneo | Match | Pick | Media quote bookmakers | Void | Edge | ROI | Valore | Conf.):"
-    )
+    if is_ladder:
+        lines.append(
+            "Step (N | Ora | Torneo | Match | Mercato | Predizione | Puntata step | Quota):"
+        )
+    else:
+        lines.append(
+            "Pick (Ora | Torneo | Match | Mercato | Predizione | Percentuale di riuscita | Quota):"
+        )
     for index, pick in enumerate(picks, start=1):
         winner = slip_pick_winner_name(pick) or "n.d."
         tournament = pick.get("tournament_name") or "-"
-        value = pick.get("value_decision") or "-"
         lifecycle_note = ""
         if pick.get("pick_status") == "void":
             lifecycle_note = f" · {pick.get('void_reason') or pick.get('match_lifecycle_label') or 'Annullata'}"
@@ -756,15 +856,25 @@ def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None =
             "finished",
         }:
             lifecycle_note = f" · {pick.get('match_lifecycle_label')}"
-        lines.append(
-            f"{index}. [{pick_status_label(pick.get('pick_status'))}] "
-            f"{_format_event_time(pick.get('event_time'))} | {tournament} | {_match_title(pick)}{lifecycle_note}\n"
-            f"   Pick: {winner} | Q {_format_decimal(pick.get('odds'))} | "
-            f"Void {_format_decimal(pick.get('void_odds'))} | "
-            f"Edge {_format_signed_percent(pick.get('edge_percent'))} | "
-            f"ROI {_format_signed_roi(pick.get('expected_roi'))} | "
-            f"{value} | Conf. {_format_percent(pick.get('confidence'))}"
-        )
+        step_n = pick.get("ladder_step_index") or index
+        if is_ladder:
+            lines.append(
+                f"{step_n}. [{pick_status_label(pick.get('pick_status'))}] "
+                f"{_format_event_time(pick.get('event_time'))} | {tournament} | "
+                f"{_match_title(pick)}{lifecycle_note}\n"
+                f"   {market_label(pick.get('market'))}: {winner} | "
+                f"Puntata {_format_decimal(pick.get('ladder_step_stake'))} | "
+                f"Quota {_format_decimal(pick.get('odds'))}"
+            )
+        else:
+            lines.append(
+                f"{index}. [{pick_status_label(pick.get('pick_status'))}] "
+                f"{_format_event_time(pick.get('event_time'))} | {tournament} | "
+                f"{_match_title(pick)}{lifecycle_note}\n"
+                f"   {market_label(pick.get('market'))}: {winner} | "
+                f"Percentuale di riuscita {_format_percent(pick.get('confidence'))} | "
+                f"Quota {_format_decimal(pick.get('odds'))}"
+            )
     return "\n".join(lines)
 
 
@@ -773,15 +883,18 @@ def format_betting_slip_photo_caption(
     *,
     series_label: str | None = None,
 ) -> str:
-    label = slip.get("label") or slip.get("slip_key") or "Schedina"
+    is_ladder = slip_kind_of(slip) == "ladder"
+    label = slip.get("label") or slip.get("slip_key") or ("Scalata" if is_ladder else "Schedina")
     status = slip_status_label(slip.get("slip_status"))
     picks_won = slip.get("picks_won")
     picks_total = slip.get("picks_total") or len(slip.get("picks") or [])
-    lines = [f"{label} | {status} | {picks_won}/{picks_total} pick"]
+    unit = "step" if is_ladder else "pick"
+    lines = [f"{label} | {status} | {picks_won}/{picks_total} {unit}"]
     if series_label:
         lines.append(series_label)
+    odds_label = "Moltiplicatore" if is_ladder else "Quota"
     lines.append(
-        f"Quota {_format_decimal(slip.get('combined_odds'))} | "
+        f"{odds_label} {_format_decimal(slip.get('combined_odds'))} | "
         f"Profitto {_format_decimal(slip.get('potential_profit'))}"
     )
     return "\n".join(lines)
@@ -794,23 +907,27 @@ def format_betting_slips(
     series_label: str | None = None,
     last_updated: Any = None,
     feedback_url: str | None = None,
+    slip_kind: str = "parlay",
 ) -> str:
-    slips = payload.get("slips") or []
-    slip_date = payload.get("date") or "oggi"
+    filtered = filter_slips_by_kind(payload, slip_kind=slip_kind)
+    slips = filtered.get("slips") or []
+    slip_date = filtered.get("date") or "oggi"
     if not slips:
         return format_betting_slips_empty(
             slip_date,
-            warnings=list(payload.get("warnings") or []),
+            warnings=list(filtered.get("warnings") or []),
             last_updated=last_updated,
             feedback_url=feedback_url,
+            slip_kind=slip_kind,
         )
 
     lines = [
         format_betting_slips_intro(
-            payload,
+            filtered,
             min_edge_percent=min_edge_percent,
             last_updated=last_updated,
             feedback_url=feedback_url,
+            slip_kind=slip_kind,
         )
     ]
     for slip in slips:

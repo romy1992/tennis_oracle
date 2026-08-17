@@ -51,7 +51,10 @@ class WeeklyBetaLiveTipsMetrics(BaseModel):
     roi_pct: float | None = None
     yield_pct: float | None = None
     max_drawdown: float = 0.0
-
+    # Headline KPIs refer to this market (default match_winner; never mixed).
+    market: str = "match_winner"
+    # Per-market breakdown (each row has empty by_market).
+    by_market: list["WeeklyBetaLiveTipsMetrics"] = Field(default_factory=list)
 
 class WeeklyBetaPipelineMetrics(BaseModel):
     runs_total: int = 0

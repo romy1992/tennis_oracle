@@ -1,14 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useGlobalUpdate } from "../hooks/useGlobalUpdate";
 import { ApiError } from "../services/apiClient";
-import type { MLModelVersion } from "../types/api";
-import {
-  MODEL_VERSIONS,
-  readStoredGlobalUpdateVersions,
-  writeStoredGlobalUpdateVersions
-} from "../utils/modelVersion";
+import { ACTIVE_MARKETS } from "../utils/modelVersion";
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -28,32 +23,11 @@ export function GlobalUpdateControls() {
     useGlobalUpdate();
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
-  const [selectedVersions, setSelectedVersions] = useState<MLModelVersion[]>(() =>
-    readStoredGlobalUpdateVersions()
-  );
-
-  useEffect(() => {
-    writeStoredGlobalUpdateVersions(selectedVersions);
-  }, [selectedVersions]);
-
-  const allVersionsSelected = selectedVersions.length === MODEL_VERSIONS.length;
-
-  function toggleVersion(version: MLModelVersion) {
-    setSelectedVersions((current) => {
-      if (current.includes(version)) {
-        if (current.length === 1) {
-          return current; // keep at least one version selected
-        }
-        return current.filter((value) => value !== version);
-      }
-      return [...current, version];
-    });
-  }
 
   async function handleClick() {
     try {
       setActionError(null);
-      await triggerUpdate(true, allVersionsSelected ? undefined : selectedVersions);
+      await triggerUpdate(true);
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -85,18 +59,10 @@ export function GlobalUpdateControls() {
 
   return (
     <div className="global-update-controls">
-      <div className="global-update-version-filters">
-        {MODEL_VERSIONS.map((option) => (
-          <label key={option.value} className="global-update-version-checkbox">
-            <input
-              type="checkbox"
-              checked={selectedVersions.includes(option.value)}
-              disabled={isRunning}
-              onChange={() => toggleVersion(option.value)}
-            />
-            {option.label}
-          </label>
-        ))}
+      <div className="global-update-version-filters" aria-label="Mercati coperti">
+        <small className="global-update-markets-note">
+          Copre sempre tutti i mercati: {ACTIVE_MARKETS.map((option) => option.label).join(", ")}.
+        </small>
       </div>
       <div className="global-update-actions">
         <button
@@ -105,12 +71,9 @@ export function GlobalUpdateControls() {
           onClick={() => void handleClick()}
           disabled={isRunning}
         >
-          {isRunning
-            ? "Aggiornamento globale..."
-            : allVersionsSelected
-              ? "Aggiorna tutto"
-              : `Aggiorna selezionate (${selectedVersions.join(", ")})`}
+          {isRunning ? "Aggiornamento globale..." : "Aggiorna tutto"}
         </button>
+
         {isRunning && status ? (
           <button
             type="button"

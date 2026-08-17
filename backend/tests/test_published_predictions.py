@@ -15,6 +15,7 @@ from backend.src.app.services.published_predictions import (
     PublishedPredictionError,
     compute_content_hash,
     correct_published_prediction,
+    list_latest_published_predictions_by_event_keys,
     list_publication_versions,
     list_published_predictions,
     match_has_started,
@@ -139,6 +140,55 @@ def test_correction_creates_new_version_linked_to_previous(db_session):
     assert original is not None
     assert original.probability == 0.60
     assert original.content_version == 1
+
+
+def test_latest_by_event_keys_collapses_competing_publications_per_market(db_session):
+    _future_fixture(db_session, event_key=9200)
+    older = publish_prediction(
+        db_session,
+        _create_payload(
+            event_key=9200,
+            selection="Over 20.5",
+            model_version="over_under_games_v1",
+            model_name="random_forest",
+            publication_source="system",
+        ),
+        published_at=datetime(2026, 8, 14, 8, 0),
+    )
+    newer = publish_prediction(
+        db_session,
+        _create_payload(
+            event_key=9200,
+            selection="Under 20.5",
+            model_version="over_under_games_v1",
+            model_name="random_forest",
+            publication_source="manual",
+        ),
+        published_at=datetime(2026, 8, 14, 9, 0),
+    )
+    first_set = publish_prediction(
+        db_session,
+        _create_payload(
+            event_key=9200,
+            selection="First Player",
+            model_version="first_set_winner_v1",
+            model_name="random_forest",
+            publication_source="system",
+            odds=None,
+            edge=None,
+        ),
+        published_at=datetime(2026, 8, 14, 8, 30),
+    )
+
+    grouped = list_latest_published_predictions_by_event_keys(
+        db_session,
+        [9200],
+        model_versions=["first_set_winner_v1", "over_under_games_v1"],
+    )
+
+    returned_ids = {row.id for row in grouped[9200]}
+    assert returned_ids == {newer.id, first_set.id}
+    assert older.id not in returned_ids
 
 
 def test_cannot_publish_or_correct_after_match_started(db_session):

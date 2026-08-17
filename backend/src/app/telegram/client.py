@@ -138,7 +138,7 @@ class BackendApiClient:
         model_version: str,
         model_name: str | None,
         stake: float,
-        slip_count: int = 9,
+        slip_count: int = 10,
         picks_per_slip: int = 5,
         min_edge_percent: float = 2.0,
     ) -> dict[str, Any]:

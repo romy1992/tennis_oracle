@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 
+import { MarketTabs } from "../components/MarketTabs";
 import { MetricCard } from "../components/MetricCard";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
 import type {
+  LiveDashboardMarket,
   PublishedPrediction,
   PublishedPredictionListResponse,
   PublishedPredictionVersionChainResponse
 } from "../types/api";
-import { MODEL_VERSIONS } from "../utils/modelVersion";
+import { DEFAULT_LIVE_MARKET, marketLabel } from "../utils/markets";
 import { formatDate, todayLocalISODate } from "../utils/tennis";
 
 const PAGE_SIZE = 50;
@@ -58,7 +60,7 @@ export function PublishedPredictionsPage() {
   const [toDate, setToDate] = useState(() => todayIso());
   const [eventKey, setEventKey] = useState("");
   const [source, setSource] = useState("");
-  const [modelVersion, setModelVersion] = useState("");
+  const [market, setMarket] = useState<LiveDashboardMarket>(DEFAULT_LIVE_MARKET);
   const [latestOnly, setLatestOnly] = useState(true);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -77,8 +79,9 @@ export function PublishedPredictionsPage() {
             parsedEventKey !== undefined && Number.isFinite(parsedEventKey)
               ? parsedEventKey
               : undefined,
-          model_version: modelVersion || undefined,
           publication_source: source.trim() || undefined,
+          market,
+          include_archived: false,
           latest_only: latestOnly,
           limit: PAGE_SIZE,
           offset
@@ -92,7 +95,7 @@ export function PublishedPredictionsPage() {
       }
     }
     void load();
-  }, [fromDate, toDate, eventKey, source, modelVersion, latestOnly, offset]);
+  }, [fromDate, toDate, eventKey, source, market, latestOnly, offset]);
 
   async function openVersions(publicationId: string) {
     try {
@@ -103,6 +106,12 @@ export function PublishedPredictionsPage() {
       setVersions(null);
       setVersionsError(err instanceof Error ? err.message : "Errore caricamento versioni.");
     }
+  }
+
+  function selectMarket(next: LiveDashboardMarket) {
+    setOffset(0);
+    setVersions(null);
+    setMarket(next);
   }
 
   if (loading && !data) return <LoadingState />;
@@ -123,11 +132,19 @@ export function PublishedPredictionsPage() {
         <div>
           <h2>Storico pubblicazioni</h2>
           <p>
-            Registro immutabile dei pronostici pubblicati. Dopo l&apos;inizio partita le
-            righe non sono modificabili; le correzioni creano una nuova versione.
+            Registro immutabile per mercato. Dopo l&apos;inizio partita le righe non sono
+            modificabili; le correzioni creano una nuova versione.
           </p>
         </div>
+        <span className={`market-badge market-${market}`}>{marketLabel(market)}</span>
       </header>
+
+      <MarketTabs
+        value={market}
+        onChange={selectMarket}
+        ariaLabel="Mercato storico pubblicazioni"
+        disabled={loading}
+      />
 
       <div className="filters-grid">
         <label>
@@ -177,23 +194,6 @@ export function PublishedPredictionsPage() {
             }}
           />
         </label>
-        <label>
-          Versione modello
-          <select
-            value={modelVersion}
-            onChange={(event) => {
-              setOffset(0);
-              setModelVersion(event.target.value);
-            }}
-          >
-            <option value="">Tutte</option>
-            {MODEL_VERSIONS.map((entry) => (
-              <option key={entry.value} value={entry.value}>
-                {entry.label}
-              </option>
-            ))}
-          </select>
-        </label>
         <label className="checkbox-field">
           <input
             type="checkbox"
@@ -226,7 +226,7 @@ export function PublishedPredictionsPage() {
         {items.length === 0 ? (
           <EmptyState
             title="Nessuna pubblicazione"
-            message="Nessuna pubblicazione nel periodo selezionato."
+            message={`Nessuna pubblicazione ${marketLabel(market)} nel periodo selezionato.`}
           />
         ) : (
           <div className="table-wrap">
@@ -235,8 +235,8 @@ export function PublishedPredictionsPage() {
                 <tr>
                   <th>UTC</th>
                   <th>Partita</th>
+                  <th>Mercato</th>
                   <th>Selezione</th>
-                  <th>Modello</th>
                   <th>P</th>
                   <th>Quota</th>
                   <th>Void</th>
@@ -250,46 +250,51 @@ export function PublishedPredictionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
-                  <tr key={item.id}>
-                    <td>{formatDateTime(item.published_at)}</td>
-                    <td>
-                      <div>{matchLabel(item)}</div>
-                      <div className="note">
-                        #{item.event_key}
-                        {item.event_date ? ` · ${formatDate(item.event_date)}` : ""}
-                        {item.tournament_name ? ` · ${item.tournament_name}` : ""}
-                      </div>
-                    </td>
-                    <td>{item.selection}</td>
-                    <td>
-                      {item.model_version}/{item.model_name}
-                    </td>
-                    <td>{formatPct(item.probability)}</td>
-                    <td>{formatNum(item.odds)}</td>
-                    <td>{formatNum(item.void_odds)}</td>
-                    <td>{item.edge == null ? "-" : `${formatNum(item.edge, 1)}%`}</td>
-                    <td>{formatNum(item.unit_stake)}</td>
-                    <td>{item.publication_source}</td>
-                    <td>v{item.content_version}</td>
-                    <td>
-                      {item.match_started ? "congelata" : item.initial_status}
-                      {item.is_latest ? "" : " · superseduta"}
-                    </td>
-                    <td>
-                      <code title={item.content_hash}>{item.content_hash.slice(0, 8)}…</code>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="action-button"
-                        onClick={() => void openVersions(item.publication_id)}
-                      >
-                        Versioni
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {items.map((item) => {
+                  const tipMarket = item.market || market;
+                  return (
+                    <tr key={item.id}>
+                      <td>{formatDateTime(item.published_at)}</td>
+                      <td>
+                        <div>{matchLabel(item)}</div>
+                        <div className="note">
+                          #{item.event_key}
+                          {item.event_date ? ` · ${formatDate(item.event_date)}` : ""}
+                          {item.tournament_name ? ` · ${item.tournament_name}` : ""}
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`market-badge market-${tipMarket}`}>
+                          {marketLabel(tipMarket)}
+                        </span>
+                      </td>
+                      <td>{item.selection}</td>
+                      <td>{formatPct(item.probability)}</td>
+                      <td>{formatNum(item.odds)}</td>
+                      <td>{formatNum(item.void_odds)}</td>
+                      <td>{item.edge == null ? "-" : `${formatNum(item.edge, 1)}%`}</td>
+                      <td>{formatNum(item.unit_stake)}</td>
+                      <td>{item.publication_source}</td>
+                      <td>v{item.content_version}</td>
+                      <td>
+                        {item.match_started ? "congelata" : item.initial_status}
+                        {item.is_latest ? "" : " · superseduta"}
+                      </td>
+                      <td>
+                        <code title={item.content_hash}>{item.content_hash.slice(0, 8)}…</code>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="action-button"
+                          onClick={() => void openVersions(item.publication_id)}
+                        >
+                          Versioni
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

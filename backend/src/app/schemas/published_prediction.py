@@ -15,10 +15,15 @@ PublicationSource = Literal[
 ]
 
 InitialStatus = Literal["published", "draft"]
+PredictionMarket = Literal["match_winner", "first_set_winner", "over_under_games"]
+ValueDecision = Literal["PLAY", "BORDERLINE", "NO BET"]
 
 
 class PublishedPredictionCreate(BaseModel):
     event_key: int
+    market: PredictionMarket = "match_winner"
+    value_decision: ValueDecision | None = None
+    official_play: bool = False
     selection: str = Field(min_length=1, max_length=255)
     model_version: str = Field(min_length=1, max_length=64)
     model_name: str = Field(min_length=1, max_length=128)
@@ -41,6 +46,9 @@ class PublishedPredictionCreate(BaseModel):
 class PublishedPredictionCorrection(BaseModel):
     """Payload for a new immutable version linked to a previous publication."""
 
+    market: PredictionMarket | None = None
+    value_decision: ValueDecision | None = None
+    official_play: bool = False
     selection: str | None = Field(default=None, min_length=1, max_length=255)
     model_version: str | None = Field(default=None, min_length=1, max_length=64)
     model_name: str | None = Field(default=None, min_length=1, max_length=128)
@@ -68,6 +76,9 @@ class PublishedPredictionRead(BaseModel):
     content_version: int
     previous_version_id: int | None = None
     event_key: int
+    market: PredictionMarket = "match_winner"
+    value_decision: ValueDecision | None = None
+    official_play: bool = False
     selection: str
     model_version: str
     model_name: str
@@ -166,6 +177,9 @@ class PublishedLiveStatsSummary(BaseModel):
     tournament_name: str | None = None
     surface: str | None = None
     odds_band: OddsBand | None = None
+    market: PredictionMarket | None = None
+    include_archived: bool = True
+    official_only: bool = False
 
     predictions_total: int
     closed: int

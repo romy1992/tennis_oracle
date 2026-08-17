@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 PickStatus = Literal["pending", "won", "lost", "void"]
 SlipStatus = Literal["pending", "won", "lost", "void"]
+SlipKind = Literal["parlay", "ladder"]
 
 
 class BettingSlipsGenerateRequest(BaseModel):
@@ -16,6 +17,7 @@ class BettingSlipsGenerateRequest(BaseModel):
 
 class BettingSlipPickRead(BaseModel):
     event_key: int
+    market: str = "match_winner"
     event_date: date | None = None
     event_time: time | None = None
     tournament_name: str | None = None
@@ -45,6 +47,10 @@ class BettingSlipPickRead(BaseModel):
     match_lifecycle_label: str | None = None
     event_status: str | None = None
     void_reason: str | None = None
+    # Populated for ladder slips: progressive stake at this step (base → reinvest).
+    ladder_step_index: int | None = None
+    ladder_step_stake: float | None = None
+    ladder_step_return_if_won: float | None = None
 
 
 class BettingSlipRead(BaseModel):
@@ -52,6 +58,7 @@ class BettingSlipRead(BaseModel):
     slip_key: str
     label: str
     description: str | None = None
+    slip_kind: SlipKind = "parlay"
     picks: list[BettingSlipPickRead] = Field(default_factory=list)
     pick_count: int
     combined_odds: float
@@ -134,12 +141,34 @@ class BettingSlipStatsDay(BaseModel):
 class BettingSlipStatsProfile(BaseModel):
     slip_key: str
     label: str
+    slip_kind: SlipKind = "parlay"
     slips_won: int
     slips_lost: int
     slips_pending: int = 0
     slips_void: int = 0
     slips_total: int = 0
     slip_win_rate_pct: float | None = None
+
+
+class BettingSlipStatsKind(BaseModel):
+    """Aggregate for parlays vs ladders in the same stats window."""
+
+    slip_kind: SlipKind
+    label: str
+    slips_total: int
+    slips_won: int
+    slips_lost: int
+    slips_pending: int = 0
+    slips_void: int = 0
+    slip_win_rate_pct: float | None = None
+    picks_total: int = 0
+    picks_won: int = 0
+    picks_lost: int = 0
+    picks_pending: int = 0
+    picks_void: int = 0
+    pick_hit_rate_pct: float | None = None
+    theoretical_profit_units: float = 0.0
+    theoretical_roi_pct: float | None = None
 
 
 class BettingSlipStatsSummary(BaseModel):
@@ -158,6 +187,7 @@ class BettingSlipStatsSummary(BaseModel):
     theoretical_profit_units: float = 0.0
     theoretical_roi_pct: float | None = None
     by_profile: list[BettingSlipStatsProfile] = Field(default_factory=list)
+    by_kind: list[BettingSlipStatsKind] = Field(default_factory=list)
 
 
 class BettingSlipStatsResponse(BaseModel):
@@ -191,8 +221,23 @@ class BettingSlipModelStatsRow(BaseModel):
     last_date: date
 
 
+class BettingSlipMarketStatsRow(BaseModel):
+    """Pick-level aggregate for one prediction market across slips in the window."""
+
+    market: str
+    picks_total: int
+    picks_won: int
+    picks_lost: int
+    picks_pending: int
+    picks_void: int = 0
+    pick_hit_rate_pct: float | None = None
+
+
 class BettingSlipModelStatsResponse(BaseModel):
     from_date: date
     to_date: date
     stake: float
     rows: list[BettingSlipModelStatsRow] = Field(default_factory=list)
+    by_market: list[BettingSlipMarketStatsRow] = Field(default_factory=list)
+    by_kind: list[BettingSlipStatsKind] = Field(default_factory=list)
+    by_profile: list[BettingSlipStatsProfile] = Field(default_factory=list)

@@ -296,7 +296,7 @@ export const apiClient = {
     request<DailyPredictionStatsResponse>(
       withQuery("/api/predictions/stats/daily", params)
     ),
-  getPredictionSummary: (params: { model_version?: MLModelVersion; model_name?: string } = {}) =>
+  getPredictionSummary: (params: { model_version?: MLModelVersion | string; model_name?: string } = {}) =>
     request<PredictionSummaryResponse>(
       withQuery("/api/predictions/stats/summary", params)
     ),
@@ -331,6 +331,10 @@ export const apiClient = {
     ),
   getBettingSlipCalendar: (params: { model_version?: MLModelVersion; model_name?: string } = {}) =>
     request<BettingSlipCalendarResponse>(withQuery("/api/betting-slips/calendar", params)),
+  downloadBettingSlipImage: (params: BettingSlipsQueryParams & { slip_key: string }) =>
+    getFile(withQuery("/api/betting-slips/daily/image.png", params)),
+  downloadBettingSlipImagesZip: (params: BettingSlipsQueryParams = {}) =>
+    getFile(withQuery("/api/betting-slips/daily/images.zip", params)),
   startGlobalUpdate: (
     params: {
       force?: boolean;
@@ -384,7 +388,14 @@ export const apiClient = {
       withQuery("/api/published-predictions/stats", params)
     ),
   getLiveBetaDashboard: (params: LiveBetaDashboardParams = {}) =>
-    request<LiveBetaDashboardResponse>(withQuery("/api/live-beta-dashboard", params)),
+    request<LiveBetaDashboardResponse>(
+      withQuery("/api/live-beta-dashboard", {
+        ...params,
+        market: params.market ?? "match_winner",
+        include_archived: params.include_archived ?? false,
+        official_only: params.official_only ?? false
+      })
+    ),
   getWeeklyBetaReports: (params: { limit?: number; offset?: number } = {}) =>
     request<WeeklyBetaReportListResponse>(withQuery("/api/weekly-beta-reports", params)),
   getLatestWeeklyBetaReport: () =>

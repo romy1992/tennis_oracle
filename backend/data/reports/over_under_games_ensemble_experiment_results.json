@@ -1,0 +1,770 @@
+{
+  "generated_at": "2026-08-15T07:54:00.283319+00:00",
+  "phase": "extra_markets_ensemble_experiment",
+  "market": "over_under_games",
+  "preparation_note": "over_under line=20.5; default min_date=2024-12-01; filtered match_date>=2024-12-01",
+  "dataset_path": "/app/backend/data/processed/tennis_winner_dataset_with_odds_v3.csv",
+  "rows_total": 16565,
+  "date_min": "2024-12-20",
+  "date_max": "2026-06-21",
+  "quick_mode": false,
+  "grid_search": {
+    "results_path": "/app/backend/data/reports/over_under_games_grid_search_results.json",
+    "algorithms": {
+      "logistic_regression": {
+        "cv_best_roc_auc": 0.577445,
+        "test_roc_auc": 0.569676,
+        "test_roi": -0.04837,
+        "best_params": {
+          "model__C": 0.1,
+          "model__class_weight": null,
+          "model__l1_ratio": 0.5,
+          "model__max_iter": 1500,
+          "model__solver": "saga",
+          "model__tol": 0.001
+        },
+        "fit_seconds": 24.03
+      },
+      "random_forest": {
+        "cv_best_roc_auc": 0.580534,
+        "test_roc_auc": 0.569105,
+        "test_roi": -0.048952,
+        "best_params": {
+          "model__max_depth": 10,
+          "model__max_features": "log2",
+          "model__min_samples_leaf": 50,
+          "model__n_estimators": 200
+        },
+        "fit_seconds": 50.93
+      },
+      "hist_gradient_boosting": {
+        "cv_best_roc_auc": 0.561444,
+        "test_roc_auc": 0.566402,
+        "test_roi": -0.050061,
+        "best_params": {
+          "model__l2_regularization": 0.0,
+          "model__learning_rate": 0.05,
+          "model__max_depth": null,
+          "model__max_iter": 100
+        },
+        "fit_seconds": 53.36
+      },
+      "xgboost": {
+        "cv_best_roc_auc": 0.57064,
+        "test_roc_auc": 0.564332,
+        "test_roi": -0.047971,
+        "best_params": {
+          "model__colsample_bytree": 0.8,
+          "model__learning_rate": 0.05,
+          "model__max_depth": 3,
+          "model__n_estimators": 100,
+          "model__subsample": 0.8
+        },
+        "fit_seconds": 34.96
+      },
+      "lightgbm": {
+        "cv_best_roc_auc": 0.558435,
+        "test_roc_auc": 0.558045,
+        "test_roi": -0.062631,
+        "best_params": {
+          "model__learning_rate": 0.05,
+          "model__max_depth": -1,
+          "model__n_estimators": 100,
+          "model__num_leaves": 31
+        },
+        "fit_seconds": 53.13
+      }
+    },
+    "top_algorithms_for_ensemble": [
+      "logistic_regression",
+      "random_forest",
+      "hist_gradient_boosting"
+    ],
+    "winner": "logistic_regression",
+    "production_baseline": {
+      "model_name": "random_forest",
+      "source": "walk_forward._estimators (untuned production defaults)",
+      "test_metrics": {
+        "accuracy": 0.552369,
+        "precision": 0.545234,
+        "recall": 0.550245,
+        "f1": 0.547728,
+        "roc_auc": 0.568392,
+        "log_loss": 0.685701,
+        "brier_score": 0.24633,
+        "confusion_matrix": [
+          [
+            932,
+            749
+          ],
+          [
+            734,
+            898
+          ]
+        ],
+        "class_distribution": {
+          "0": 1681,
+          "1": 1632
+        },
+        "eval_rows": 3313,
+        "eval_rows_total": 3313,
+        "value_bet": {
+          "accuracy": 0.552369,
+          "log_loss": 0.685701,
+          "brier_score": 0.24633,
+          "roi": -0.044939,
+          "yield": -0.044939,
+          "max_drawdown": 158.438563,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 3313,
+          "total_profit": -148.882805,
+          "avg_odds": 1.739226
+        }
+      }
+    }
+  },
+  "ensembles": {
+    "stacking": {
+      "test_metrics": {
+        "accuracy": 0.549049,
+        "precision": 0.545939,
+        "recall": 0.502451,
+        "f1": 0.523293,
+        "roc_auc": 0.570554,
+        "log_loss": 0.684594,
+        "brier_score": 0.245797,
+        "confusion_matrix": [
+          [
+            999,
+            682
+          ],
+          [
+            812,
+            820
+          ]
+        ],
+        "class_distribution": {
+          "0": 1681,
+          "1": 1632
+        },
+        "eval_rows": 3313,
+        "eval_rows_total": 3313,
+        "value_bet": {
+          "accuracy": 0.549049,
+          "log_loss": 0.684594,
+          "brier_score": 0.245797,
+          "roi": -0.056675,
+          "yield": -0.056675,
+          "max_drawdown": 199.599247,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 3313,
+          "total_profit": -187.764906,
+          "avg_odds": 1.728214
+        }
+      },
+      "fit_seconds": 6.21,
+      "model_path": "/app/backend/data/reports/models_staging/over_under_games_ensemble/stacking.pkl",
+      "base_algorithms": [
+        "logistic_regression",
+        "random_forest",
+        "hist_gradient_boosting"
+      ],
+      "meta_learner_coefficients": {
+        "logistic_regression": 1.935837,
+        "random_forest": 1.686022,
+        "hist_gradient_boosting": 0.325818
+      },
+      "meta_learner_intercept": -1.979251
+    },
+    "voting_soft": {
+      "test_metrics": {
+        "accuracy": 0.553577,
+        "precision": 0.551308,
+        "recall": 0.503676,
+        "f1": 0.526417,
+        "roc_auc": 0.570385,
+        "log_loss": 0.684657,
+        "brier_score": 0.245825,
+        "confusion_matrix": [
+          [
+            1012,
+            669
+          ],
+          [
+            810,
+            822
+          ]
+        ],
+        "class_distribution": {
+          "0": 1681,
+          "1": 1632
+        },
+        "eval_rows": 3313,
+        "eval_rows_total": 3313,
+        "value_bet": {
+          "accuracy": 0.553577,
+          "log_loss": 0.684657,
+          "brier_score": 0.245825,
+          "roi": -0.046448,
+          "yield": -0.046448,
+          "max_drawdown": 167.81049,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 3313,
+          "total_profit": -153.882065,
+          "avg_odds": 1.731821
+        }
+      },
+      "fit_seconds": 1.93,
+      "model_path": "/app/backend/data/reports/models_staging/over_under_games_ensemble/voting_soft.pkl",
+      "base_algorithms": [
+        "logistic_regression",
+        "random_forest",
+        "hist_gradient_boosting"
+      ]
+    }
+  },
+  "holdout_comparison": {
+    "candidates_roc_auc": {
+      "stacking": 0.570554,
+      "voting_soft": 0.570385,
+      "single:logistic_regression": 0.569676,
+      "single:random_forest": 0.569105,
+      "single:hist_gradient_boosting": 0.566402,
+      "single:xgboost": 0.564332,
+      "single:lightgbm": 0.558045,
+      "production:random_forest": 0.568392
+    },
+    "winner": "stacking",
+    "winner_roc_auc": 0.570554,
+    "beats_production": true
+  },
+  "walk_forward_comparison": {
+    "mode": "quick",
+    "folds_planned": 17,
+    "fold_overlap_warnings": [],
+    "folds_completed_per_model": {
+      "market_no_vig": 17,
+      "stacking": 17,
+      "voting_soft": 17,
+      "logistic_regression": 17,
+      "random_forest": 17,
+      "market_favorite": 17,
+      "coin_flip": 17
+    },
+    "model_names": [
+      "random_forest",
+      "stacking",
+      "voting_soft",
+      "logistic_regression"
+    ],
+    "base_algorithms": [
+      "logistic_regression",
+      "random_forest",
+      "hist_gradient_boosting"
+    ],
+    "aggregate_metrics": {
+      "random_forest": {
+        "folds_completed": 17,
+        "accuracy": {
+          "mean": 0.552636,
+          "std": 0.01697,
+          "n": 17
+        },
+        "precision": {
+          "mean": 0.545945,
+          "std": 0.023642,
+          "n": 17
+        },
+        "recall": {
+          "mean": 0.581833,
+          "std": 0.064544,
+          "n": 17
+        },
+        "f1": {
+          "mean": 0.561683,
+          "std": 0.037722,
+          "n": 17
+        },
+        "roc_auc": {
+          "mean": 0.573739,
+          "std": 0.01885,
+          "n": 17
+        },
+        "log_loss": {
+          "mean": 0.684506,
+          "std": 0.004962,
+          "n": 17
+        }
+      },
+      "stacking": {
+        "folds_completed": 17,
+        "accuracy": {
+          "mean": 0.549471,
+          "std": 0.012924,
+          "n": 17
+        },
+        "precision": {
+          "mean": 0.544802,
+          "std": 0.022744,
+          "n": 17
+        },
+        "recall": {
+          "mean": 0.568097,
+          "std": 0.104534,
+          "n": 17
+        },
+        "f1": {
+          "mean": 0.551189,
+          "std": 0.050913,
+          "n": 17
+        },
+        "roc_auc": {
+          "mean": 0.577466,
+          "std": 0.017888,
+          "n": 17
+        },
+        "log_loss": {
+          "mean": 0.683129,
+          "std": 0.004156,
+          "n": 17
+        }
+      },
+      "voting_soft": {
+        "folds_completed": 17,
+        "accuracy": {
+          "mean": 0.55352,
+          "std": 0.013183,
+          "n": 17
+        },
+        "precision": {
+          "mean": 0.5496,
+          "std": 0.022442,
+          "n": 17
+        },
+        "recall": {
+          "mean": 0.564293,
+          "std": 0.077278,
+          "n": 17
+        },
+        "f1": {
+          "mean": 0.553733,
+          "std": 0.040031,
+          "n": 17
+        },
+        "roc_auc": {
+          "mean": 0.575774,
+          "std": 0.015882,
+          "n": 17
+        },
+        "log_loss": {
+          "mean": 0.683574,
+          "std": 0.004317,
+          "n": 17
+        }
+      },
+      "logistic_regression": {
+        "folds_completed": 17,
+        "accuracy": {
+          "mean": 0.551475,
+          "std": 0.012876,
+          "n": 17
+        },
+        "precision": {
+          "mean": 0.547944,
+          "std": 0.023068,
+          "n": 17
+        },
+        "recall": {
+          "mean": 0.560021,
+          "std": 0.07941,
+          "n": 17
+        },
+        "f1": {
+          "mean": 0.550703,
+          "std": 0.038753,
+          "n": 17
+        },
+        "roc_auc": {
+          "mean": 0.574649,
+          "std": 0.018657,
+          "n": 17
+        },
+        "log_loss": {
+          "mean": 0.683572,
+          "std": 0.004972,
+          "n": 17
+        }
+      },
+      "coin_flip": {
+        "folds_completed": 17,
+        "accuracy": {
+          "mean": 0.496694,
+          "std": 0.02265,
+          "n": 17
+        },
+        "precision": {
+          "mean": 0.496694,
+          "std": 0.02265,
+          "n": 17
+        },
+        "recall": {
+          "mean": 1.0,
+          "std": 0.0,
+          "n": 17
+        },
+        "f1": {
+          "mean": 0.663416,
+          "std": 0.020167,
+          "n": 17
+        },
+        "roc_auc": {
+          "mean": 0.5,
+          "std": 0.0,
+          "n": 17
+        },
+        "log_loss": {
+          "mean": 0.693147,
+          "std": 0.0,
+          "n": 17
+        }
+      },
+      "market_favorite": {
+        "folds_completed": 17,
+        "accuracy": {
+          "mean": 0.550697,
+          "std": 0.015213,
+          "n": 17
+        },
+        "precision": {
+          "mean": 0.537094,
+          "std": 0.021773,
+          "n": 17
+        },
+        "recall": {
+          "mean": 0.68018,
+          "std": 0.039746,
+          "n": 17
+        },
+        "f1": {
+          "mean": 0.599821,
+          "std": 0.025417,
+          "n": 17
+        },
+        "roc_auc": {
+          "mean": 0.552173,
+          "std": 0.01609,
+          "n": 17
+        },
+        "log_loss": {
+          "mean": 6.164822,
+          "std": 0.222024,
+          "n": 17
+        }
+      },
+      "market_no_vig": {
+        "folds_completed": 17,
+        "accuracy": {
+          "mean": 0.55064,
+          "std": 0.015286,
+          "n": 17
+        },
+        "precision": {
+          "mean": 0.537045,
+          "std": 0.02183,
+          "n": 17
+        },
+        "recall": {
+          "mean": 0.68018,
+          "std": 0.039746,
+          "n": 17
+        },
+        "f1": {
+          "mean": 0.599791,
+          "std": 0.025457,
+          "n": 17
+        },
+        "roc_auc": {
+          "mean": 0.580276,
+          "std": 0.019405,
+          "n": 17
+        },
+        "log_loss": {
+          "mean": 0.682649,
+          "std": 0.003978,
+          "n": 17
+        }
+      }
+    },
+    "aggregate_value_bet_metrics": {
+      "random_forest": {
+        "folds_completed": 17,
+        "roi": {
+          "mean": -0.049483,
+          "std": 0.028815,
+          "n": 17
+        },
+        "yield": {
+          "mean": -0.049483,
+          "std": 0.028815,
+          "n": 17
+        },
+        "max_drawdown": {
+          "mean": 55.140504,
+          "std": 28.550394,
+          "n": 17
+        },
+        "bets_settled": {
+          "mean": 880.941176,
+          "std": 343.091562,
+          "n": 17
+        },
+        "total_profit": {
+          "mean": -43.984769,
+          "std": 30.852178,
+          "n": 17
+        },
+        "avg_odds": {
+          "mean": 1.734803,
+          "std": 0.019527,
+          "n": 17
+        }
+      },
+      "stacking": {
+        "folds_completed": 17,
+        "roi": {
+          "mean": -0.063768,
+          "std": 0.02364,
+          "n": 17
+        },
+        "yield": {
+          "mean": -0.063768,
+          "std": 0.02364,
+          "n": 17
+        },
+        "max_drawdown": {
+          "mean": 66.068812,
+          "std": 26.300026,
+          "n": 17
+        },
+        "bets_settled": {
+          "mean": 880.941176,
+          "std": 343.091562,
+          "n": 17
+        },
+        "total_profit": {
+          "mean": -54.034216,
+          "std": 28.122393,
+          "n": 17
+        },
+        "avg_odds": {
+          "mean": 1.717915,
+          "std": 0.020252,
+          "n": 17
+        }
+      },
+      "voting_soft": {
+        "folds_completed": 17,
+        "roi": {
+          "mean": -0.052749,
+          "std": 0.025495,
+          "n": 17
+        },
+        "yield": {
+          "mean": -0.052749,
+          "std": 0.025495,
+          "n": 17
+        },
+        "max_drawdown": {
+          "mean": 60.185546,
+          "std": 25.299806,
+          "n": 17
+        },
+        "bets_settled": {
+          "mean": 880.941176,
+          "std": 343.091562,
+          "n": 17
+        },
+        "total_profit": {
+          "mean": -46.371398,
+          "std": 28.58797,
+          "n": 17
+        },
+        "avg_odds": {
+          "mean": 1.724781,
+          "std": 0.020092,
+          "n": 17
+        }
+      },
+      "logistic_regression": {
+        "folds_completed": 17,
+        "roi": {
+          "mean": -0.061095,
+          "std": 0.024703,
+          "n": 17
+        },
+        "yield": {
+          "mean": -0.061095,
+          "std": 0.024703,
+          "n": 17
+        },
+        "max_drawdown": {
+          "mean": 65.658504,
+          "std": 28.025152,
+          "n": 17
+        },
+        "bets_settled": {
+          "mean": 880.941176,
+          "std": 343.091562,
+          "n": 17
+        },
+        "total_profit": {
+          "mean": -52.62245,
+          "std": 30.504615,
+          "n": 17
+        },
+        "avg_odds": {
+          "mean": 1.715841,
+          "std": 0.019729,
+          "n": 17
+        }
+      },
+      "coin_flip": {
+        "folds_completed": 17,
+        "roi": {
+          "mean": -0.1113,
+          "std": 0.038904,
+          "n": 17
+        },
+        "yield": {
+          "mean": -0.1113,
+          "std": 0.038904,
+          "n": 17
+        },
+        "max_drawdown": {
+          "mean": 106.920393,
+          "std": 54.443818,
+          "n": 17
+        },
+        "bets_settled": {
+          "mean": 880.941176,
+          "std": 343.091562,
+          "n": 17
+        },
+        "total_profit": {
+          "mean": -100.264994,
+          "std": 55.065865,
+          "n": 17
+        },
+        "avg_odds": {
+          "mean": 1.828502,
+          "std": 0.017369,
+          "n": 17
+        }
+      },
+      "market_favorite": {
+        "folds_completed": 17,
+        "roi": {
+          "mean": -0.069962,
+          "std": 0.025734,
+          "n": 17
+        },
+        "yield": {
+          "mean": -0.069962,
+          "std": 0.025734,
+          "n": 17
+        },
+        "max_drawdown": {
+          "mean": 69.965464,
+          "std": 31.855092,
+          "n": 17
+        },
+        "bets_settled": {
+          "mean": 880.941176,
+          "std": 343.091562,
+          "n": 17
+        },
+        "total_profit": {
+          "mean": -59.839738,
+          "std": 33.257077,
+          "n": 17
+        },
+        "avg_odds": {
+          "mean": 1.700708,
+          "std": 0.018213,
+          "n": 17
+        }
+      },
+      "market_no_vig": {
+        "folds_completed": 17,
+        "roi": {
+          "mean": -0.070069,
+          "std": 0.02582,
+          "n": 17
+        },
+        "yield": {
+          "mean": -0.070069,
+          "std": 0.02582,
+          "n": 17
+        },
+        "max_drawdown": {
+          "mean": 69.965464,
+          "std": 31.855092,
+          "n": 17
+        },
+        "bets_settled": {
+          "mean": 880.941176,
+          "std": 343.091562,
+          "n": 17
+        },
+        "total_profit": {
+          "mean": -59.949149,
+          "std": 33.366148,
+          "n": 17
+        },
+        "avg_odds": {
+          "mean": 1.700708,
+          "std": 0.018213,
+          "n": 17
+        }
+      }
+    },
+    "ranking_by_roc_auc": [
+      "stacking",
+      "voting_soft",
+      "logistic_regression",
+      "random_forest"
+    ],
+    "ranking_including_benchmarks": [
+      "market_no_vig",
+      "stacking",
+      "voting_soft",
+      "logistic_regression",
+      "random_forest",
+      "market_favorite",
+      "coin_flip"
+    ],
+    "best_model": "stacking",
+    "beats_production": true,
+    "production_baseline": "random_forest",
+    "production_roc_auc_mean": 0.573739
+  },
+  "recommendation": {
+    "verdict": "candidate_for_production",
+    "detail": "stacking batte random_forest sia su holdout sia su walk-forward quick. Attendere conferma esplicita prima del promote.",
+    "best_ensemble_holdout": "stacking",
+    "best_ensemble_holdout_roc_auc": 0.570554,
+    "production_baseline": "random_forest",
+    "search_winner": "logistic_regression",
+    "walk_forward_best": "stacking"
+  },
+  "production_gate": {
+    "promote_now": false,
+    "reason": "Promozione bloccata di proposito: serve conferma esplicita dopo lettura del resoconto metriche."
+  }
+}

@@ -1,9 +1,16 @@
-"""Temporal walk-forward validation for all model versions.
+"""Temporal walk-forward validation for live models across all active markets.
 
 Independent from the single holdout split in ``train_baseline``:
 - never shuffles rows for official WF metrics;
 - never overwrites ``baseline_*_metrics.json`` or production ``.pkl`` artifacts;
 - never updates the live/public model selection.
+Default scope is every active market/version (match-winner +
+first_set_winner + over_under_games), not archived match-winner v1-v3 — see
+``walk_forward_markets.ACTIVE_WALK_FORWARD_MARKET_VERSIONS``. This module
+owns the match-winner (CSV-based) fold generation/evaluation primitives;
+``walk_forward_markets.py`` plugs the DB-based extra markets into the same
+engine to avoid a circular import (those markets' dataframe builders/fold
+evaluators already import primitives FROM this module).
 """
 
 from __future__ import annotations
@@ -16,9 +23,12 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 import pandas as pd
+from sqlalchemy.orm import Session
 
 from backend.src.app.ml.model_versioning import (
+    ACTIVE_MATCH_WINNER_VERSIONS,
     MODEL_VERSIONS,
+    MODELS_DIR,
     PROCESSED_DATA_DIR,
     REPORTS_DIR,
     ModelVersion,
@@ -855,6 +865,33 @@ def _aggregate_official_benchmarks(completed: list[WalkForwardFoldOutcome]) -> d
     return aggregate
 
 
+def _load_extra_market_holdout_metadata(model_version: str) -> dict[str, Any] | None:
+    """Read the ``model_metadata.json`` written by the extra-market final-model
+    trainers (``train_first_set_winner_odds_final_model.py`` /
+    ``train_over_under_games_final_model.py``), which have no holdout split
+    (trained on full history) but do record training-row counts/date range."""
+    path = MODELS_DIR / model_version / "model_metadata.json"
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as handle:
+        metadata = json.load(handle)
+    return {
+        "source": "extra_market_full_history_training",
+        "metrics_path": str(path),
+        "split": None,
+        "models": {},
+        "note": (
+            "Nessun holdout per questo mercato: il modello di produzione è allenato "
+            "su tutto lo storico disponibile. Confronto informativo con i metadati di "
+            "training (righe, intervallo date). La stima OOS resta il walk-forward."
+        ),
+        "training_rows": metadata.get("training_rows"),
+        "date_min": metadata.get("date_min"),
+        "date_max": metadata.get("date_max"),
+        "generated_at": metadata.get("generated_at"),
+    }
+
+
 def load_holdout_metrics_for_comparison(
     model_version: str,
     reports_dir: str | Path = REPORTS_DIR,
@@ -862,7 +899,7 @@ def load_holdout_metrics_for_comparison(
     """Read current single-split metrics without modifying them."""
     version_paths = MODEL_VERSIONS.get(model_version)  # type: ignore[arg-type]
     if version_paths is None:
-        return None
+        return _load_extra_market_holdout_metadata(model_version)
     path = Path(reports_dir) / version_paths.metrics_filename
     if not path.exists():
         return None
@@ -906,11 +943,14 @@ def _count_planned_fold_units(
     *,
     processed_dir: str | Path,
     model_names: tuple[str, ...],
+    db: Session | None = None,
     should_cancel: ShouldCancel | None = None,
     prepare_progress_callback: PrepareProgressCallback | None = None,
 ) -> int:
+    from backend.src.app.ml.training.walk_forward_markets import EXTRA_MARKET_SPECS
+
     total = 0
-    version_list = [version for version in versions if version in MODEL_VERSIONS]
+    version_list = list(versions)
     for index, version in enumerate(version_list):
         if should_cancel and should_cancel():
             raise BackgroundJobCancelled("Walk-forward cancelled.")
@@ -918,18 +958,152 @@ def _count_planned_fold_units(
             prepare_progress_callback(
                 f"Preparazione fold · {version} ({index + 1}/{len(version_list)})"
             )
-        dataset_path = select_training_dataset(processed_dir, model_version=version)
-        raw = pd.read_csv(dataset_path, low_memory=False)
-        dataframe = prepare_temporal_dataframe(raw, model_version=version)
+        if version in MODEL_VERSIONS:
+            dataset_path = select_training_dataset(processed_dir, model_version=version)
+            raw = pd.read_csv(dataset_path, low_memory=False)
+            dataframe = prepare_temporal_dataframe(raw, model_version=version)
+        elif version in EXTRA_MARKET_SPECS:
+            spec = EXTRA_MARKET_SPECS[version]
+            dataframe, _ = spec.load_dataframe(db, processed_dir)
+        else:
+            continue
         folds = generate_walk_forward_folds(dataframe, config)
         total += len(folds) * len(model_names)
     return total
+
+
+def _finalize_version_result(
+    *,
+    model_version: str,
+    dataset_path: str,
+    dataframe: pd.DataFrame,
+    folds: list[WalkForwardFoldSpec],
+    outcomes: list[WalkForwardFoldOutcome],
+    version_leakage: list[str],
+    feature_set: list[str],
+    excluded_feature_model_version: str,
+    reports_dir: str | Path,
+) -> WalkForwardVersionResult:
+    completed = [item for item in outcomes if item.status == "completed"]
+    skipped = [item for item in outcomes if item.status.startswith("skipped")]
+    errors = [item for item in outcomes if item.status == "error"]
+    for item in outcomes:
+        version_leakage.extend(item.leakage_flags)
+    # de-dupe preserving order
+    seen: set[str] = set()
+    unique_leakage: list[str] = []
+    for flag in version_leakage:
+        if flag not in seen:
+            seen.add(flag)
+            unique_leakage.append(flag)
+
+    coverage = {
+        "folds_planned": len(folds),
+        "fold_outcomes": len(outcomes),
+        "completed": len(completed),
+        "skipped": len(skipped),
+        "errors": len(errors),
+        "dataset_rows_after_filters": int(len(dataframe)),
+        "features_excluded_sample": excluded_feature_columns(
+            dataframe, feature_set, model_version=excluded_feature_model_version
+        )[:40],
+    }
+
+    aggregate_metrics = _mean_metrics(completed)
+    aggregate_metrics["official_benchmarks"] = _aggregate_official_benchmarks(completed)
+
+    return WalkForwardVersionResult(
+        model_version=model_version,
+        dataset_path=dataset_path,
+        dataset_rows=int(len(dataframe)),
+        date_min=_date_min(dataframe),
+        date_max=_date_max(dataframe),
+        feature_set=feature_set,
+        folds=outcomes,
+        aggregate_metrics=aggregate_metrics,
+        holdout_comparison=load_holdout_metrics_for_comparison(
+            model_version, reports_dir=reports_dir
+        ),
+        coverage=coverage,
+        leakage_flags=unique_leakage,
+    )
+
+
+def _run_walk_forward_for_market_version(
+    version: str,
+    config: WalkForwardConfig,
+    *,
+    db: Session | None,
+    processed_dir: str | Path,
+    reports_dir: str | Path,
+    progress_callback: ProgressCallback | None,
+    should_cancel: ShouldCancel | None,
+    estimators_factory: EstimatorsFactory,
+) -> WalkForwardVersionResult:
+    """Extra-market (non match-winner) counterpart of ``run_walk_forward_for_version``.
+
+    Reuses the dataframe builder + fold evaluator already built for this
+    market in ``train_first_set_winner_odds.py`` / ``train_over_under_games.py``
+    (see ``walk_forward_markets.EXTRA_MARKET_SPECS``), just plugged into the
+    same fold-generation/persistence pipeline as match-winner versions.
+    """
+    from backend.src.app.ml.training.walk_forward_markets import EXTRA_MARKET_SPECS
+
+    spec = EXTRA_MARKET_SPECS.get(version)
+    if spec is None:
+        raise ValueError(f"Versione/mercato walk-forward sconosciuto: {version}")
+    if db is None:
+        raise ValueError(f"Walk-forward per '{version}' richiede una sessione DB.")
+
+    dataframe, dataset_path = spec.load_dataframe(db, processed_dir)
+    folds = generate_walk_forward_folds(dataframe, config)
+    feature_set = selected_feature_columns(dataframe, model_version="v3") + [
+        column for column in spec.feature_columns_extra if column in dataframe.columns
+    ]
+    outcomes: list[WalkForwardFoldOutcome] = []
+    version_leakage = list(_fold_test_overlaps(folds))
+    if not folds:
+        version_leakage.append("no_folds_generated_insufficient_date_span")
+
+    for fold in folds:
+        if should_cancel and should_cancel():
+            raise BackgroundJobCancelled("Walk-forward cancelled.")
+        train, test = slice_fold_frames(dataframe, fold)
+        outcomes.extend(
+            spec.evaluate_fold(
+                train,
+                test,
+                dataset_path=str(dataset_path),
+                fold=fold,
+                config=config,
+                estimators_factory=estimators_factory,
+            )
+        )
+        if progress_callback:
+            progress_callback(
+                f"{version} · fold {fold.fold_index + 1}/{len(folds)}",
+                len(MODEL_NAMES),
+                len(folds),
+            )
+
+    return _finalize_version_result(
+        model_version=version,
+        dataset_path=str(dataset_path),
+        dataframe=dataframe,
+        folds=folds,
+        outcomes=outcomes,
+        version_leakage=version_leakage,
+        feature_set=feature_set,
+        excluded_feature_model_version="v3",
+        reports_dir=reports_dir,
+    )
 
 
 def run_walk_forward_for_version(
     model_version: ModelVersion | str,
     config: WalkForwardConfig,
     *,
+    db: Session | None = None,
     processed_dir: str | Path = PROCESSED_DATA_DIR,
     reports_dir: str | Path = REPORTS_DIR,
     model_names: tuple[str, ...] = MODEL_NAMES,
@@ -938,6 +1112,18 @@ def run_walk_forward_for_version(
     estimators_factory: EstimatorsFactory = _estimators,
 ) -> WalkForwardVersionResult:
     config.validate()
+    if model_version not in MODEL_VERSIONS:
+        return _run_walk_forward_for_market_version(
+            str(model_version),
+            config,
+            db=db,
+            processed_dir=processed_dir,
+            reports_dir=reports_dir,
+            progress_callback=progress_callback,
+            should_cancel=should_cancel,
+            estimators_factory=estimators_factory,
+        )
+
     dataset_path = select_training_dataset(processed_dir, model_version=model_version)
     raw = pd.read_csv(dataset_path, low_memory=False)
     dataframe = prepare_temporal_dataframe(raw, model_version=model_version)
@@ -972,48 +1158,16 @@ def run_walk_forward_for_version(
                 len(folds),
             )
 
-    completed = [item for item in outcomes if item.status == "completed"]
-    skipped = [item for item in outcomes if item.status.startswith("skipped")]
-    errors = [item for item in outcomes if item.status == "error"]
-    for item in outcomes:
-        version_leakage.extend(item.leakage_flags)
-    # de-dupe preserving order
-    seen: set[str] = set()
-    unique_leakage: list[str] = []
-    for flag in version_leakage:
-        if flag not in seen:
-            seen.add(flag)
-            unique_leakage.append(flag)
-
-    coverage = {
-        "folds_planned": len(folds),
-        "fold_outcomes": len(outcomes),
-        "completed": len(completed),
-        "skipped": len(skipped),
-        "errors": len(errors),
-        "dataset_rows_after_filters": int(len(dataframe)),
-        "features_excluded_sample": excluded_feature_columns(
-            dataframe, feature_set, model_version=model_version
-        )[:40],
-    }
-
-    aggregate_metrics = _mean_metrics(completed)
-    aggregate_metrics["official_benchmarks"] = _aggregate_official_benchmarks(completed)
-
-    return WalkForwardVersionResult(
+    return _finalize_version_result(
         model_version=str(model_version),
         dataset_path=str(dataset_path),
-        dataset_rows=int(len(dataframe)),
-        date_min=_date_min(dataframe),
-        date_max=_date_max(dataframe),
+        dataframe=dataframe,
+        folds=folds,
+        outcomes=outcomes,
+        version_leakage=version_leakage,
         feature_set=feature_set,
-        folds=outcomes,
-        aggregate_metrics=aggregate_metrics,
-        holdout_comparison=load_holdout_metrics_for_comparison(
-            str(model_version), reports_dir=reports_dir
-        ),
-        coverage=coverage,
-        leakage_flags=unique_leakage,
+        excluded_feature_model_version=str(model_version),
+        reports_dir=reports_dir,
     )
 
 
@@ -1021,6 +1175,7 @@ def run_walk_forward_validation(
     config: WalkForwardConfig | None = None,
     *,
     versions: tuple[str, ...] | None = None,
+    db: Session | None = None,
     processed_dir: str | Path = PROCESSED_DATA_DIR,
     reports_dir: str | Path = REPORTS_DIR,
     model_names: tuple[str, ...] = MODEL_NAMES,
@@ -1028,10 +1183,21 @@ def run_walk_forward_validation(
     prepare_progress_callback: PrepareProgressCallback | None = None,
     should_cancel: ShouldCancel | None = None,
 ) -> WalkForwardRunResult:
-    """Run walk-forward for all (or selected) versions. Does not touch public models."""
+    """Run walk-forward for live (or selected) markets. Does not touch public models.
+
+    Default scope (``versions=None``) is every currently active market/version
+    (see ``walk_forward_markets.ACTIVE_WALK_FORWARD_MARKET_VERSIONS``), not just
+    match-winner. Extra markets (first_set_winner, over_under_games) build their
+    dataframe from the DB, so ``db`` must be provided to include them.
+    """
+    from backend.src.app.ml.training.walk_forward_markets import (
+        ACTIVE_WALK_FORWARD_MARKET_VERSIONS,
+        ALL_WALK_FORWARD_VERSIONS,
+    )
+
     resolved = config or WalkForwardConfig()
     resolved.validate()
-    selected_versions = versions or tuple(MODEL_VERSIONS.keys())
+    selected_versions = versions or ACTIVE_WALK_FORWARD_MARKET_VERSIONS
     started = datetime.now(timezone.utc)
     version_results: list[WalkForwardVersionResult] = []
     if prepare_progress_callback:
@@ -1041,6 +1207,7 @@ def run_walk_forward_validation(
         selected_versions,
         processed_dir=processed_dir,
         model_names=model_names,
+        db=db,
         should_cancel=should_cancel,
         prepare_progress_callback=prepare_progress_callback,
     )
@@ -1053,8 +1220,8 @@ def run_walk_forward_validation(
             progress_callback(phase, completed_units, max(total_units, 1))
 
     for version in selected_versions:
-        if version not in MODEL_VERSIONS:
-            raise ValueError(f"Versione modello sconosciuta: {version}")
+        if version not in ALL_WALK_FORWARD_VERSIONS:
+            raise ValueError(f"Versione/mercato walk-forward sconosciuto: {version}")
         if should_cancel and should_cancel():
             raise BackgroundJobCancelled("Walk-forward cancelled.")
         logger.info("Walk-forward start version=%s mode=%s", version, resolved.mode)
@@ -1062,6 +1229,7 @@ def run_walk_forward_validation(
             run_walk_forward_for_version(
                 version,
                 resolved,
+                db=db,
                 processed_dir=processed_dir,
                 reports_dir=reports_dir,
                 model_names=model_names,

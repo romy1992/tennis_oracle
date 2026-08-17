@@ -305,5 +305,100 @@ class WalkForwardTemporalTest(unittest.TestCase):
                 self.assertIsNotNone(benchmark_outcomes[0].skip_reason)
 
 
+class ResolveVersionsDefaultTests(unittest.TestCase):
+    def test_service_default_is_every_active_market(self) -> None:
+        from backend.src.app.ml.training.walk_forward_markets import (
+            ACTIVE_WALK_FORWARD_MARKET_VERSIONS,
+        )
+        from backend.src.app.services.walk_forward import resolve_versions
+
+        default = resolve_versions(None)
+        self.assertEqual(default, ACTIVE_WALK_FORWARD_MARKET_VERSIONS)
+        self.assertIn("v4", default)
+        self.assertIn("first_set_winner_v2", default)
+        self.assertIn("over_under_games_v1", default)
+        self.assertNotIn("v1", default)
+        self.assertNotIn("v2", default)
+        self.assertNotIn("v3", default)
+
+    def test_unknown_explicit_version_is_rejected(self) -> None:
+        from backend.src.app.schemas.walk_forward import WalkForwardTriggerRequest
+        from backend.src.app.services.walk_forward import resolve_versions
+
+        with self.assertRaises(ValueError):
+            resolve_versions(WalkForwardTriggerRequest(versions=["not_a_real_market"]))
+
+    def test_explicit_extra_market_version_is_accepted(self) -> None:
+        from backend.src.app.schemas.walk_forward import WalkForwardTriggerRequest
+        from backend.src.app.services.walk_forward import resolve_versions
+
+        result = resolve_versions(WalkForwardTriggerRequest(versions=["first_set_winner_v2"]))
+        self.assertEqual(result, ("first_set_winner_v2",))
+
+
+class MarketDispatchTests(unittest.TestCase):
+    def test_missing_db_raises_for_extra_market_version(self) -> None:
+        config = WalkForwardConfig(
+            mode="expanding",
+            initial_train_days=30,
+            test_days=10,
+            step_days=10,
+            min_train_rows=5,
+            min_test_rows=2,
+        )
+        with self.assertRaises(ValueError):
+            run_walk_forward_for_version("first_set_winner_v2", config, db=None)
+
+    def test_run_walk_forward_for_version_dispatches_to_market_spec(self) -> None:
+        from backend.src.app.ml.training import walk_forward_markets
+
+        dataset = _synthetic_dataset(n_days=220, matches_per_day=2)
+
+        def _load_dataframe(_db, _processed_dir):
+            return dataset, Path("fake_market_dataset.csv")
+
+        def _evaluate_fold(train, test, *, dataset_path, fold, config, **_kwargs):
+            from backend.src.app.ml.training.walk_forward import evaluate_fold_models
+
+            return evaluate_fold_models(
+                train,
+                test,
+                model_version="fake_market_v1",
+                dataset_path=dataset_path,
+                fold=fold,
+                config=config,
+                model_names=("logistic_regression",),
+            )
+
+        fake_spec = walk_forward_markets.WalkForwardMarketSpec(
+            version_label="fake_market_v1",
+            target_column="target_player_1_win",
+            feature_columns_extra=(),
+            load_dataframe=_load_dataframe,
+            evaluate_fold=_evaluate_fold,
+        )
+        original_specs = dict(walk_forward_markets.EXTRA_MARKET_SPECS)
+        walk_forward_markets.EXTRA_MARKET_SPECS["fake_market_v1"] = fake_spec
+        try:
+            config = WalkForwardConfig(
+                mode="expanding",
+                initial_train_days=90,
+                test_days=30,
+                step_days=30,
+                min_train_rows=40,
+                min_test_rows=10,
+            )
+            result = run_walk_forward_for_version(
+                "fake_market_v1", config, db=object(),
+            )
+        finally:
+            walk_forward_markets.EXTRA_MARKET_SPECS.clear()
+            walk_forward_markets.EXTRA_MARKET_SPECS.update(original_specs)
+
+        self.assertEqual(result.model_version, "fake_market_v1")
+        self.assertTrue(result.folds)
+        self.assertTrue(any(fold.status == "completed" for fold in result.folds))
+
+
 if __name__ == "__main__":
     unittest.main()

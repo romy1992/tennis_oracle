@@ -34,7 +34,7 @@ class CalibrationConfigSchema(BaseModel):
     embargo_days: int | None = Field(default=None, ge=0)
     edge_threshold: float | None = Field(default=None, ge=0.0)
     random_state: int | None = None
-    versions: list[Literal["v1", "v2", "v3"]] | None = None
+    versions: list[Literal["v1", "v2", "v3", "v4"]] | None = None
     walk_forward_run_id: int | None = None
 
 

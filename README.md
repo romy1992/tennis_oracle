@@ -146,7 +146,7 @@ RATE_LIMIT_TELEGRAM_EXPENSIVE=10
 - Endpoint costosi (login, imports, global-update, SMVA, regenerate schedine, …) hanno un quota aggiuntiva
 - `/health` e `/ready` (e docs OpenAPI) sono esclusi
 - Superato il limite: HTTP **429** con header `Retry-After`
-- Bot Telegram: limite per `telegram_user_id` (più stretto su `/schedine`, `/partite`, `/statistiche`)
+- Bot Telegram: limite per `telegram_user_id` (più stretto su `/schedine`, `/scalate`, `/partite`, `/statistiche`)
 
 All’avvio, se la tabella `admin_user` è vuota e sono impostati `ADMIN_USERNAME` / `ADMIN_PASSWORD`, viene creato il primo admin (password con bcrypt). Non inserire segreti reali nel repo: usa `backend/.env.example` come modello.
 
@@ -176,7 +176,7 @@ PUBLIC_MODEL_VERSION=
 PUBLIC_MODEL_NAME=
 ```
 
-Prima di abilitare: applicare migrazioni fino a `0024`, registrare e **attivare** un candidato da dashboard (`/public-model-registry`) o API admin, verificare un global-update e il report `summary.live_publication`. Nessun fallback silenzioso ad un’altra combo. Le pubblicazioni già salvate non vengono riscritte al cambio modello attivo.
+Prima di abilitare: applicare migrazioni fino a `0024`, registrare e **attivare** un candidato via API admin (`/api/public-model-registry`), verificare un global-update e il report `summary.live_publication`. Nessun fallback silenzioso ad un’altra combo. Le pubblicazioni già salvate non vengono riscritte al cambio modello attivo. (La UI non espone più la pagina registro: in LIVE si filtra per **mercato**.)
 
 `TELEGRAM_SERVICE_API_KEY` deve coincidere con `SERVICE_API_KEY` quando quest’ultima è valorizzata (header `X-Service-Token`). Per ruotare: imposta la nuova chiave in `SERVICE_API_KEY`, lascia la vecchia in `SERVICE_API_KEY_PREVIOUS`, aggiorna `TELEGRAM_SERVICE_API_KEY` sul bot, poi rimuovi `SERVICE_API_KEY_PREVIOUS`.
 
@@ -306,8 +306,10 @@ Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, met
 | GET | `/api/predictions/stats/daily` | `predictions.read_daily_prediction_stats` | admin | Stats giornaliere |
 | GET | `/api/predictions/stats/summary` | `predictions.read_prediction_summary` | admin o service | Riepilogo accuracy/ROI |
 | GET | `/api/single-match-value` | `single_match_value.read_single_match_value_analysis` | admin o service | Analisi value bet (margine globale default 2%) |
-| GET | `/api/betting-slips/daily` | `betting_slips.read_daily_betting_slips` | admin o service (`regenerate=true` → solo admin) | Schedine del giorno (9 profili a tier) |
+| GET | `/api/betting-slips/daily` | `betting_slips.read_daily_betting_slips` | admin o service (`regenerate=true` → solo admin) | Schedine del giorno (fino a 10 profili: Doppia + tier Play/Border/Miste) |
 | POST | `/api/betting-slips/daily` | `betting_slips.generate_daily_betting_slips` | admin | Rigenera schedine del giorno |
+| GET | `/api/betting-slips/daily/image.png` | `betting_slips.download_daily_betting_slip_image` | admin | PNG singola schedina (stesso layout Telegram) |
+| GET | `/api/betting-slips/daily/images.zip` | `betting_slips.download_daily_betting_slip_images_zip` | admin | ZIP di tutte le PNG della giocata/giorno |
 | GET | `/api/betting-slips/calendar` | `betting_slips.read_betting_slip_calendar` | admin | Calendario giorni con schedine |
 | POST | `/api/betting-slips/refresh` | `betting_slips.refresh_daily_betting_slips` | admin | Refresh import + rigenera schedine |
 | GET | `/api/betting-slips/stats` | `betting_slips.read_betting_slip_stats` | admin | Stats schedine |
@@ -340,12 +342,12 @@ Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, met
 | GET | `/api/telegram/feedback/{feedback_id}` | `telegram_feedback.read_telegram_feedback` | admin | Dettaglio feedback |
 | PATCH | `/api/telegram/feedback/{feedback_id}` | `telegram_feedback.patch_telegram_feedback_status` | admin | Aggiorna stato (`new`/`reviewing`/`resolved`/`rejected`) |
 | POST | `/api/published-predictions` | `published_predictions.create_published_prediction` | admin | Pubblica snapshot immutabile |
-| GET | `/api/published-predictions` | `published_predictions.read_published_predictions` | admin | Storico pubblicazioni (filtri) |
-| GET | `/api/published-predictions/stats` | `published_predictions.read_published_live_stats` | admin | Statistiche live tipbook (ledger immutabile; filtri periodo/modello/torneo/superficie/fascia quota) |
+| GET | `/api/published-predictions` | `published_predictions.read_published_predictions` | admin | Storico pubblicazioni (filtri mercato/storico/PLAY) |
+| GET | `/api/published-predictions/stats` | `published_predictions.read_published_live_stats` | admin | Statistiche live tipbook (ledger immutabile; filtri periodo/mercato/torneo/superficie/fascia quota) |
 | GET | `/api/published-predictions/by-publication/{publication_id}` | `published_predictions.read_publication_versions` | admin | Catena versioni |
 | GET | `/api/published-predictions/{id}` | `published_predictions.read_published_prediction` | admin | Dettaglio snapshot |
 | POST | `/api/published-predictions/{id}/corrections` | `published_predictions.create_published_prediction_correction` | admin | Nuova versione (append-only) |
-| GET | `/api/live-beta-dashboard` | `live_beta_dashboard.read_live_beta_dashboard` | admin | Dashboard aggregata beta live (pipeline, tipbook, bot, completezza, errori) |
+| GET | `/api/live-beta-dashboard` | `live_beta_dashboard.read_live_beta_dashboard` | admin | Dashboard live multi-mercato (pipeline, tutti i pronostici vs PLAY ufficiali, bot, completezza, errori) |
 | GET | `/api/weekly-beta-reports` | `weekly_beta_reports.list_reports` | admin | Storico report settimanali beta |
 | GET | `/api/weekly-beta-reports/latest` | `weekly_beta_reports.read_latest_report` | admin | Ultimo report settimanale |
 | GET | `/api/weekly-beta-reports/{report_id}` | `weekly_beta_reports.read_report` | admin | Dettaglio report (payload + WoW) |
@@ -365,8 +367,8 @@ Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, met
 | POST | `/api/public-model-registry/candidates` | `public_model_registry.create_candidate` | admin | Registra candidato con metriche/artefatti |
 | POST | `/api/public-model-registry/entries/{id}/activate` | `public_model_registry.activate_entry` | admin | Promuove candidato → active (ritira il precedente) |
 | POST | `/api/public-model-registry/rollback` | `public_model_registry.rollback_active` | admin | Ripristina il modello precedente |
-| GET | `/api/probability-bands` | `probability_bands.read_probability_band_analysis` | admin | Analisi prestazioni per fasce probabilità/edge (live, walk-forward OOS, backtest) |
-| GET | `/api/segment-roi` | `segment_roi.read_segment_roi_analysis` | admin | ROI/yield/hit rate/drawdown per segmento (superficie, torneo, circuito, …) |
+| GET | `/api/probability-bands` | `probability_bands.read_probability_band_analysis` | admin | Fasce probabilità/edge: live (param `market`, un mercato alla volta), walk-forward OOS, backtest |
+| GET | `/api/segment-roi` | `segment_roi.read_segment_roi_analysis` | admin | ROI per segmento; live con `market` (Match / 1° set / O/U non misti) |
 | GET | `/api/ops/checks` | `ops.get_ops_checks` | admin | Controlli operativi (import, pronostici, durata); `?alert=true` notifica admin |
 | POST | `/api/prematch-odds-snapshots` | `prematch_odds_snapshots.create_prematch_odds_snapshot` | admin | Append singolo rilevamento quote |
 | POST | `/api/prematch-odds-snapshots/from-payload` | `prematch_odds_snapshots.create_prematch_odds_snapshots_from_payload` | admin | Ingest matrice Home/Away |
@@ -454,7 +456,7 @@ Modulo `backend/src/entity/` (home canonica delle tabelle operative). `app/model
 | `WeeklyBetaReport` | Snapshot report settimanale beta (`weekly_beta_report`; migrazione `0020`; payload KPI + stato invio Telegram admin) |
 | `TelegramNotificationDelivery` | Ledger consegna push (`telegram_notification_delivery`; migrazione `0018`; dedupe per utente/kind/giorno) |
 | `User` / `Plan` / `Subscription` / `Entitlement` / `PaymentEvent` / `AccessLog` | Dominio abbonamenti e permessi data-driven (`app_user`, `plan`, `subscription`, `entitlement`, `payment_event`, `access_log`; migrazione `0025`) |
-| `PublishedPrediction` | Registro immutabile pronostici pubblicati (`published_prediction`; migrazione `0013`; versioni via `publication_id` + `content_version`) |
+| `PublishedPrediction` | Registro immutabile pronostici pubblicati (`published_prediction`; migrazione `0013`; versioni via `publication_id` + `content_version`; colonne `market` / `value_decision` / `official_play` in `0030`) |
 | `PrematchOddsSnapshot` | Storico append-only quote pre-match per bookmaker/selezione (`prematch_odds_snapshot`; migrazione `0014`; tipi `opening`/`observed`/`publication`/`closing`) |
 | `AdminUser` | Account amministratore (`admin_user`; migrazione `0011`; solo hash password) |
 | `RateLimitBucket` | Contatori rate limit multi-istanza (`rate_limit_bucket`; migrazione `0012`) |
@@ -539,11 +541,11 @@ KPI live **solo** dal ledger `PublishedPrediction` (non da `MatchPrediction` / s
 
 #### `app/services/live_beta_dashboard.py`
 
-Aggregato admin per la beta live: riusa pipeline (`global_update` + `import_state`), tipbook live, telegram stats, completezza quote/snapshot ed errori recenti. Non mescola training/backtest nei KPI LIVE.
+Aggregato admin per la dashboard live multi-mercato: riusa pipeline (`global_update` + `import_state`), ledger pubblicazioni, Telegram stats, completezza quote/snapshot ed errori recenti. Separa Vincitore partita, Vincitore 1° set e Over/Under Games; distingue tutti i pronostici dai soli PLAY ufficiali e non mescola training/backtest nei KPI LIVE. Le versioni Match Winner archiviate sono escluse di default ma restano consultabili per audit.
 
 | Funzione | Ruolo |
 |----------|-------|
-| `compute_live_beta_dashboard` | Risposta unica per `GET /api/live-beta-dashboard` (include `publication_health` diagnostico e copertura closing) |
+| `compute_live_beta_dashboard` | Risposta unica per `GET /api/live-beta-dashboard`: KPI per mercato, `live_stats` vs `official_live_stats`, `publication_health` globale e copertura closing market-aware |
 
 #### `app/services/weekly_beta_report.py`
 
@@ -626,14 +628,17 @@ Ledger append-only delle quote pre-match (non sostituisce il JSON su `Fixture`/`
 | Simbolo | Ruolo |
 |---------|-------|
 | `CandidatePick` / `GeneratedSlip` | Dataclass candidate / slip generata |
-| `SLIP_PROFILES` | 9 profili: 3 Play, 3 Play+Borderline, 3 miste (tutti gli stati) |
-| `build_candidate_pool` | Pool pick da fixtures+predizioni+odds (include PLAY/BORDERLINE/NO BET) |
+| `SLIP_PROFILES` | 10 profili: Play · Doppia (2 pick score), 3 Play, 3 Play+Borderline, 3 miste |
+| `LADDER_PROFILES` / `generate_ladders` | 3 scalate progressive (`ladder_*`): step singoli ordinati per orario, reinvestimento del ritorno; stesso pool candidati |
+| `slip_kind_from_key` | `parlay` vs `ladder` (prefisso `ladder_`, senza migrazione DB) |
+| `build_candidate_pool` | Pool pick da fixtures+predizioni+odds (match winner, 1° set, O/U games; include PLAY/BORDERLINE/NO BET). Esclude cancelled/postponed/abandoned/unknown/started. `include_completed=True` per replay storico (fallback `Fixture`) |
 | `generate_slips` | Seleziona pick per tier di difficoltà e costruisce slip |
 | `get_betting_slip_calendar` | Giorni con presenza/assenza slip |
-| `get_daily_betting_slips` | Legge o genera slip del giorno con `min_edge_percent` globale |
+| `get_daily_betting_slips` | Legge o genera slip del giorno (schedine + scalate) con `min_edge_percent` globale; backfill scalate su oggi/futuro se mancanti |
+| `render_daily_betting_slip_png` / `render_daily_betting_slip_images_zip` | Export PNG (singola) / ZIP (tutte) riusando `telegram.images.render_betting_slip_png` |
 | `refresh_betting_slips` | Rigenera forzando delete/upsert |
-| `compute_betting_slip_stats` | ROI/winrate per profilo e giorno (profitto su `effective_combined_odds`) |
-| `compute_betting_slip_model_stats` | Stats aggregate per versione/modello |
+| `compute_betting_slip_stats` | ROI/winrate per profilo e giorno (profitto su `effective_combined_odds`); `by_kind` Schedine vs Scalate |
+| `compute_betting_slip_model_stats` | Stats aggregate per versione/modello + `by_market` / `by_kind` / `by_profile` |
 | `_resolve_pick_status` / `_resolve_slip_status` | Settlement on-read: `pending`/`won`/`lost`/`void`; void ignorati per win; slip tutta void → `void` |
 | `effective_combined_odds` | Prodotto quote dei soli pick non-void (quota originale resta in `combined_odds`) |
 
@@ -642,6 +647,7 @@ Ledger append-only delle quote pre-match (non sostituisce il JSON su `Fixture`/`
 | Simbolo | Ruolo |
 |---------|-------|
 | `classify_match_lifecycle` | Normalizza `event_status`/winner → `upcoming`/`started`/`completed`/`postponed`/`cancelled`/`abandoned`/`walkover`/`retired`/`unknown` (alias legacy: `scheduled`/`live`/`finished`/`unknown_problem`) |
+| `is_eligible_for_slip_pool` | Gate generazione schedine: solo `upcoming` in live; in replay storico ammette anche completed/walkover/retired; mai cancelled/postponed/abandoned/unknown/started |
 | `settlement_policy` / `settle_simulated_bet` | Matrice esplicita effetti su singole/schedine/stake/profitto/ROI; idempotente; cancelled/non disputate → void (mai perse) |
 | `is_void_for_betting` | Pick void se status terminale senza winner bettable; postponed resta pending |
 | `match_lifecycle_label` | Label IT per UI/Telegram |
@@ -733,7 +739,7 @@ Servizio centralizzato di autorizzazione comandi bot con policy `free`/`premium`
 
 | Funzione | Ruolo |
 |----------|-------|
-| `command_policy` | Risolve la policy comando (`help`/`notifiche`/`feedback` free, `partite`/`schedine`/`statistiche` premium) |
+| `command_policy` | Risolve la policy comando (`help`/`notifiche`/`feedback` free, `partite`/`schedine`/`scalate`/`statistiche` premium) |
 | `authorize_telegram_command_safe` | Verifica in un solo punto: utente Telegram, stato account, piano, stato abbonamento, trial, entitlement richiesto, scadenza |
 | `authorize_telegram_command_by_key_safe` | Helper per decorator bot |
 
@@ -826,6 +832,14 @@ Parsing quote match-winner, aggregati bookmaker, attach a dataset:
 
 `load_fixture_odds_records`, `aggregate_match_odds`, `attach_odds_to_dataset`, `build_and_export_odds_dataset`, utilità `implied_probability`, `bookmaker_margin`, `no_vig_market_probabilities`, ROI/hit-rate.
 
+#### `app/ml/datasets/first_set_winner_odds_builder.py`
+
+Quote dedicate Vincitore 1° set (`Home/Away (1st Set)`): `first_set_winner_rows_from_record`, `first_set_winner_feature_row`, `build_first_set_odds_dataframe`.
+
+#### `app/ml/datasets/over_under_games_odds_builder.py`
+
+Quote Over/Under games (`Over/Under by Games in Match`, linea 20.5): `over_under_games_rows_from_record`, `over_under_games_feature_row`, `build_over_under_odds_dataframe`.
+
 #### `app/ml/datasets/atp_singles_enrichment.py`
 
 Matching fixture ↔ CSV ATP singles: `build_atp_singles_outputs`, mapping player/match, export dataset arricchito.
@@ -864,12 +878,26 @@ Validazione temporale multi-fold **separata** dalla holdout di `train_baseline` 
 | `generate_walk_forward_folds` | Genera fold ordinati cronologicamente (train → test immediatamente successivo) |
 | `prepare_temporal_dataframe` | Ordina per data, nessun shuffle |
 | `evaluate_fold_models` | Training in-memory per fold (non scrive `.pkl` di produzione) |
-| `run_walk_forward_validation` | Esegue tutte le versioni; confronta holdout senza sovrascriverlo |
+| `run_walk_forward_validation` | Esegue le versioni live (o subset esplicito); confronta holdout senza sovrascriverlo |
 | `write_walk_forward_report` | JSON sotto `data/reports/walk_forward/` |
 
 Persistenza: entity `WalkForwardRun` / `WalkForwardFold` (migrazioni `0021`, `0023`), service `app/services/walk_forward.py` (`start_walk_forward_run`, `cancel_walk_forward_run`, `reconcile_orphaned_walk_forward_runs`), job `jobs/run_walk_forward.py`. Progresso incrementale (`progress_pct`, `current_phase`) e annullamento cooperativo; run orfane riconciliate all'avvio API. Il global update include una fase osservabile `walk_forward_observe` (esecuzione completa solo se `WALK_FORWARD_IN_GLOBAL_UPDATE=true`).
 
 Benchmark ufficiali inclusi nei fold walk-forward (stesso campione/range/regole): `market_favorite`, `market_no_vig`, `atp_ranking`, `elo`, `logistic_regression`, `random_forest`. Le metriche ufficiali includono accuracy, log loss, Brier score, ROI, yield, drawdown e CLV (se disponibile; in OOS offline senza closing odds viene marcata non disponibile). Il report salva anche `official_benchmark_sample` per impedire confronti silenziosi su campioni differenti.
+
+Mercati extra (fuori da `MODEL_VERSIONS` match-winner):
+
+- `train_first_set_winner.py` / `train_first_set_winner_final_model.py` — v1, classificazione senza quote dedicate
+- `train_first_set_winner_odds.py` / `train_first_set_winner_odds_final_model.py` — **v2** (produzione: `logistic_regression`), feature-set v3 + quote `Home/Away (1st Set)`, ROI reale; inferenza in `extra_markets_predictor.predict_first_set_winner`
+- `train_over_under_games.py` / `train_over_under_games_final_model.py` — O/U games linea 20.5
+- `train_extra_markets_ensemble.py` — esplorativo: grid search (LR/RF/HGB/XGB/LightGBM) → stacking → soft voting + confronto holdout/WF vs baseline produzione; **non** promuove in prod
+
+```bash
+python -m backend.src.app.ml.training.train_first_set_winner_odds --quick
+python -m backend.src.app.ml.training.train_first_set_winner_odds_final_model
+python -m backend.src.app.ml.training.train_extra_markets_ensemble --market first_set_winner
+python -m backend.src.app.ml.training.train_extra_markets_ensemble --market over_under_games
+```
 
 #### `app/ml/training/calibration.py`
 
@@ -897,7 +925,7 @@ Persistenza: entity `CalibrationRun` / `CalibrationResult` (migrazioni `0022`, `
 | `collect_oos_band_records` | Record OOS walk-forward con calibrazione fold-wise opzionale |
 | `collect_oos_comparison_records` | Confronto raw / platt / isotonic |
 
-Service `app/services/probability_band_stats.py`, API `GET /api/probability-bands`, UI `ProbabilityBandsPage`. Sorgenti: **live** (`PublishedPrediction`), **walk-forward** / **backtest** (OOS offline). Fasce con campione &lt; `min_bin_samples` marcate `insufficient_sample`.
+Service `app/services/probability_band_stats.py`, API `GET /api/probability-bands`, UI `ProbabilityBandsPage`. Sorgenti: **live** (`PublishedPrediction`, filtro `market` default `match_winner`, `include_archived=false`), **walk-forward** / **backtest** (OOS match-winner offline). Fasce con campione &lt; `min_bin_samples` marcate `insufficient_sample`.
 
 #### `app/ml/training/segment_roi_analysis.py` (ML-04)
 
@@ -908,7 +936,7 @@ Service `app/services/probability_band_stats.py`, API `GET /api/probability-band
 | `analyze_segment_records` | Aggregazione KPI per segmento (hit rate, ROI, yield, drawdown, IC hit/ROI) |
 | `collect_oos_segment_records` | Record OOS walk-forward con colonne dataset + arricchimento fixture opzionale |
 
-Service `app/services/segment_roi_stats.py`, API `GET /api/segment-roi`, UI `SegmentRoiPage`. Dimensioni: superficie, torneo, circuito, livello, turno, favorito/sfavorito, fascia quota, bookmaker (aggregato se quote medie), modello, versione, periodo. Soglia minima campione: `min_segment_samples` (default `calibration_min_bin_samples`).
+Service `app/services/segment_roi_stats.py`, API `GET /api/segment-roi`, UI `SegmentRoiPage`. Live: stesso filtro `market` delle fasce. Dimensioni: superficie, torneo, circuito, livello, turno, favorito/sfavorito, fascia quota, bookmaker (aggregato se quote medie), modello, versione, periodo. Soglia minima campione: `min_segment_samples` (default `calibration_min_bin_samples`).
 
 #### `app/ml/prediction/predictor.py`
 
@@ -1007,7 +1035,6 @@ Wrapper di compatibilità: delega a `run_global_update` (tutte le combo abilitat
 | `/telegram-feedback` | `TelegramFeedbackPage` |
 | `/subscriptions-dashboard` | `SubscriptionsDashboardPage` |
 | `/weekly-beta-report` | `WeeklyBetaReportPage` |
-| `/public-model-registry` | `PublicModelRegistryPage` |
 | `/walk-forward` | `WalkForwardPage` |
 | `/calibration` | `CalibrationPage` |
 | `/probability-bands` | `ProbabilityBandsPage` |
@@ -1021,24 +1048,23 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 | Componente | Ruolo |
 |------------|-------|
 | `LoginPage` | Login admin; salva access token in `localStorage` |
-| `LiveBetaDashboardPage` | Dashboard admin beta live: pipeline, tip oggi/aperti/chiusi, KPI+drawdown, bot, errori, completezza; separazione LIVE/BACKTEST |
-| `PredictionsPage` | Lista partite+predizioni; margine globale (default 2%); void/decision in riga |
-| `PredictionStatsPage` | Summary e serie giornaliere accuracy/ROI |
-| `PublishedPredictionsPage` | Storico registro immutabile pubblicazioni (filtri, versioni, hash) |
-| `PublishedLiveStatsPage` | KPI live tipbook dal ledger (hit rate, ROI/yield, drawdown, streak, distribuzioni) |
-| `BettingSlipsPage` | Calendario, tab modello, 9 slip a tier, colonna media quote bookmakers, margine globale (default 2%), status pick void / quota effettiva |
-| `BettingSlipModelStatsPage` | Tabella comparativa stats per modello |
-| `GlobalUpdateReportPage` | Report ultima run globale: errori, warning, fasi, combo |
+| `LiveBetaDashboardPage` | Dashboard live: tre mercati, hit rate di tutti i pronostici vs ROI dei PLAY ufficiali, pipeline, bot, errori, completezza; storico Match Winner opzionale |
+| `PredictionsPage` | Lista partite+predizioni sui tre mercati; margine globale (default 2%); void/decision in riga |
+| `PublishedPredictionsPage` | Storico registro immutabile per mercato (tab Match / 1° set / O/U; filtri, versioni, hash) |
+| `PublishedLiveStatsPage` | KPI live tipbook dal ledger per mercato |
+| `BettingSlipsPage` | Calendario e schedine multi-mercato |
+| `GlobalUpdateReportPage` | Report ultima run: mercati aggiornati (Match + tip 1° set/O/U), fasi, errori |
+| `PredictionStatsPage` | Statistiche per mercato (tab Match / 1° set / O/U); Match = previsioni operative, extra = tip live |
+| `BettingSlipModelStatsPage` | Pick per mercato + esito schedine (niente colonne v*) |
 | `TelegramBotPage` | Analytics admin bot: KPI, filtri data/action/user, breakdown per giorno, storico eventi |
 | `TelegramUsersPage` | Gestione utenti beta: ricerca, invito, attiva/sospendi/blocca, termini e origine invito |
 | `TelegramFeedbackPage` | Inbox feedback bot: filtri stato/categoria, messaggio, transizioni `new`/`reviewing`/`resolved`/`rejected` |
 | `SubscriptionsDashboardPage` | Dashboard abbonamenti: KPI Free/Pro/Founder, conversione/churn, filtri utenti, timeline eventi, azioni manuali e export CSV |
-| `WeeklyBetaReportPage` | Report settimanale beta salvati: KPI utenti/retention/comandi/tip/ROI/pipeline/notifiche/feedback + WoW; generazione manuale |
-| `PublicModelRegistryPage` | Registro ML-07: candidati, attivazione, rollback, artefatti e metriche approvazione |
-| `WalkForwardPage` | Validazione walk-forward: fold, metriche, copertura, fold saltati e flag leakage; avvio manuale, barra avanzamento e annullamento (non aggiorna modello pubblico) |
-| `CalibrationPage` | Calibrazione probabilità OOS: grezzo vs Platt/isotonic, ECE/MCE/Brier/log loss, reliability curve e tabella fasce; barra avanzamento e annullamento; non attiva modello pubblico |
-| `ProbabilityBandsPage` | Analisi prestazioni per fasce probabilità/edge: live vs walk-forward vs backtest, confronto raw/calibrato, filtri modello/periodo, IC Wilson, ROI/yield; fasce a campione basso evidenziate |
-| `SegmentRoiPage` | ROI per segmento (superficie, torneo, circuito, livello, turno, favorito/sfavorito, fascia quota, bookmaker, modello, versione, periodo): hit rate, ROI/yield, drawdown, IC; live vs OOS |
+| `WeeklyBetaReportPage` | Report settimanale beta: KPI utenti/bot + tip live **match_winner** in headline e tabella `by_market` (1° set / O/U) senza mischiare ROI |
+| `WalkForwardPage` | Validazione walk-forward per mercato (default Vincitore partita live); non aggiorna modello pubblico |
+| `CalibrationPage` | Calibrazione OOS match-winner; non attiva modello pubblico |
+| `ProbabilityBandsPage` | Fasce probabilità/edge: live con tab mercato; OOS match-winner |
+| `SegmentRoiPage` | ROI per segmento: live con tab mercato; OOS match-winner |
 
 ### Componenti / hook
 
@@ -1047,7 +1073,8 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 | `ProtectedRoute` | Redirect a `/login` se non autenticato |
 | `Layout` | Sidebar, nav, logout, slot `GlobalUpdateControls` |
 | `GlobalUpdateControls` | Start/cancel/status aggiornamento globale; link a report se ci sono errori |
-| `ModelControls` | Selettore versione/nome modello |
+| `ModelControls` | Selettore mercato/modello (pagine operative; label senza v*) |
+| `MarketTabs` | Tab mercato condivisi (un mercato alla volta, KPI non misti) |
 | `Status` | `LoadingState` / `ErrorState` / `EmptyState` |
 | `MetricCard` | Card metrica |
 | `useGlobalUpdate` | Context: polling status, start/cancel |
@@ -1055,13 +1082,15 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 
 ### `services/apiClient.ts`
 
-Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, published-predictions (+ live stats), live-beta-dashboard, weekly-beta-reports, walk-forward, calibration, public-model-registry, probability-bands, segment-roi, betting-slips, imports, global-update, single-match-value, Telegram analytics / users / feedback.
+Client `fetch` tipizzato verso le API montate: auth (`login` / `getSession` / `logout`), predictions, published-predictions (+ live stats), live-beta-dashboard, weekly-beta-reports, walk-forward, calibration, public-model-registry (API only, no UI page), probability-bands, segment-roi, betting-slips, imports, global-update, single-match-value, Telegram analytics / users / feedback.
+
 Invia `Authorization: Bearer` quando presente; su **401** notifica il handler di sessione scaduta.  
 `ApiError` — errore HTTP con `status`.
 
 ### Utils
 
-- `utils/modelVersion.ts` — default UI `v3`, persistenza localStorage; `resolvePreferredModelVersion` su Predictions / Betting slips / Stats
+- `utils/modelVersion.ts` — default UI match-winner attivo (`v4`), persistenza localStorage; `resolvePreferredModelVersion` su Predictions / Betting slips / Stats
+- `utils/markets.ts` — catalogo mercati LIVE (`match_winner` / `first_set_winner` / `over_under_games`) per tab e badge
 - `utils/minEdge.ts` — classificazione PLAY/BORDERLINE/NO BET lato client
 - `utils/tennis.ts` — format date/score/superficie/nomi giocatore
 - `types/api.ts` — tipi TypeScript allineati agli schema Pydantic (incl. tipi Telegram analytics)
@@ -1138,7 +1167,7 @@ Modulo `app/telegram/`.
 
 | Modulo | Ruolo |
 |--------|-------|
-| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, `telegram_service_api_key` (S2S, allineata a `SERVICE_API_KEY`), model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 9), `telegram_min_edge_percent` (default 2.0), whitelist/termini (`telegram_whitelist_enabled`, `telegram_terms_required`, `telegram_terms_version`), `telegram_premium_upgrade_url`, `telegram_feedback_url` (link pubblici opzionali) |
+| `config.TelegramSettings` | Token, `TELEGRAM_API_BASE_URL`, `telegram_service_api_key` (S2S, allineata a `SERVICE_API_KEY`), model version/name, `telegram_model_names` (fallback multi-modello), stake, `telegram_slip_count` (default 10), `telegram_min_edge_percent` (default 2.0), whitelist/termini (`telegram_whitelist_enabled`, `telegram_terms_required`, `telegram_terms_version`), `telegram_premium_upgrade_url`, `telegram_feedback_url` (link pubblici opzionali) |
 | `client.BackendApiClient` | Chiama le stesse API FastAPI (`/betting-slips/daily`, `/betting-slips/stats/by-model`, `/predictions/stats/summary`, `/models-versions/results`, `/next-fixtures/predictions`, `/single-match-value`, …) |
 | `bot.build_application` / `main` | Polling + handler comandi |
 | `rate_limit.rate_limited` | Limite comandi per `telegram_user_id` (DB condiviso; messaggio IT se superato) |
@@ -1149,9 +1178,9 @@ Modulo `app/telegram/`.
 
 Service condivisi: `app/services/telegram_analytics.py`, `app/services/telegram_users.py`, `app/services/telegram_command_authorization.py`, `app/services/telegram_feedback.py`, `app/services/telegram_notifications.py` (vedi §4.4).
 
-**Comandi attivi:** `/start`, `/help`, `/accetta_condizioni`, `/notifiche`, `/feedback`, `/annulla` (solo durante feedback), `/piano`, `/abbonati`, `/gestisci_abbonamento`, `/schedine`, `/partite`, `/statistiche`.
+**Comandi attivi:** `/start`, `/help`, `/accetta_condizioni`, `/notifiche`, `/feedback`, `/annulla` (solo durante feedback), `/piano`, `/abbonati`, `/gestisci_abbonamento`, `/schedine`, `/scalate`, `/partite`, `/statistiche`.
 
-`/start` registra (o aggiorna) l’utente in `telegram_user` con `telegram_user_id`, `chat_id`, username, nome, primo/ultimo accesso, stato, origine invito (payload deep-link), preferenze notifiche e stato termini, poi mostra menu inline (Partite / Schedine / Statistiche / Aiuto). `/help` resta una guida sintetica con la stessa tastiera. `/notifiche` mostra o aggiorna le preferenze push (master, pronostici, risultati, giorno vuoto). `/feedback` avvia una conversazione a step (categoria → valutazione 1–5 → messaggio) con annullo via `/annulla` o pulsante; salva solo il submit finale in `telegram_feedback` (stato iniziale `new`). Con whitelist attiva (default) i nuovi utenti restano `invited` finché un admin non li attiva dalla pagina **Utenti beta Telegram**. Il gate centralizzato classifica i comandi in `free` e `premium` (`help`/`notifiche`/`feedback`/`piano`/`abbonati`/`gestisci_abbonamento` free, `schedine`/`partite`/`statistiche` premium): per ogni richiesta verifica utente esistente, stato, piano, stato abbonamento, periodo di prova, entitlement richiesto e scadenza. In caso di diniego premium mostra messaggio upgrade unico (opzionale link `TELEGRAM_PREMIUM_UPGRADE_URL`) senza duplicazioni nei singoli handler.
+`/start` registra (o aggiorna) l’utente in `telegram_user` con `telegram_user_id`, `chat_id`, username, nome, primo/ultimo accesso, stato, origine invito (payload deep-link), preferenze notifiche e stato termini, poi mostra menu inline (Partite / Schedine / Scalate / Statistiche / Aiuto). `/help` resta una guida sintetica con la stessa tastiera. `/notifiche` mostra o aggiorna le preferenze push (master, pronostici, risultati, giorno vuoto). `/feedback` avvia una conversazione a step (categoria → valutazione 1–5 → messaggio) con annullo via `/annulla` o pulsante; salva solo il submit finale in `telegram_feedback` (stato iniziale `new`). Con whitelist attiva (default) i nuovi utenti restano `invited` finché un admin non li attiva dalla pagina **Utenti beta Telegram**. Il gate centralizzato classifica i comandi in `free` e `premium` (`help`/`notifiche`/`feedback`/`piano`/`abbonati`/`gestisci_abbonamento` free, `schedine`/`scalate`/`partite`/`statistiche` premium): per ogni richiesta verifica utente esistente, stato, piano, stato abbonamento, periodo di prova, entitlement richiesto e scadenza. In caso di diniego premium mostra messaggio upgrade unico (opzionale link `TELEGRAM_PREMIUM_UPGRADE_URL`) senza duplicazioni nei singoli handler.
 
 Comandi abbonamento:
 
@@ -1165,9 +1194,11 @@ UX pubblica: messaggi di caricamento sulle operazioni costose, footer uniforme c
 
 Ogni comando/callback menu (e i messaggi non gestiti) viene registrato in tabella `telegram_bot_event`; gli step intermedi di `/feedback` non vengono tracciati come eventi dedicati (solo l’entry `/feedback`). Analytics (`/telegram-bot`), gestione utenti (`/telegram-users`) e inbox feedback (`/telegram-feedback`) sono solo dashboard admin.
 
-`/schedine` carica le schedine di tutti i modelli della versione configurata. Se i contenuti coincidono (stessi match e stessi vincitori previsti) ne mostra una sola serie; se differiscono anche solo per una partita/pick, mostra entrambe con etichetta pubblica basata sull’accuratezza (es. `Serie A · accuratezza 58.2%`). L’intro include data, legende stati/valore, ultimo aggiornamento e disclaimer. Pick void escludono la quota dalla combinata effettiva.
+`/schedine` carica le **schedine multi-leg** del giorno (escluse le scalate). Se i contenuti coincidono (stessi match e stessi vincitori previsti) ne mostra una sola serie; se differiscono anche solo per una partita/pick, mostra entrambe con etichetta pubblica basata sull’accuratezza (es. `Serie A · accuratezza 58.2%`). L’intro include data, legende stati/valore, ultimo aggiornamento e disclaimer. Pick void escludono la quota dalla combinata effettiva.
 
-`/partite` allinea la pagina **Partite**: tabella Ora/Torneo/Surface/Match/Predetto/Conf./Void/Valore/Stato (stato partita normalizzato), void+valore via SMVA (fallback da probabilità modello), multi-serie se i predittori differiscono (stesse etichette pubbliche), intro coerente con legende + ultimo aggiornamento. Senza partite risponde con messaggio dedicato (non un fallimento generico).
+`/scalate` carica le **scalate progressive** dello stesso giorno (stesso entitlement/feature flag delle schedine): step singoli in ordine di orario con reinvestimento del ritorno; PNG con colonna puntata step. Se non ci sono abbastanza candidati, risponde con stato vuoto dedicato.
+
+`/partite` allinea la pagina **Partite**: tabella Ora/Torneo/Superficie (IT)/Match/Mercato/Predizione (colori mercato come web)/Percentuale di riuscita/Quota/Stato; una riga per mercato (Match, 1° set, O/U); void+valore via SMVA restano nel backend ma fuori dalle immagini bot; multi-serie se i predittori differiscono (stesse etichette pubbliche), intro coerente con legende + ultimo aggiornamento. Senza partite risponde con messaggio dedicato (non un fallimento generico).
 
 `/statistiche` mostra PNG di confronto (partite + schedine con profitto/ROI) usando le stesse etichette pubbliche. Comandi pronostici (`/pronostici`, `/giorno`, `/10giorni`, `/cerca`) restano nel codice ma non sono registrati.
 
@@ -1180,11 +1211,11 @@ python -m src.app.telegram.bot
 
 ## 9. Schema dati
 
-Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `telegram_user` (utenti beta / whitelist; migrazione `0017`, prefs/`chat_id` in `0018`), `telegram_notification_delivery` (ledger push; migrazione `0018`), `telegram_feedback` (feedback in-bot; migrazione `0019`), `weekly_beta_report` (report settimanale beta; migrazione `0020`), `walk_forward_run` / `walk_forward_fold` (validazione temporale walk-forward; migrazione `0021`), `calibration_run` / `calibration_result` (analisi calibrazione OOS; migrazione `0022`), `public_model_registry_entry` (registro modello pubblico ML-07; migrazione `0024`), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`), dominio abbonamenti (`app_user`, `plan`, `entitlement`, `subscription`, `payment_event`, `access_log`; migrazione `0025`, audit accessi bot free/premium incluso), mapping pagamenti provider (`payment_customer`, `payment_checkout_session`; migrazione `0026`), audit operazioni manuali admin (`admin_audit_log`; migrazione `0027`).
+Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `next_fixture`, `match_prediction`, tabelle betting slip (`betting_slip`, `betting_slip_day`, `betting_slip_pick`; colonna `market` e unicità `(schedina, partita, mercato)` in `0029`) e global update (`global_update_run`, `global_update_run_item`), `pipeline_lock` (lock distribuito job; migrazione `0016`), `telegram_bot_event` (analytics accessi bot), `telegram_user` (utenti beta / whitelist; migrazione `0017`, prefs/`chat_id` in `0018`), `telegram_notification_delivery` (ledger push; migrazione `0018`), `telegram_feedback` (feedback in-bot; migrazione `0019`), `weekly_beta_report` (report settimanale beta; migrazione `0020`), `walk_forward_run` / `walk_forward_fold` (validazione temporale walk-forward; migrazione `0021`), `calibration_run` / `calibration_result` (analisi calibrazione OOS; migrazione `0022`), `public_model_registry_entry` (registro modello pubblico ML-07; migrazione `0024`), `published_prediction` (registro immutabile pubblicazioni; migrazione `0013`; `market` / `value_decision` / `official_play` in `0030`), `prematch_odds_snapshot` (storico quote pre-match append-only; migrazione `0014`; `market` / `market_line` in `0030`), dominio abbonamenti (`app_user`, `plan`, `entitlement`, `subscription`, `payment_event`, `access_log`; migrazione `0025`, audit accessi bot free/premium incluso), mapping pagamenti provider (`payment_customer`, `payment_checkout_session`; migrazione `0026`), audit operazioni manuali admin (`admin_audit_log`; migrazione `0027`).
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
 
-Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report` → `0021_walk_forward` → `0022_calibration` → `0023_background_job_progress` → `0024_public_model_registry` → `0025_subscriptions_domain` → `0026_payment_checkout_providers` → `0027_admin_audit_log`.
+Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report` → `0021_walk_forward` → `0022_calibration` → `0023_background_job_progress` → `0024_public_model_registry` → `0025_subscriptions_domain` → `0026_payment_checkout_providers` → `0027_admin_audit_log` → `0028_feature_flags` → `0029_betting_slip_pick_market` → `0030_multi_market_columns`.
 
 ```bash
 cd backend
@@ -1277,6 +1308,7 @@ Vedi [docs/DOCKER.md](docs/DOCKER.md) per avvio/arresto, **hot-reload** (`docker
 | `.env.example` | Modello env per Compose (copiare in `.env`) |
 | `.env.staging.example` | Modello staging (copiare in `.env.staging`; vedi [STAGING.md](docs/STAGING.md)) |
 | `backend/scripts/smoke_check.py` | Smoke HTTP su `/health`, `/ready`, frontend |
+| `backend/scripts/diag_betting_slip_baseline.py` | Baseline storica + what-if 2–3 fold solo PLAY (light da pick in schedina + full pool con `include_completed`/fallback `Fixture`; report JSON in `data/reports/`) |
 | `backend/scripts/run_alembic_upgrade.py` | Migrazioni Compose controllate da `AUTO_MIGRATE` |
 | `backend/scripts/backup_postgres.sh|.bat` | Backup PostgreSQL pianificato (`run_db_backup --alert`) |
 | `backend/scripts/restore_postgres.sh|.bat` | Restore (`dry-run` / `test` / `overwrite`) |

@@ -11,17 +11,42 @@ import type {
   BettingSlipStatsResponse,
   BettingSlipsDailyResponse,
   MLModelVersion,
-  ModelsVersionsResultsResponse
+  ModelsVersionsResultsResponse,
+  SlipKind
 } from "../types/api";
 import { classifySingleBetValue } from "../utils/minEdge";
 import {
   DEFAULT_MODEL_VERSION,
+  modelVersionLabel,
   resolvePreferredModelVersion,
   writeStoredModelVersion
 } from "../utils/modelVersion";
 import { formatDate, todayLocalISODate } from "../utils/tennis";
 
 const STAKE_PRESETS = [1, 5, 10, 25, 50];
+
+async function downloadBrowserFile(
+  file: { blob: Blob; filename: string | null },
+  fallbackName: string
+) {
+  if (typeof window.URL?.createObjectURL !== "function") {
+    throw new Error("Download non supportato da questo browser.");
+  }
+  const url = window.URL.createObjectURL(file.blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.filename || fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+function marketLabel(market: string | null | undefined) {
+  if (market === "over_under_games") return "Over/Under Games";
+  if (market === "first_set_winner") return "Vincitore 1° set";
+  return "Vincitore partita";
+}
 
 function formatProb(value: number | null | undefined) {
   if (value === null || value === undefined) return "-";
@@ -34,7 +59,7 @@ function formatTime(value: string | null | undefined) {
 }
 
 function formatOdds(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return "—";
   return value.toLocaleString("it-IT", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
@@ -42,7 +67,7 @@ function formatOdds(value: number | null | undefined) {
 }
 
 function formatMoney(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return "—";
   return `${value.toLocaleString("it-IT", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
@@ -50,18 +75,18 @@ function formatMoney(value: number | null | undefined) {
 }
 
 function formatPct(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return "—";
   return `${value.toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
 }
 
 function formatSignedPct(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return "—";
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
 }
 
 function formatSignedRoi(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return "—";
   const sign = value > 0 ? "+" : "";
   return `${sign}${(value * 100).toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
 }
@@ -152,15 +177,22 @@ function calendarDayLabel(day: BettingSlipCalendarDay) {
 function SlipStatsPanel({
   title,
   subtitle,
-  stats
+  stats,
+  focusKind
 }: {
   title: string;
   subtitle: string;
   stats: BettingSlipStatsResponse | null;
+  focusKind?: "parlay" | "ladder";
 }) {
   const daysWithSlips = [...(stats?.days ?? [])]
     .filter((day) => day.slips_total > 0)
     .sort((left, right) => right.date.localeCompare(left.date));
+
+  const profiles = (stats?.summary.by_profile ?? []).filter((profile) =>
+    focusKind ? (profile.slip_kind ?? "parlay") === focusKind : true
+  );
+  const kinds = stats?.summary.by_kind ?? [];
 
   if (!stats || stats.summary.slips_total === 0) {
     return (
@@ -203,6 +235,37 @@ function SlipStatsPanel({
         </div>
       </div>
 
+      {kinds.length > 1 ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Totale</th>
+                <th>Prese</th>
+                <th>Perse</th>
+                <th>Win rate</th>
+                <th>Profitto</th>
+                <th>ROI</th>
+              </tr>
+            </thead>
+            <tbody>
+              {kinds.map((kind) => (
+                <tr key={kind.slip_kind}>
+                  <td>{kind.label}</td>
+                  <td>{kind.slips_total}</td>
+                  <td>{kind.slips_won}</td>
+                  <td>{kind.slips_lost}</td>
+                  <td>{formatPct(kind.slip_win_rate_pct)}</td>
+                  <td>{formatMoney(kind.theoretical_profit_units)}</td>
+                  <td>{formatPct(kind.theoretical_roi_pct)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
       {daysWithSlips.length > 1 ? (
         <div className="table-wrap">
           <table>
@@ -238,12 +301,13 @@ function SlipStatsPanel({
         </div>
       ) : null}
 
-      {stats.summary.by_profile.length ? (
+      {profiles.length ? (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Profilo</th>
+                <th>Tipo</th>
                 <th>Schedine</th>
                 <th>Prese</th>
                 <th>Perse</th>
@@ -251,9 +315,10 @@ function SlipStatsPanel({
               </tr>
             </thead>
             <tbody>
-              {stats.summary.by_profile.map((profile) => (
+              {profiles.map((profile) => (
                 <tr key={profile.slip_key}>
                   <td>{profile.label}</td>
+                  <td>{(profile.slip_kind ?? "parlay") === "ladder" ? "Scalata" : "Schedina"}</td>
                   <td>{profile.slips_total}</td>
                   <td>{profile.slips_won}</td>
                   <td>{profile.slips_lost}</td>
@@ -286,13 +351,18 @@ function SlipCard({
   slip,
   stake,
   historicalOutcomesMissing,
-  globalMinEdge
+  globalMinEdge,
+  downloadingImage = false,
+  onDownloadImage
 }: {
   slip: BettingSlip;
   stake: number;
   historicalOutcomesMissing: boolean;
   globalMinEdge: number;
+  downloadingImage?: boolean;
+  onDownloadImage?: () => void;
 }) {
+  const isLadder = (slip.slip_kind ?? "parlay") === "ladder";
   const { potentialReturn, potentialProfit, actualOutcome, displayOdds } = computeStakeValues(slip, stake);
   const hasRecalculatedOdds =
     (slip.picks_void ?? 0) > 0 &&
@@ -304,10 +374,11 @@ function SlipCard({
   }
 
   return (
-    <article className={`panel slip-card ${slip.slip_status}`}>
+    <article className={`panel slip-card ${slip.slip_status}${isLadder ? " slip-card-ladder" : ""}`}>
       <header className="slip-card-header">
         <div className="slip-card-title">
           <span className="pill">{slip.label}</span>
+          {isLadder ? <span className="pill">Scalata</span> : null}
           <p className="slip-description">{slip.description}</p>
         </div>
         <div className="slip-card-meta">
@@ -315,7 +386,9 @@ function SlipCard({
             {slipStatusLabel(slip.slip_status, historicalOutcomesMissing)}
           </span>
           <span className="slip-pick-counter">
-            {slip.picks_won}/{slip.picks_total - (slip.picks_void ?? 0)} pick corrette
+            {isLadder
+              ? `${slip.picks_won}/${slip.picks_total - (slip.picks_void ?? 0)} step ok`
+              : `${slip.picks_won}/${slip.picks_total - (slip.picks_void ?? 0)} pick corrette`}
             {(slip.picks_void ?? 0) > 0 ? ` · ${slip.picks_void} annullate` : ""}
           </span>
         </div>
@@ -326,14 +399,18 @@ function SlipCard({
           <thead>
             <tr>
               <th className="slip-col-status" aria-label="Esito" />
+              {isLadder ? <th>Step</th> : null}
               <th>Ora</th>
               <th>Torneo</th>
               <th>Match</th>
+              <th>Mercato</th>
               <th>Pick</th>
+              {isLadder ? <th className="slip-col-odds">Puntata step</th> : null}
               <th className="slip-col-odds">Media quote bookmakers</th>
-              <th>Void</th>
-              <th>Edge</th>
-              <th>ROI</th>
+              {isLadder ? <th className="slip-col-odds">Ritorno se presa</th> : null}
+              {!isLadder ? <th>Void</th> : null}
+              {!isLadder ? <th>Edge</th> : null}
+              {!isLadder ? <th>ROI</th> : null}
               <th>Valore</th>
               <th>Conf.</th>
             </tr>
@@ -354,13 +431,19 @@ function SlipCard({
                           ? "Esito non disponibile"
                           : "In corso";
               return (
-              <tr key={pick.event_key} className={pick.pick_status === "void" ? "pick-void" : undefined}>
+              <tr
+                key={`${pick.event_key}-${pick.market}`}
+                className={pick.pick_status === "void" ? "pick-void" : undefined}
+              >
                 <td className="slip-col-status">
                   <span
                     className={`result-dot ${pickDotClass(pick.pick_status)}`}
                     title={pickTitle}
                   />
                 </td>
+                {isLadder ? (
+                  <td className="slip-col-time">{pick.ladder_step_index ?? "—"}</td>
+                ) : null}
                 <td className="slip-col-time">{formatTime(pick.event_time)}</td>
                 <td className="slip-col-tournament" title={pick.tournament_name ?? undefined}>
                   {truncateText(pick.tournament_name, 32)}
@@ -377,24 +460,37 @@ function SlipCard({
                     </small>
                   ) : null}
                 </td>
+                <td className="slip-col-market">
+                  <span className={`market-badge market-${pick.market}`}>{marketLabel(pick.market)}</span>
+                </td>
                 <td className="slip-col-pick">
                   <strong>{pick.predicted_winner_label ?? "-"}</strong>
                 </td>
+                {isLadder ? (
+                  <td className="slip-col-odds">{formatMoney(pick.ladder_step_stake)}</td>
+                ) : null}
                 <td className="slip-col-odds">{formatOdds(pick.odds)}</td>
-                <td className="slip-col-value">{formatOdds(pick.void_odds)}</td>
-                <td className={`slip-col-value ${pick.edge_percent !== null && pick.edge_percent >= 0 ? "positive-value" : "negative-value"}`}>
-                  {formatSignedPct(pick.edge_percent)}
-                </td>
-                <td className={`slip-col-value ${pick.expected_roi !== null && pick.expected_roi >= 0 ? "positive-value" : "negative-value"}`}>
-                  {formatSignedRoi(pick.expected_roi)}
-                </td>
+                {isLadder ? (
+                  <td className="slip-col-odds">{formatMoney(pick.ladder_step_return_if_won)}</td>
+                ) : null}
+                {!isLadder ? <td className="slip-col-value">{formatOdds(pick.void_odds)}</td> : null}
+                {!isLadder ? (
+                  <td className={`slip-col-value ${pick.edge_percent !== null && pick.edge_percent >= 0 ? "positive-value" : "negative-value"}`}>
+                    {formatSignedPct(pick.edge_percent)}
+                  </td>
+                ) : null}
+                {!isLadder ? (
+                  <td className={`slip-col-value ${pick.expected_roi !== null && pick.expected_roi >= 0 ? "positive-value" : "negative-value"}`}>
+                    {formatSignedRoi(pick.expected_roi)}
+                  </td>
+                ) : null}
                 <td className="slip-col-value-state">
                   {display.decision ? (
                     <span className={`value-decision-badge ${valueDecisionClass(display.decision)}`}>
                       {display.decision}
                     </span>
                   ) : (
-                    "-"
+                    "—"
                   )}
                   {pick.value_label ? <small>{pick.value_label}</small> : null}
                 </td>
@@ -409,18 +505,18 @@ function SlipCard({
       <footer className="slip-card-footer">
         <div className="slip-metrics-grid">
           <div>
-            <span>{hasRecalculatedOdds ? "Quota effettiva" : "Quota combinata"}</span>
+            <span>{hasRecalculatedOdds ? "Quota effettiva" : isLadder ? "Moltiplicatore catena" : "Quota combinata"}</span>
             <strong>{formatOdds(displayOdds)}</strong>
             {hasRecalculatedOdds ? (
               <small className="slip-odds-note">Originale {formatOdds(slip.combined_odds)}</small>
             ) : null}
           </div>
           <div>
-            <span>Puntata</span>
+            <span>{isLadder ? "Puntata iniziale" : "Puntata"}</span>
             <strong>{formatMoney(stake)}</strong>
           </div>
           <div>
-            <span>Vincita potenziale</span>
+            <span>{isLadder ? "Ritorno se tutta presa" : "Vincita potenziale"}</span>
             <strong>{formatMoney(potentialReturn)}</strong>
           </div>
           <div>
@@ -436,9 +532,19 @@ function SlipCard({
             </div>
           ) : null}
         </div>
-        <button type="button" className="action-button" onClick={() => void copySlip()}>
-          Copia schedina
-        </button>
+        <div className="slip-card-actions">
+          <button type="button" className="action-button" onClick={() => void copySlip()}>
+            {isLadder ? "Copia scalata" : "Copia schedina"}
+          </button>
+          <button
+            type="button"
+            className="action-button secondary"
+            onClick={() => onDownloadImage?.()}
+            disabled={!onDownloadImage || downloadingImage}
+          >
+            {downloadingImage ? "Download..." : "Scarica immagine"}
+          </button>
+        </div>
       </footer>
     </article>
   );
@@ -456,9 +562,12 @@ export function BettingSlipsPage() {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [stake, setStake] = useState(10);
   const [minEdgePercent, setMinEdgePercent] = useState(2);
+  const [viewKind, setViewKind] = useState<SlipKind>("parlay");
   const [loading, setLoading] = useState(true);
   const [loadingDay, setLoadingDay] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [downloadingZip, setDownloadingZip] = useState(false);
+  const [downloadingSlipKey, setDownloadingSlipKey] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastReloadToken, setLastReloadToken] = useState<string | null>(null);
@@ -621,12 +730,64 @@ export function BettingSlipsPage() {
       setRegenerating(true);
       setActionMessage(null);
       await loadDayData(selectedDate, { regenerate: true, minEdge: minEdgePercent });
-      setActionMessage("Schedine rigenerate (9 profili: Play / Play+Border / Miste).");
+      setActionMessage("Schedine e scalate rigenerate dal pool del giorno.");
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore inatteso.");
     } finally {
       setRegenerating(false);
+    }
+  }
+
+  async function handleDownloadAllImages() {
+    const daily = selectedModel ? dailyByModel[selectedModel] : undefined;
+    if (!selectedModel || !daily?.slips.length) {
+      setActionMessage("Nessuna schedina da scaricare per la giocata selezionata.");
+      return;
+    }
+    try {
+      setDownloadingZip(true);
+      setActionMessage(null);
+      const file = await apiClient.downloadBettingSlipImagesZip({
+        date: selectedDate,
+        model_version: activeVersion,
+        model_name: selectedModel,
+        stake,
+        min_edge_percent: minEdgePercent
+      });
+      await downloadBrowserFile(
+        file,
+        `schedine_${selectedDate}_${activeVersion}_${selectedModel}.zip`
+      );
+      setActionMessage("Immagini di tutte le schedine scaricate.");
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Download immagini non riuscito.");
+    } finally {
+      setDownloadingZip(false);
+    }
+  }
+
+  async function handleDownloadSlipImage(slipKey: string) {
+    if (!selectedModel) return;
+    try {
+      setDownloadingSlipKey(slipKey);
+      setActionMessage(null);
+      const file = await apiClient.downloadBettingSlipImage({
+        date: selectedDate,
+        model_version: activeVersion,
+        model_name: selectedModel,
+        stake,
+        min_edge_percent: minEdgePercent,
+        slip_key: slipKey
+      });
+      await downloadBrowserFile(file, `${slipKey}.png`);
+      setActionMessage(`Immagine schedina ${slipKey} scaricata.`);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Download immagine non riuscito.");
+    } finally {
+      setDownloadingSlipKey(null);
     }
   }
 
@@ -643,6 +804,10 @@ export function BettingSlipsPage() {
   const selectedDaily = selectedModel ? dailyByModel[selectedModel] : undefined;
   const selectedDayStats = selectedModel ? dayStatsByModel[selectedModel] ?? null : null;
   const selectedOverallStats = selectedModel ? overallStatsByModel[selectedModel] ?? null : null;
+  const visibleSlips = (selectedDaily?.slips ?? []).filter(
+    (slip) =>
+      (slip.slip_kind ?? (slip.slip_key.startsWith("ladder_") ? "ladder" : "parlay")) === viewKind
+  );
   const historicalOutcomesMissing =
     Boolean(selectedCalendarDay?.is_past) &&
     Boolean(selectedDaily?.slips.some((slip) => slip.picks_pending > 0));
@@ -653,8 +818,8 @@ export function BettingSlipsPage() {
         <div>
           <h2>Consiglio schedina</h2>
           <p>
-            {formatDate(selectedDate)} · versione {activeVersion} · 9 schedine a difficoltà crescente
-            (3 Play, 3 Play+Borderline, 3 miste)
+            {formatDate(selectedDate)} · Tab Schedine (multi-leg) o Scalate (reinvestimento
+            progressivo) · mercati Match / 1° set / O/U
           </p>
         </div>
         <div className="page-header-actions">
@@ -678,10 +843,23 @@ export function BettingSlipsPage() {
           >
             {regenerating ? "Rigenerazione..." : "Rigenera schedine"}
           </button>
+          <button
+            type="button"
+            className="action-button secondary"
+            onClick={() => void handleDownloadAllImages()}
+            disabled={
+              downloadingZip ||
+              loadingDay ||
+              !selectedModel ||
+              !(selectedDaily?.slips.length)
+            }
+          >
+            {downloadingZip ? "Download immagini..." : "Scarica immagini"}
+          </button>
         </div>
       </header>
 
-      {availableVersions.length ? (
+      {availableVersions.length > 1 ? (
         <div className="tab-list" aria-label="Versioni modello">
           {availableVersions.map((entry) => (
             <button
@@ -694,22 +872,7 @@ export function BettingSlipsPage() {
                 setActiveVersion(next);
               }}
             >
-              {entry.version}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {activeModels.length ? (
-        <div className="tab-list" aria-label="Modelli">
-          {activeModels.map((modelName) => (
-            <button
-              key={modelName}
-              type="button"
-              className={selectedModel === modelName ? "active" : undefined}
-              onClick={() => setSelectedModel(modelName)}
-            >
-              {modelName}
+              {modelVersionLabel(entry.version)}
             </button>
           ))}
         </div>
@@ -774,7 +937,9 @@ export function BettingSlipsPage() {
       ))}
 
       <div className="panel stake-panel">
-        <label htmlFor="stake-input">Simula puntata</label>
+        <label htmlFor="stake-input">
+          {viewKind === "ladder" ? "Simula puntata iniziale scalata" : "Simula puntata"}
+        </label>
         <div className="stake-controls">
           <input
             id="stake-input"
@@ -797,6 +962,30 @@ export function BettingSlipsPage() {
         </div>
       </div>
 
+      <div className="tab-list" aria-label="Tipo consiglio">
+        <button
+          type="button"
+          className={viewKind === "parlay" ? "active" : undefined}
+          onClick={() => setViewKind("parlay")}
+        >
+          Schedine
+        </button>
+        <button
+          type="button"
+          className={viewKind === "ladder" ? "active" : undefined}
+          onClick={() => setViewKind("ladder")}
+        >
+          Scalate
+        </button>
+      </div>
+      {viewKind === "ladder" ? (
+        <p className="note">
+          Ogni step è una singola: se vinci, il ritorno viene reinvestito nello step successivo
+          (ordine di orario). Alla prima persa la catena si interrompe; gli step annullati
+          trasmettono la puntata allo step seguente.
+        </p>
+      ) : null}
+
       <div className="result-legend">
         <span><span className="result-dot win" /> Presa</span>
         <span><span className="result-dot loss" /> Persa</span>
@@ -804,22 +993,32 @@ export function BettingSlipsPage() {
         <span><span className="result-dot void" /> Annullata</span>
       </div>
 
-      {!loadingDay && selectedModel && !selectedDaily?.slips.length ? (
+      {!loadingDay && selectedModel && !visibleSlips.length ? (
         <EmptyState
-          title="Nessuna schedina disponibile per questo giorno"
-          message='Seleziona un altro giorno o usa "Aggiorna tutto" nella sidebar.'
+          title={
+            viewKind === "ladder"
+              ? "Nessuna scalata disponibile per questo giorno"
+              : "Nessuna schedina disponibile per questo giorno"
+          }
+          message={
+            viewKind === "ladder"
+              ? 'Serve un pool di almeno 2 PLAY (o PLAY+Border). Usa "Rigenera schedine" o Aggiorna tutto.'
+              : 'Seleziona un altro giorno o usa "Aggiorna tutto" nella sidebar.'
+          }
         />
       ) : null}
 
-      {!loadingDay && selectedDaily?.slips.length ? (
+      {!loadingDay && visibleSlips.length ? (
         <section className="slip-list">
-          {selectedDaily.slips.map((slip) => (
+          {visibleSlips.map((slip) => (
             <SlipCard
               key={`${selectedModel}-${slip.slip_key}`}
               slip={slip}
               stake={stake}
               historicalOutcomesMissing={historicalOutcomesMissing}
               globalMinEdge={minEdgePercent}
+              downloadingImage={downloadingSlipKey === slip.slip_key}
+              onDownloadImage={() => void handleDownloadSlipImage(slip.slip_key)}
             />
           ))}
         </section>
@@ -827,25 +1026,30 @@ export function BettingSlipsPage() {
 
       {!loadingDay ? (
         <SlipStatsPanel
-          title="Statistiche giorno"
-          subtitle={`Risultati per ${formatDate(selectedDate)}${selectedModel ? ` · ${selectedModel}` : ""}.`}
+          title={viewKind === "ladder" ? "Statistiche giorno (focus scalate)" : "Statistiche giorno"}
+          subtitle={`Risultati per ${formatDate(selectedDate)}${selectedModel ? ` · ${selectedModel}` : ""}. Profili filtrati sul tab attivo.`}
           stats={selectedDayStats}
+          focusKind={viewKind}
         />
       ) : null}
 
       <SlipStatsPanel
-        title="Statistiche complessive"
+        title={
+          viewKind === "ladder" ? "Statistiche complessive (focus scalate)" : "Statistiche complessive"
+        }
         subtitle={
           selectedOverallStats
             ? `Storico completo dal ${formatDate(selectedOverallStats.from_date)} al ${formatDate(selectedOverallStats.to_date)}${selectedModel ? ` · ${selectedModel}` : ""}.`
             : "Storico completo di tutte le schedine salvate."
         }
         stats={selectedOverallStats}
+        focusKind={viewKind}
       />
 
       <p className="disclaimer">
-        Simulazione basata su previsioni ML. Una pick persa invalida l&apos;intera schedina. Non
-        costituisce consiglio di scommessa reale.
+        Simulazione basata su previsioni ML. Nelle schedine multi-leg una pick persa invalida
+        l&apos;intera schedina; nelle scalate la prima persa interrompe la catena. Non costituisce
+        consiglio di scommessa reale.
       </p>
     </section>
   );

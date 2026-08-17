@@ -2,14 +2,21 @@ import { useEffect, useMemo, useState } from "react";
 
 import { MetricCard } from "../components/MetricCard";
 import { LongRunningJobProgress } from "../components/LongRunningJobProgress";
+import { MarketTabs } from "../components/MarketTabs";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient, ApiError } from "../services/apiClient";
 import type {
   CalibrationResult,
   CalibrationRun,
   CalibrationRunListItem,
-  MLModelVersion
+  LiveDashboardMarket
 } from "../types/api";
+import {
+  DEFAULT_LIVE_MARKET,
+  isArchivedMatchWinnerVersion,
+  marketFromInternalVersion,
+  marketLabel
+} from "../utils/markets";
 
 function formatPct(value: number | null | undefined) {
   if (value === null || value === undefined) return "-";
@@ -221,7 +228,8 @@ export function CalibrationPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
-  const [versionFilter, setVersionFilter] = useState<MLModelVersion | "all">("all");
+  const [selectedMarket, setSelectedMarket] = useState<LiveDashboardMarket>(DEFAULT_LIVE_MARKET);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [modelFilter, setModelFilter] = useState<string>("all");
   const [methodView, setMethodView] = useState<"raw" | "platt" | "isotonic">("raw");
 
@@ -320,11 +328,19 @@ export function CalibrationPage() {
   const filteredResults = useMemo(() => {
     if (!run?.results) return [];
     return run.results.filter((item) => {
-      if (versionFilter !== "all" && item.model_version !== versionFilter) return false;
+      const market = marketFromInternalVersion(item.model_version);
+      if (market !== selectedMarket) return false;
+      if (
+        selectedMarket === "match_winner" &&
+        !includeArchived &&
+        isArchivedMatchWinnerVersion(item.model_version)
+      ) {
+        return false;
+      }
       if (modelFilter !== "all" && item.model_name !== modelFilter) return false;
       return true;
     });
-  }, [run, versionFilter, modelFilter]);
+  }, [run, selectedMarket, includeArchived, modelFilter]);
 
   const selectedResult = filteredResults[0];
 
@@ -378,8 +394,10 @@ export function CalibrationPage() {
         <div>
           <h2>Calibrazione probabilità</h2>
           <p className="muted">
-            Analisi su probabilità OOS del walk-forward. Non attiva automaticamente la
-            calibrazione sul modello pubblico.
+            Analisi su probabilità OOS del walk-forward per il mercato{" "}
+            <strong>Vincitore partita</strong> (modello live di default). Non attiva
+            automaticamente la calibrazione sul modello pubblico e non include 1° set /
+            Over-Under.
           </p>
         </div>
         <div className="actions inline">
@@ -415,6 +433,19 @@ export function CalibrationPage() {
         />
       ) : (
         <>
+          <MarketTabs
+            value={selectedMarket}
+            onChange={setSelectedMarket}
+            ariaLabel="Mercato calibrazione"
+          />
+
+          {selectedMarket !== "match_winner" ? (
+            <EmptyState
+              title={`Calibrazione non disponibile per ${marketLabel(selectedMarket)}`}
+              message="Questa analisi OOS riguarda oggi solo il Vincitore partita. 1° set e Over/Under hanno pipeline dedicate."
+            />
+          ) : null}
+
           <div className="toolbar">
             <label>
               Run
@@ -429,24 +460,23 @@ export function CalibrationPage() {
                 ))}
               </select>
             </label>
-            <label>
-              Versione
-              <select
-                value={versionFilter}
-                onChange={(event) => setVersionFilter(event.target.value as MLModelVersion | "all")}
-              >
-                <option value="all">Tutte</option>
-                <option value="v1">v1</option>
-                <option value="v2">v2</option>
-                <option value="v3">v3</option>
-              </select>
-            </label>
+            {selectedMarket === "match_winner" ? (
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={includeArchived}
+                  onChange={(event) => setIncludeArchived(event.target.checked)}
+                />
+                Includi archivio (run storiche)
+              </label>
+            ) : null}
             <label>
               Modello
               <select value={modelFilter} onChange={(event) => setModelFilter(event.target.value)}>
                 <option value="all">Tutti</option>
-                <option value="logistic_regression">logistic_regression</option>
-                <option value="random_forest">random_forest</option>
+                <option value="voting_ensemble">Ensemble</option>
+                <option value="logistic_regression">Logistic regression</option>
+                <option value="random_forest">Random forest</option>
               </select>
             </label>
             <label>
@@ -546,7 +576,7 @@ export function CalibrationPage() {
               ) : (
                 <EmptyState
                   title="Nessun risultato per i filtri"
-                  message="Prova a cambiare versione o modello."
+                  message="Prova a cambiare mercato, includere l'archivio o cambiare modello."
                 />
               )}
             </>

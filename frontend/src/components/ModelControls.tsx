@@ -24,7 +24,7 @@ export function ModelControls({
   return (
     <>
       <label className="filters-grid" style={{ minWidth: 180 }}>
-        <span>Versione modello</span>
+        <span>Mercato</span>
         <select
           value={modelVersion}
           onChange={(event) => {

@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { MarketTabs } from "../components/MarketTabs";
 import { MetricCard } from "../components/MetricCard";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
 import type {
   BandAnalysisSource,
+  LiveDashboardMarket,
   MLModelVersion,
   SegmentDimension,
   SegmentRoiAnalysis,
   SegmentRoiBucket
 } from "../types/api";
+import { DEFAULT_LIVE_MARKET, marketLabel } from "../utils/markets";
+import { DEFAULT_MODEL_VERSION } from "../utils/modelVersion";
 import { todayLocalISODate } from "../utils/tennis";
 
 function daysAgoIso(days: number) {
@@ -135,8 +139,9 @@ export function SegmentRoiPage() {
   const [analysis, setAnalysis] = useState<SegmentRoiAnalysis | null>(null);
   const [source, setSource] = useState<BandAnalysisSource>("live");
   const [segmentDimension, setSegmentDimension] = useState<SegmentDimension>("surface");
-  const [modelVersion, setModelVersion] = useState<MLModelVersion>("v2");
-  const [modelName, setModelName] = useState("logistic_regression");
+  const [modelVersion, setModelVersion] = useState<MLModelVersion>(DEFAULT_MODEL_VERSION);
+  const [modelName, setModelName] = useState("voting_ensemble");
+  const [market, setMarket] = useState<LiveDashboardMarket>(DEFAULT_LIVE_MARKET);
   const [fromDate, setFromDate] = useState(() => daysAgoIso(180));
   const [toDate, setToDate] = useState(() => todayLocalISODate());
   const [minSegmentSamples, setMinSegmentSamples] = useState(30);
@@ -153,6 +158,8 @@ export function SegmentRoiPage() {
         segment_dimension: segmentDimension,
         model_version: source === "live" ? undefined : modelVersion,
         model_name: source === "live" ? undefined : modelName,
+        market: source === "live" ? market : undefined,
+        include_archived: source === "live" ? false : undefined,
         from: fromDate,
         to: toDate,
         min_segment_samples: minSegmentSamples,
@@ -172,6 +179,7 @@ export function SegmentRoiPage() {
     segmentDimension,
     modelVersion,
     modelName,
+    market,
     fromDate,
     toDate,
     minSegmentSamples,
@@ -183,11 +191,11 @@ export function SegmentRoiPage() {
     void load();
   }, [load]);
 
-  if (loading) {
+  if (loading && !analysis) {
     return <LoadingState title="Caricamento ROI per segmento..." />;
   }
 
-  if (error) {
+  if (error && !analysis) {
     return <ErrorState title="Analisi segmenti non disponibile" message={error} />;
   }
 
@@ -203,9 +211,27 @@ export function SegmentRoiPage() {
           <p className="muted">
             Prestazioni per {SEGMENT_DIMENSION_LABELS[analysis.segment_dimension].toLowerCase()}.
             Sorgente attiva: <strong>{sourceLabel(analysis.source)}</strong>
+            {analysis.source === "live" ? (
+              <>
+                {" "}
+                · mercato <strong>{marketLabel(analysis.market ?? market)}</strong>
+              </>
+            ) : null}
           </p>
         </div>
+        {source === "live" ? (
+          <span className={`market-badge market-${market}`}>{marketLabel(market)}</span>
+        ) : null}
       </header>
+
+      {source === "live" ? (
+        <MarketTabs
+          value={market}
+          onChange={setMarket}
+          ariaLabel="Mercato ROI per segmento"
+          disabled={loading}
+        />
+      ) : null}
 
       <article className="panel filters-panel">
         <h3>Filtri</h3>
@@ -237,21 +263,23 @@ export function SegmentRoiPage() {
           {source !== "live" ? (
             <>
               <label>
-                Versione
+                Serie storica (Vincitore partita)
                 <select
                   value={modelVersion}
                   onChange={(event) => setModelVersion(event.target.value as MLModelVersion)}
                 >
-                  <option value="v1">v1</option>
-                  <option value="v2">v2</option>
-                  <option value="v3">v3</option>
+                  <option value="v4">Vincitore partita (attuale)</option>
+                  <option value="v3">Vincitore partita (archivio)</option>
+                  <option value="v2">Vincitore partita (archivio B)</option>
+                  <option value="v1">Vincitore partita (archivio C)</option>
                 </select>
               </label>
               <label>
                 Modello
                 <select value={modelName} onChange={(event) => setModelName(event.target.value)}>
-                  <option value="logistic_regression">logistic_regression</option>
-                  <option value="random_forest">random_forest</option>
+                  <option value="voting_ensemble">Ensemble</option>
+                  <option value="logistic_regression">Logistic regression</option>
+                  <option value="random_forest">Random forest</option>
                 </select>
               </label>
             </>

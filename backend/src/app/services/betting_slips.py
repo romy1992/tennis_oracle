@@ -4,7 +4,8 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Literal
+from io import BytesIO
+from typing import Any, Literal
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
@@ -16,7 +17,23 @@ from backend.src.app.ml.datasets.odds_builder import (
     has_real_odds,
     no_vig_market_probabilities,
 )
-from backend.src.app.ml.model_versioning import MODEL_VERSIONS, ModelVersion
+from backend.src.app.ml.datasets.first_set_winner_odds_builder import (
+    average_first_set_winner_odds_from_record,
+)
+from backend.src.app.ml.datasets.over_under_games_odds_builder import (
+    DEFAULT_LINE as OU_DEFAULT_LINE,
+    average_over_under_games_odds_from_record,
+)
+from backend.src.app.ml.datasets.score_parser import parse_fixture_score, target_over_line
+from backend.src.app.ml.model_versioning import (
+    DEFAULT_ACTIVE_MATCH_WINNER_VERSION,
+    MODEL_VERSIONS,
+    ModelVersion,
+)
+from backend.src.app.ml.prediction.extra_markets_predictor import (
+    FIRST_SET_WINNER_MODEL_VERSION,
+    OVER_UNDER_GAMES_MODEL_VERSION,
+)
 from backend.src.app.ml.prediction.predictor import DEFAULT_MODEL_NAME
 from backend.src.app.models import (
     BettingSlip,
@@ -29,6 +46,7 @@ from backend.src.app.models import (
 from backend.src.app.schemas.betting_slips import (
     BettingSlipCalendarDay,
     BettingSlipCalendarResponse,
+    BettingSlipMarketStatsRow,
     BettingSlipModelStatsResponse,
     BettingSlipModelStatsRow,
     BettingSlipPickRead,
@@ -37,19 +55,23 @@ from backend.src.app.schemas.betting_slips import (
     BettingSlipsDailyResponse,
     BettingSlipsRefreshResponse,
     BettingSlipStatsDay,
+    BettingSlipStatsKind,
     BettingSlipStatsProfile,
     BettingSlipStatsResponse,
     BettingSlipStatsSummary,
+    SlipKind,
 )
 from backend.src.app.services.match_lifecycle import (
     MatchLifecycleStatus,
     classify_match_lifecycle,
+    is_eligible_for_slip_pool,
     match_lifecycle_label,
     resolve_slip_status_from_picks,
     settle_simulated_bet,
     slip_profit_units,
 )
 from backend.src.app.services.predictions import COMPLETED_WINNERS, _predictions_by_event_key, _resolve_model_name
+from backend.src.app.services.published_predictions import list_latest_published_predictions_by_event_keys
 from backend.src.app.services.single_match_value import (
     DEFAULT_MIN_EDGE_PERCENT,
     calculate_expected_roi,
@@ -62,11 +84,26 @@ SlipStatus = Literal["pending", "won", "lost", "void"]
 ValueDecision = Literal["PLAY", "BORDERLINE", "NO BET"]
 
 DEFAULT_STAKE = 10.0
-DEFAULT_SLIP_COUNT = 9
 DEFAULT_PICKS_PER_SLIP = 5
+
+# Mercati inclusi di default nel pool "a valore" delle schedine. Tutti e tre
+# hanno quote bookmaker reali (Home/Away, Home/Away 1st Set, O/U games).
+DEFAULT_SLIP_MARKETS: tuple[str, ...] = (
+    "match_winner",
+    "first_set_winner",
+    "over_under_games",
+)
 
 
 SLIP_PROFILES: tuple[dict[str, object], ...] = (
+    {
+        "slip_key": "play_double_score",
+        "label": "Play · Doppia",
+        "description": "Solo PLAY: 2 pick ordinati per score (edge+confidence+quota)",
+        "target_picks": 2,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "score",
+    },
     {
         "slip_key": "play_safe",
         "label": "Play · Sicura",
@@ -141,6 +178,60 @@ SLIP_PROFILES: tuple[dict[str, object], ...] = (
     },
 )
 
+DEFAULT_SLIP_COUNT = len(SLIP_PROFILES)
+MAX_SLIP_COUNT = len(SLIP_PROFILES)
+
+# Progressive ladders (scalate): single-leg steps ordered by kickoff; each win's
+# return is reinvested in the next step. Stored as BettingSlip with slip_key
+# prefix ``ladder_`` (no schema migration). P/L vs base stake matches an
+# accumulator of the non-void legs.
+LADDER_PROFILES: tuple[dict[str, object], ...] = (
+    {
+        "slip_key": "ladder_play_3",
+        "label": "Scalata · Play 3",
+        "description": (
+            "3 step solo PLAY in ordine di orario: la vincita di ogni step "
+            "viene reinvestita nello step successivo"
+        ),
+        "target_steps": 3,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "score",
+    },
+    {
+        "slip_key": "ladder_play_4",
+        "label": "Scalata · Play 4",
+        "description": (
+            "4 step solo PLAY in ordine di orario: raddoppio progressivo "
+            "del bankroll sullo step successivo"
+        ),
+        "target_steps": 4,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "score",
+    },
+    {
+        "slip_key": "ladder_soft_4",
+        "label": "Scalata · Play+Border 4",
+        "description": (
+            "4 step PLAY/BORDERLINE in ordine di orario: più flessibile, "
+            "stesso meccanismo di reinvestimento"
+        ),
+        "target_steps": 4,
+        "allowed_decisions": ("PLAY", "BORDERLINE"),
+        "sort_mode": "score",
+    },
+)
+
+DEFAULT_LADDER_COUNT = len(LADDER_PROFILES)
+LADDER_SLIP_KEY_PREFIX = "ladder_"
+
+
+def slip_kind_from_key(slip_key: str) -> SlipKind:
+    return "ladder" if str(slip_key).startswith(LADDER_SLIP_KEY_PREFIX) else "parlay"
+
+
+def slip_kind_label(kind: SlipKind) -> str:
+    return "Scalate" if kind == "ladder" else "Schedine"
+
 
 @dataclass(frozen=True)
 class CandidatePick:
@@ -167,6 +258,138 @@ class CandidatePick:
     value_label: str
     confidence: float
     pick_score: float
+    market: str = "match_winner"
+
+
+@dataclass(frozen=True)
+class PoolFixtureRow:
+    """Minimal fixture shape shared by live ``NextFixture`` and historical ``Fixture``."""
+
+    event_key: int
+    event_date: date | None
+    event_time: time | None
+    tournament_name: str | None
+    surface: str | None
+    event_first_player: str | None
+    event_second_player: str | None
+    first_player_key: int | None
+    second_player_key: int | None
+    odds: Any
+    event_status: str | None = None
+    is_completed: bool = False
+
+
+def _lifecycle_for_pool_fixture(
+    fixture: NextFixture | PoolFixtureRow,
+    *,
+    event_winner: str | None = None,
+) -> MatchLifecycleStatus:
+    return classify_match_lifecycle(
+        event_status=getattr(fixture, "event_status", None),
+        event_winner=event_winner,
+        is_completed=bool(getattr(fixture, "is_completed", False)),
+    )
+
+
+def _pool_fixtures_for_date(
+    db: Session,
+    slip_date: date,
+    *,
+    include_completed: bool = False,
+) -> list[NextFixture | PoolFixtureRow]:
+    """Load fixtures usable as slip candidates.
+
+    Live generation uses only open ``NextFixture`` rows that are still
+    ``upcoming`` (cancelled / postponed / abandoned / unknown / started are
+    excluded once that status is known at update time). Historical replay
+    (``include_completed=True``) also accepts completed next-fixtures, and if
+    the rolling table no longer holds that day (moved to ``fixture``), falls
+    back to ``Fixture`` rows with real odds — still excluding void-like
+    statuses.
+    """
+    if not include_completed:
+        rows = list(
+            db.scalars(
+                select(NextFixture)
+                .where(
+                    NextFixture.is_completed.is_(False),
+                    NextFixture.event_date == slip_date,
+                    has_real_odds(NextFixture.odds),
+                )
+                .order_by(
+                    NextFixture.event_time.asc().nullslast(),
+                    NextFixture.event_key.asc(),
+                )
+            ).all()
+        )
+        return [
+            fixture
+            for fixture in rows
+            if is_eligible_for_slip_pool(
+                _lifecycle_for_pool_fixture(fixture),
+                include_completed=False,
+            )
+        ]
+
+    next_rows = list(
+        db.scalars(
+            select(NextFixture)
+            .where(
+                NextFixture.event_date == slip_date,
+                has_real_odds(NextFixture.odds),
+            )
+            .order_by(
+                NextFixture.event_time.asc().nullslast(),
+                NextFixture.event_key.asc(),
+            )
+        ).all()
+    )
+    if next_rows:
+        return [
+            fixture
+            for fixture in next_rows
+            if is_eligible_for_slip_pool(
+                _lifecycle_for_pool_fixture(fixture),
+                include_completed=True,
+            )
+        ]
+
+    return [
+        PoolFixtureRow(
+            event_key=fixture.event_key,
+            event_date=fixture.event_date,
+            event_time=fixture.event_time,
+            tournament_name=fixture.tournament_name,
+            surface=None,
+            event_first_player=fixture.event_first_player,
+            event_second_player=fixture.event_second_player,
+            first_player_key=fixture.first_player_key,
+            second_player_key=fixture.second_player_key,
+            odds=fixture.odds,
+            event_status=fixture.event_status,
+            is_completed=fixture.event_winner in COMPLETED_WINNERS,
+        )
+        for fixture in db.scalars(
+            select(Fixture)
+            .where(
+                Fixture.event_date == slip_date,
+                has_real_odds(Fixture.odds),
+            )
+            .order_by(
+                Fixture.event_time.asc().nullslast(),
+                Fixture.event_key.asc(),
+            )
+        ).all()
+        if is_eligible_for_slip_pool(
+            classify_match_lifecycle(
+                event_status=fixture.event_status,
+                event_winner=fixture.event_winner,
+                event_final_result=fixture.event_final_result,
+                is_completed=fixture.event_winner in COMPLETED_WINNERS,
+            ),
+            include_completed=True,
+        )
+    ]
 
 
 @dataclass(frozen=True)
@@ -202,7 +425,7 @@ def _winner_label(
     return predicted_winner
 
 
-def _fixture_odds(fixture: NextFixture) -> MatchWinnerOddsAverage | None:
+def _fixture_odds(fixture: NextFixture | PoolFixtureRow) -> MatchWinnerOddsAverage | None:
     return average_match_winner_odds_from_record(
         FixtureOddsRecord(
             match_id=fixture.event_key,
@@ -292,22 +515,73 @@ def build_candidate_pool(
     model_name: str,
     min_edge_percent: float | None = None,
     min_edge_overrides: dict[int, float] | None = None,
+    include_markets: tuple[str, ...] = DEFAULT_SLIP_MARKETS,
+    include_completed: bool = False,
 ) -> list[CandidatePick]:
-    fixture_filters = [
-        NextFixture.is_completed.is_(False),
-        NextFixture.event_date == slip_date,
-        has_real_odds(NextFixture.odds),
-    ]
+    """Pool unico di candidati "a valore", potenzialmente misto tra mercati
+    diversi sulla STESSA giornata (match_winner + first_set_winner +
+    over_under_games: tutti hanno quote bookmaker reali, quindi edge/ROI/
+    PLAY-BORDERLINE-NO BET calcolabili in modo onesto).
 
-    fixtures = list(
-        db.scalars(
-            select(NextFixture)
-            .where(*fixture_filters)
-            .order_by(
-                NextFixture.event_time.asc().nullslast(),
-                NextFixture.event_key.asc(),
+    La selezione a valle (``_select_picks_simple``/``_select_picks_for_tier``)
+    deduplica per ``(event_key, market)``: la stessa fixture puo' quindi
+    contribuire con mercati diversi nella medesima schedina, ma mai con due
+    copie dello stesso mercato.
+
+    ``include_completed=True`` is for offline historical replay: include
+    completed next-fixtures and fall back to ``Fixture`` when the rolling
+    table no longer holds that day. Production slip generation keeps the
+    default ``False``.
+    """
+    candidates: list[CandidatePick] = []
+    if "match_winner" in include_markets:
+        candidates.extend(
+            _build_match_winner_candidate_pool(
+                db,
+                slip_date=slip_date,
+                model_version=model_version,
+                model_name=model_name,
+                min_edge_percent=min_edge_percent,
+                min_edge_overrides=min_edge_overrides,
+                include_completed=include_completed,
             )
-        ).all()
+        )
+    if "first_set_winner" in include_markets:
+        candidates.extend(
+            _build_first_set_winner_candidate_pool(
+                db,
+                slip_date=slip_date,
+                min_edge_percent=min_edge_percent,
+                min_edge_overrides=min_edge_overrides,
+                include_completed=include_completed,
+            )
+        )
+    if "over_under_games" in include_markets:
+        candidates.extend(
+            _build_over_under_candidate_pool(
+                db,
+                slip_date=slip_date,
+                min_edge_percent=min_edge_percent,
+                min_edge_overrides=min_edge_overrides,
+                include_completed=include_completed,
+            )
+        )
+    candidates.sort(key=lambda candidate: candidate.pick_score, reverse=True)
+    return candidates
+
+
+def _build_match_winner_candidate_pool(
+    db: Session,
+    *,
+    slip_date: date,
+    model_version: ModelVersion,
+    model_name: str,
+    min_edge_percent: float | None = None,
+    min_edge_overrides: dict[int, float] | None = None,
+    include_completed: bool = False,
+) -> list[CandidatePick]:
+    fixtures = _pool_fixtures_for_date(
+        db, slip_date, include_completed=include_completed
     )
     if not fixtures:
         return []
@@ -385,6 +659,248 @@ def build_candidate_pool(
                 value_label=_value_label_for_decision(value_decision),
                 confidence=confidence,
                 pick_score=_pick_score(model_prob, edge, winner_odds),
+                market="match_winner",
+            )
+        )
+
+    candidates.sort(key=lambda candidate: candidate.pick_score, reverse=True)
+    return candidates
+
+
+def _build_first_set_winner_candidate_pool(
+    db: Session,
+    *,
+    slip_date: date,
+    min_edge_percent: float | None = None,
+    min_edge_overrides: dict[int, float] | None = None,
+    include_completed: bool = False,
+) -> list[CandidatePick]:
+    """Candidati Vincitore 1° set: predizioni gia' pubblicate con quota reale."""
+    fixtures = _pool_fixtures_for_date(
+        db, slip_date, include_completed=include_completed
+    )
+    if not fixtures:
+        return []
+    fixtures_by_key = {fixture.event_key: fixture for fixture in fixtures}
+
+    published_by_event = list_latest_published_predictions_by_event_keys(
+        db, list(fixtures_by_key.keys()), model_versions=[FIRST_SET_WINNER_MODEL_VERSION],
+    )
+    overrides = min_edge_overrides or {}
+    candidates: list[CandidatePick] = []
+
+    for event_key, rows in published_by_event.items():
+        fixture = fixtures_by_key.get(event_key)
+        if fixture is None or not rows:
+            continue
+        row = max(rows, key=lambda item: item.published_at)
+        if (
+            row.probability is None
+            or row.odds is None
+            or row.void_odds is None
+            or row.selection not in COMPLETED_WINNERS
+        ):
+            continue
+
+        market_prob: float | None = None
+        edge: float | None = None
+        odds_avg = average_first_set_winner_odds_from_record(
+            FixtureOddsRecord(
+                match_id=fixture.event_key,
+                match_date=fixture.event_date,
+                player_1_id=fixture.first_player_key,
+                player_2_id=fixture.second_player_key,
+                player_1_name=fixture.event_first_player,
+                player_2_name=fixture.event_second_player,
+                odds=fixture.odds,
+            )
+        )
+        if odds_avg is not None:
+            try:
+                no_vig_p1, no_vig_p2 = no_vig_market_probabilities(
+                    odds_avg.avg_player_1_odds, odds_avg.avg_player_2_odds,
+                )
+                market_prob = no_vig_p1 if row.selection == "First Player" else no_vig_p2
+                edge = float(row.probability) - market_prob
+            except ValueError:
+                market_prob = None
+
+        model_prob = float(row.probability)
+        odds = float(row.odds)
+        void_odds = float(row.void_odds)
+        edge_absolute = odds - void_odds
+        edge_percent = (edge_absolute / void_odds) * 100.0
+        expected_roi = calculate_expected_roi(odds, model_prob)
+        baseline_min_edge = (
+            DEFAULT_MIN_EDGE_PERCENT if min_edge_percent is None else float(min_edge_percent)
+        )
+        effective_min_edge = overrides.get(event_key, baseline_min_edge)
+        value_decision = classify_single_bet_value(
+            market_odds=odds,
+            void_odds=void_odds,
+            min_edge_percent=effective_min_edge,
+        )
+        winner_label = (
+            fixture.event_first_player
+            if row.selection == "First Player"
+            else fixture.event_second_player
+        ) or row.selection
+
+        candidates.append(
+            CandidatePick(
+                event_key=fixture.event_key,
+                event_date=fixture.event_date,
+                event_time=fixture.event_time,
+                tournament_name=fixture.tournament_name,
+                surface=fixture.surface,
+                player_1_name=fixture.event_first_player,
+                player_2_name=fixture.event_second_player,
+                predicted_winner=row.selection,
+                predicted_winner_label=winner_label,
+                model_prob=model_prob,
+                market_prob=round(market_prob, 4) if market_prob is not None else None,
+                edge=round(edge, 4) if edge is not None else None,
+                odds=odds,
+                void_odds=round(void_odds, 4),
+                edge_absolute=round(edge_absolute, 4),
+                edge_percent=round(edge_percent, 2),
+                expected_roi=round(expected_roi, 6),
+                suggested_min_edge_percent=baseline_min_edge,
+                min_edge_percent=round(float(effective_min_edge), 2),
+                value_decision=value_decision,
+                value_label=_value_label_for_decision(value_decision),
+                confidence=model_prob,
+                pick_score=_pick_score(model_prob, edge, odds),
+                market="first_set_winner",
+            )
+        )
+
+    candidates.sort(key=lambda candidate: candidate.pick_score, reverse=True)
+    return candidates
+
+
+def _ou_side_and_line(selection: str | None) -> tuple[str, float] | None:
+    """Estrae ("Over"|"Under", linea) da una selection tipo "Over 20.5".
+    ``None`` se il testo non rispetta il formato atteso (difensivo)."""
+    if not selection:
+        return None
+    parts = selection.split()
+    if len(parts) != 2 or parts[0] not in {"Over", "Under"}:
+        return None
+    try:
+        line = float(parts[1])
+    except ValueError:
+        return None
+    return parts[0], line
+
+
+def _build_over_under_candidate_pool(
+    db: Session,
+    *,
+    slip_date: date,
+    min_edge_percent: float | None = None,
+    min_edge_overrides: dict[int, float] | None = None,
+    include_completed: bool = False,
+) -> list[CandidatePick]:
+    """Candidati Over/Under Games: riusa le predizioni gia' pubblicate nel
+    ledger ``PublishedPrediction`` (stessa fase pipeline di ``extra_market_predictions.py``,
+    NON richiama il modello ML al volo qui — coerente con come il pool
+    match-winner legge ``MatchPrediction`` gia' calcolato). ``market_prob``/``edge``
+    (probabilita' no-vig) vengono ricalcolati dalle quote medie Over+Under della
+    fixture per completezza (``PublishedPrediction`` conserva solo la quota
+    della selection scelta, non entrambe)."""
+    fixtures = _pool_fixtures_for_date(
+        db, slip_date, include_completed=include_completed
+    )
+    if not fixtures:
+        return []
+    fixtures_by_key = {fixture.event_key: fixture for fixture in fixtures}
+
+    published_by_event = list_latest_published_predictions_by_event_keys(
+        db, list(fixtures_by_key.keys()), model_versions=[OVER_UNDER_GAMES_MODEL_VERSION],
+    )
+    overrides = min_edge_overrides or {}
+    candidates: list[CandidatePick] = []
+
+    for event_key, rows in published_by_event.items():
+        fixture = fixtures_by_key.get(event_key)
+        if fixture is None or not rows:
+            continue
+        row = max(rows, key=lambda item: item.published_at)
+        if row.probability is None or row.odds is None or row.void_odds is None:
+            continue  # niente quota reale pubblicata: non e' un candidato "a valore"
+
+        side_line = _ou_side_and_line(row.selection)
+        if side_line is None:
+            continue
+        side, line = side_line
+
+        market_prob: float | None = None
+        edge: float | None = None
+        odds_avg = average_over_under_games_odds_from_record(
+            FixtureOddsRecord(
+                match_id=fixture.event_key,
+                match_date=fixture.event_date,
+                player_1_id=fixture.first_player_key,
+                player_2_id=fixture.second_player_key,
+                player_1_name=fixture.event_first_player,
+                player_2_name=fixture.event_second_player,
+                odds=fixture.odds,
+            ),
+            line=line,
+        )
+        if odds_avg is not None:
+            try:
+                no_vig_over, no_vig_under = no_vig_market_probabilities(
+                    odds_avg.avg_over_odds, odds_avg.avg_under_odds,
+                )
+                market_prob = no_vig_over if side == "Over" else no_vig_under
+                edge = float(row.probability) - market_prob
+            except ValueError:
+                market_prob = None
+
+        model_prob = float(row.probability)
+        odds = float(row.odds)
+        void_odds = float(row.void_odds)
+        edge_absolute = odds - void_odds
+        edge_percent = (edge_absolute / void_odds) * 100.0
+        expected_roi = calculate_expected_roi(odds, model_prob)
+        baseline_min_edge = (
+            DEFAULT_MIN_EDGE_PERCENT if min_edge_percent is None else float(min_edge_percent)
+        )
+        effective_min_edge = overrides.get(event_key, baseline_min_edge)
+        value_decision = classify_single_bet_value(
+            market_odds=odds,
+            void_odds=void_odds,
+            min_edge_percent=effective_min_edge,
+        )
+
+        candidates.append(
+            CandidatePick(
+                event_key=fixture.event_key,
+                event_date=fixture.event_date,
+                event_time=fixture.event_time,
+                tournament_name=fixture.tournament_name,
+                surface=fixture.surface,
+                player_1_name=fixture.event_first_player,
+                player_2_name=fixture.event_second_player,
+                predicted_winner=row.selection,
+                predicted_winner_label=f"{side} {line:g} games",
+                model_prob=model_prob,
+                market_prob=round(market_prob, 4) if market_prob is not None else None,
+                edge=round(edge, 4) if edge is not None else None,
+                odds=odds,
+                void_odds=round(void_odds, 4),
+                edge_absolute=round(edge_absolute, 4),
+                edge_percent=round(edge_percent, 2),
+                expected_roi=round(expected_roi, 6),
+                suggested_min_edge_percent=baseline_min_edge,
+                min_edge_percent=round(float(effective_min_edge), 2),
+                value_decision=value_decision,
+                value_label=_value_label_for_decision(value_decision),
+                confidence=model_prob,
+                pick_score=_pick_score(model_prob, edge, odds),
+                market="over_under_games",
             )
         )
 
@@ -403,31 +919,51 @@ def _diversity_bonus(candidate: CandidatePick, selected: list[CandidatePick]) ->
     return bonus
 
 
+def _candidate_identity(candidate: CandidatePick) -> tuple[int, str]:
+    """Identity persisted by ``uq_betting_slip_pick_event_market``."""
+    return candidate.event_key, candidate.market
+
+
 def _select_picks_simple(
     pool: list[CandidatePick],
     *,
     count: int,
-    exclude_keys: set[int],
+    exclude_keys: set[tuple[int, str]],
     sort_key,
     extra_filter=None,
+    selected_context: list[CandidatePick] | None = None,
 ) -> list[CandidatePick]:
     filtered = [
         candidate
         for candidate in pool
-        if candidate.event_key not in exclude_keys
+        if _candidate_identity(candidate) not in exclude_keys
         and (extra_filter(candidate) if extra_filter is not None else True)
     ]
     filtered.sort(key=lambda candidate: sort_key(candidate) + _diversity_bonus(candidate, []), reverse=True)
 
     selected_picks: list[CandidatePick] = []
+    context = list(selected_context or [])
     remaining = filtered.copy()
     while len(selected_picks) < count and remaining:
-        remaining.sort(
-            key=lambda candidate: sort_key(candidate) + _diversity_bonus(candidate, selected_picks),
+        current_selection = [*context, *selected_picks]
+        used_markets = {pick.market for pick in current_selection}
+        unseen_market_candidates = [
+            candidate for candidate in remaining if candidate.market not in used_markets
+        ]
+        # Finche' esiste un mercato non ancora rappresentato, riservagli il
+        # prossimo slot. In questo modo una schedina e' realmente multi-mercato
+        # quando il tier dispone di candidati idonei, senza inventare pick che
+        # non superano il filtro PLAY/BORDERLINE/NO BET del profilo.
+        eligible = unseen_market_candidates or remaining
+        eligible.sort(
+            key=lambda candidate: sort_key(candidate) + _diversity_bonus(candidate, current_selection),
             reverse=True,
         )
-        next_pick = remaining.pop(0)
-        if next_pick.event_key in {pick.event_key for pick in selected_picks}:
+        next_pick = eligible[0]
+        remaining.remove(next_pick)
+        if _candidate_identity(next_pick) in {
+            _candidate_identity(pick) for pick in current_selection
+        }:
             continue
         selected_picks.append(next_pick)
     return selected_picks
@@ -453,13 +989,15 @@ def _select_picks_for_tier(
     candidates: list[CandidatePick],
     *,
     count: int,
-    exclude_keys: set[int],
+    exclude_keys: set[tuple[int, str]],
     allowed_decisions: tuple[str, ...],
     sort_key,
 ) -> list[CandidatePick]:
     """Fill a slip preferring a mix of decision states when the tier allows them."""
     allowed_set = set(allowed_decisions)
-    base_filter = lambda candidate: candidate.value_decision in allowed_set
+
+    def base_filter(candidate: CandidatePick) -> bool:
+        return candidate.value_decision in allowed_set
 
     if allowed_set == {"PLAY"}:
         return _select_picks_simple(
@@ -483,10 +1021,11 @@ def _select_picks_for_tier(
             exclude_keys=used,
             sort_key=sort_key,
             extra_filter=lambda candidate, decision=decision: candidate.value_decision == decision,
+            selected_context=selected,
         )
         for pick in picks:
             selected.append(pick)
-            used.add(pick.event_key)
+            used.add(_candidate_identity(pick))
 
     remaining = count - len(selected)
     if remaining > 0:
@@ -496,6 +1035,7 @@ def _select_picks_for_tier(
             exclude_keys=used,
             sort_key=sort_key,
             extra_filter=base_filter,
+            selected_context=selected,
         )
         selected.extend(fillers)
 
@@ -514,7 +1054,7 @@ def generate_slips(
 
     profiles = list(SLIP_PROFILES[:slip_count])
     generated: list[GeneratedSlip] = []
-    used_keys_by_tier: dict[tuple[str, ...], set[int]] = defaultdict(set)
+    used_keys_by_tier: dict[tuple[str, ...], set[tuple[int, str]]] = defaultdict(set)
 
     for profile in profiles:
         target = min(int(profile["target_picks"]), picks_per_slip)
@@ -531,14 +1071,15 @@ def generate_slips(
             allowed_decisions=allowed,
             sort_key=sort_key,
         )
-        if len(picks) < 4:
+        if len(picks) < target:
             warnings.append(
-                f"Schedina '{profile['label']}': solo {len(picks)} pick disponibili."
+                f"Schedina '{profile['label']}': solo {len(picks)}/{target} pick disponibili."
             )
-            if not picks:
-                continue
+        # Serve almeno una doppia: non persistiamo schedine monogamba.
+        if len(picks) < 2:
+            continue
 
-        tier_used.update(pick.event_key for pick in picks)
+        tier_used.update(_candidate_identity(pick) for pick in picks)
         generated.append(
             GeneratedSlip(
                 slip_key=slip_key,
@@ -552,6 +1093,113 @@ def generate_slips(
     if len(generated) < slip_count:
         warnings.append(
             f"Solo {len(generated)} schedine generate: candidati insufficienti."
+        )
+
+    return generated, warnings
+
+
+def _select_ladder_steps(
+    candidates: list[CandidatePick],
+    *,
+    count: int,
+    exclude_keys: set[tuple[int, str]],
+    exclude_events: set[int],
+    allowed_decisions: tuple[str, ...],
+    sort_key,
+) -> list[CandidatePick]:
+    """Pick ``count`` singles on distinct fixtures, then order by kickoff."""
+    pool = [
+        candidate
+        for candidate in candidates
+        if candidate.value_decision in allowed_decisions
+        and _candidate_identity(candidate) not in exclude_keys
+        and candidate.event_key not in exclude_events
+        and candidate.odds is not None
+        and candidate.odds > 1.0
+    ]
+    pool.sort(
+        key=lambda candidate: sort_key(candidate) + _diversity_bonus(candidate, []),
+        reverse=True,
+    )
+
+    selected: list[CandidatePick] = []
+    used_events: set[int] = set()
+    remaining = pool.copy()
+    while len(selected) < count and remaining:
+        current = [*selected]
+        remaining.sort(
+            key=lambda candidate: sort_key(candidate)
+            + _diversity_bonus(candidate, current),
+            reverse=True,
+        )
+        pick = remaining.pop(0)
+        if pick.event_key in used_events:
+            continue
+        selected.append(pick)
+        used_events.add(pick.event_key)
+        remaining = [item for item in remaining if item.event_key not in used_events]
+
+    selected.sort(
+        key=lambda candidate: (
+            candidate.event_time is None,
+            candidate.event_time or time.max,
+            candidate.event_key,
+            candidate.market,
+        )
+    )
+    return selected
+
+
+def generate_ladders(
+    candidates: list[CandidatePick],
+    *,
+    ladder_count: int = DEFAULT_LADDER_COUNT,
+) -> tuple[list[GeneratedSlip], list[str]]:
+    """Build progressive stake ladders from the same value candidate pool."""
+    warnings: list[str] = []
+    if not candidates:
+        return [], ["Nessun candidato disponibile per generare scalate."]
+
+    profiles = list(LADDER_PROFILES[:ladder_count])
+    generated: list[GeneratedSlip] = []
+    used_keys: set[tuple[int, str]] = set()
+    used_events: set[int] = set()
+
+    for profile in profiles:
+        target = int(profile["target_steps"])
+        allowed = tuple(profile["allowed_decisions"])  # type: ignore[arg-type]
+        sort_mode = str(profile.get("sort_mode") or "score")
+        sort_key = _sort_key_for_mode(sort_mode)
+        picks = _select_ladder_steps(
+            candidates,
+            count=target,
+            exclude_keys=used_keys,
+            exclude_events=used_events,
+            allowed_decisions=allowed,
+            sort_key=sort_key,
+        )
+        if len(picks) < target:
+            warnings.append(
+                f"Scalata '{profile['label']}': solo {len(picks)}/{target} step disponibili."
+            )
+        if len(picks) < 2:
+            continue
+
+        used_keys.update(_candidate_identity(pick) for pick in picks)
+        used_events.update(pick.event_key for pick in picks)
+        generated.append(
+            GeneratedSlip(
+                slip_key=str(profile["slip_key"]),
+                label=str(profile["label"]),
+                description=str(profile["description"]),
+                picks=tuple(picks),
+                combined_odds=_combined_odds(picks),
+            )
+        )
+
+    if len(generated) < ladder_count:
+        warnings.append(
+            f"Solo {len(generated)} scalate generate: candidati insufficienti."
         )
 
     return generated, warnings
@@ -571,6 +1219,26 @@ def _slips_exist(
             BettingSlip.slip_date == slip_date,
             BettingSlip.model_version == model_version,
             BettingSlip.model_name == model_name,
+        )
+    )
+    return int(count or 0) > 0
+
+
+def _ladder_slips_exist(
+    db: Session,
+    *,
+    slip_date: date,
+    model_version: ModelVersion,
+    model_name: str,
+) -> bool:
+    count = db.scalar(
+        select(func.count())
+        .select_from(BettingSlip)
+        .where(
+            BettingSlip.slip_date == slip_date,
+            BettingSlip.model_version == model_version,
+            BettingSlip.model_name == model_name,
+            BettingSlip.slip_key.startswith(LADDER_SLIP_KEY_PREFIX),
         )
     )
     return int(count or 0) > 0
@@ -688,7 +1356,7 @@ def _slip_counts_by_date(
 def get_betting_slip_calendar(
     db: Session,
     *,
-    model_version: ModelVersion = "v2",
+    model_version: ModelVersion = DEFAULT_ACTIVE_MATCH_WINNER_VERSION,
     model_name: str | None = None,
 ) -> BettingSlipCalendarResponse:
     today = date.today()
@@ -789,6 +1457,7 @@ def _persist_slips(
                 BettingSlipPick(
                     betting_slip_id=slip.id,
                     event_key=pick.event_key,
+                    market=pick.market,
                     event_date=pick.event_date,
                     event_time=pick.event_time,
                     tournament_name=pick.tournament_name,
@@ -909,6 +1578,9 @@ def _resolve_actual_winner(
     predictions: dict[int, MatchPrediction],
     fixtures: dict[int, Fixture],
 ) -> str | None:
+    """Vincitore REALE del match (First/Second Player), indipendentemente dal
+    mercato scommesso su questo pick: serve a determinare il lifecycle della
+    partita (``_resolve_match_lifecycle``), non l'esito del pick stesso."""
     prediction = predictions.get(pick.event_key)
     if prediction is not None and prediction.actual_winner in COMPLETED_WINNERS:
         return prediction.actual_winner
@@ -920,27 +1592,102 @@ def _resolve_actual_winner(
     return None
 
 
+def _resolve_over_under_actual_result(
+    pick: BettingSlipPick,
+    fixtures: dict[int, Fixture],
+) -> tuple[str | None, bool]:
+    """Esito reale ("Over"/"Under") per un pick over_under_games, ricavato dal
+    punteggio set-by-set reale (``score_parser``). ``has_result=False`` quando
+    lo score non e' ancora disponibile/valido (match non finito, ritiro,
+    anomalia): il pick resta pending o viene voidato in base al lifecycle,
+    MAI forzato a won/lost senza un conteggio game affidabile."""
+    fixture = fixtures.get(pick.event_key)
+    if fixture is None:
+        return None, False
+    parsed = parse_fixture_score(
+        match_id=pick.event_key,
+        scores=fixture.scores,
+        event_game_result=fixture.event_game_result,
+    )
+    if not parsed.is_valid_for_training:
+        return None, False
+    side_line = _ou_side_and_line(pick.predicted_winner)
+    line = side_line[1] if side_line else OU_DEFAULT_LINE
+    is_over = target_over_line(parsed.total_games, line)
+    if is_over is None:
+        return None, False
+    return ("Over" if is_over else "Under"), True
+
+
+def _resolve_first_set_actual_result(
+    pick: BettingSlipPick,
+    fixtures: dict[int, Fixture],
+) -> tuple[str | None, bool]:
+    """Esito reale 1° set ("First Player"/"Second Player") da score set-by-set."""
+    fixture = fixtures.get(pick.event_key)
+    if fixture is None:
+        return None, False
+    parsed = parse_fixture_score(
+        match_id=pick.event_key,
+        scores=fixture.scores,
+        event_game_result=fixture.event_game_result,
+    )
+    if not parsed.is_valid_for_training or parsed.first_set_winner is None:
+        return None, False
+    if parsed.first_set_winner == "player_1":
+        return "First Player", True
+    if parsed.first_set_winner == "player_2":
+        return "Second Player", True
+    return None, False
+
+
+def _resolve_pick_actual_result(
+    pick: BettingSlipPick,
+    *,
+    predictions: dict[int, MatchPrediction],
+    fixtures: dict[int, Fixture],
+) -> tuple[str | None, bool]:
+    """Esito REALE del mercato specifico di questo pick (generico su
+    ``pick.market``): ("First Player"/"Second Player", has_result) per
+    match_winner / first_set_winner, ("Over"/"Under", has_result) per
+    over_under_games."""
+    if pick.market == "over_under_games":
+        return _resolve_over_under_actual_result(pick, fixtures)
+    if pick.market == "first_set_winner":
+        return _resolve_first_set_actual_result(pick, fixtures)
+    actual_winner = _resolve_actual_winner(pick, predictions, fixtures)
+    return actual_winner, actual_winner in COMPLETED_WINNERS
+
+
 def _actual_winner_label(
-    actual_winner: str | None,
+    actual_result: str | None,
     pick: BettingSlipPick,
 ) -> str | None:
-    if actual_winner is None:
+    if actual_result is None:
         return None
-    return _winner_label(actual_winner, pick.player_1_name, pick.player_2_name)
+    if pick.market == "over_under_games":
+        return actual_result  # "Over"/"Under" e' gia' leggibile di per se'
+    return _winner_label(actual_result, pick.player_1_name, pick.player_2_name)
 
 
 def _resolve_pick_status(
     pick: BettingSlipPick,
-    actual_winner: str | None,
+    actual_result: str | None,
     *,
     match_lifecycle_status: MatchLifecycleStatus | None = None,
+    has_result: bool | None = None,
 ) -> tuple[PickStatus, bool | None]:
     lifecycle = match_lifecycle_status or "upcoming"
+    predicted = pick.predicted_winner
+    if pick.market == "over_under_games":
+        side_line = _ou_side_and_line(predicted)
+        predicted = side_line[0] if side_line else predicted
     settlement = settle_simulated_bet(
         lifecycle=lifecycle,
-        predicted_winner=pick.predicted_winner,
-        actual_winner=actual_winner,
+        predicted_winner=predicted,
+        actual_winner=actual_result,
         market_odds=pick.odds,
+        has_result=has_result,
     )
     return settlement.outcome, settlement.is_correct
 
@@ -1023,17 +1770,21 @@ def _pick_read(
     next_fixtures: dict[int, NextFixture],
     min_edge_percent: float | None = None,
 ) -> BettingSlipPickRead:
-    actual_winner = _resolve_actual_winner(pick, predictions, fixtures)
+    match_actual_winner = _resolve_actual_winner(pick, predictions, fixtures)
     lifecycle, event_status = _resolve_match_lifecycle(
         pick.event_key,
         fixtures=fixtures,
         next_fixtures=next_fixtures,
-        actual_winner=actual_winner,
+        actual_winner=match_actual_winner,
+    )
+    actual_result, has_result = _resolve_pick_actual_result(
+        pick, predictions=predictions, fixtures=fixtures,
     )
     pick_status, is_correct = _resolve_pick_status(
         pick,
-        actual_winner,
+        actual_result,
         match_lifecycle_status=lifecycle,
+        has_result=has_result,
     )
     value_fields = _resolve_pick_value_fields(pick, min_edge_percent=min_edge_percent)
     void_reason = None
@@ -1041,6 +1792,7 @@ def _pick_read(
         void_reason = match_lifecycle_label(lifecycle)
     return BettingSlipPickRead(
         event_key=pick.event_key,
+        market=pick.market,
         event_date=pick.event_date,
         event_time=pick.event_time,
         tournament_name=pick.tournament_name,
@@ -1064,7 +1816,7 @@ def _pick_read(
         confidence=pick.confidence,
         pick_score=pick.pick_score,
         pick_status=pick_status,
-        actual_winner_label=_actual_winner_label(actual_winner, pick),
+        actual_winner_label=_actual_winner_label(actual_result, pick),
         is_correct=is_correct,
         match_lifecycle_status=lifecycle,
         match_lifecycle_label=match_lifecycle_label(lifecycle),
@@ -1123,12 +1875,16 @@ def _slip_read(
             resolved_combined_odds *= pick.odds
     resolved_combined_odds = round(resolved_combined_odds, 4) if picks_won else None
     theoretical_profit_if_won = potential_profit if slip_status == "won" else None
+    slip_kind = slip_kind_from_key(slip.slip_key)
+    if slip_kind == "ladder":
+        pick_reads = _annotate_ladder_step_stakes(pick_reads, stake=stake)
 
     return BettingSlipRead(
         id=slip.slip_key,
         slip_key=slip.slip_key,
         label=slip.label,
         description=slip.description,
+        slip_kind=slip_kind,
         picks=pick_reads,
         pick_count=slip.pick_count,
         combined_odds=slip.combined_odds,
@@ -1146,6 +1902,46 @@ def _slip_read(
         theoretical_profit_if_won=theoretical_profit_if_won,
         generated_at=slip.generated_at,
     )
+
+
+def _annotate_ladder_step_stakes(
+    picks: list[BettingSlipPickRead],
+    *,
+    stake: float,
+) -> list[BettingSlipPickRead]:
+    """Attach progressive stake path (void carries stake; loss stops compounding)."""
+    annotated: list[BettingSlipPickRead] = []
+    running_stake = float(stake)
+    chain_alive = True
+    for index, pick in enumerate(picks):
+        step_stake = round(running_stake, 2) if chain_alive else 0.0
+        step_return: float | None = None
+        if chain_alive and pick.pick_status != "void" and pick.odds is not None:
+            step_return = round(step_stake * pick.odds, 2)
+        elif chain_alive and pick.pick_status == "void":
+            step_return = step_stake
+
+        annotated.append(
+            pick.model_copy(
+                update={
+                    "ladder_step_index": index + 1,
+                    "ladder_step_stake": step_stake,
+                    "ladder_step_return_if_won": step_return,
+                }
+            )
+        )
+
+        if not chain_alive:
+            continue
+        if pick.pick_status == "lost":
+            chain_alive = False
+            running_stake = 0.0
+        elif pick.pick_status == "void":
+            continue
+        elif pick.odds is not None:
+            # Pending/won: show theoretical path assuming the step holds.
+            running_stake = step_stake * pick.odds
+    return annotated
 
 
 def _build_daily_response(
@@ -1201,7 +1997,7 @@ def get_daily_betting_slips(
     db: Session,
     *,
     slip_date: date | None = None,
-    model_version: ModelVersion = "v2",
+    model_version: ModelVersion = DEFAULT_ACTIVE_MATCH_WINNER_VERSION,
     model_name: str | None = None,
     stake: float = DEFAULT_STAKE,
     slip_count: int = DEFAULT_SLIP_COUNT,
@@ -1260,14 +2056,17 @@ def get_daily_betting_slips(
             slip_count=slip_count,
             picks_per_slip=picks_per_slip,
         )
+        ladders, ladder_warnings = generate_ladders(candidates)
         warnings.extend(generation_warnings)
-        if generated:
+        warnings.extend(ladder_warnings)
+        combined = [*generated, *ladders]
+        if combined:
             _persist_slips(
                 db,
                 slip_date=target_date,
                 model_version=model_version,
                 model_name=resolved_model_name,
-                generated_slips=generated,
+                generated_slips=combined,
             )
     else:
         candidates = build_candidate_pool(
@@ -1279,6 +2078,27 @@ def get_daily_betting_slips(
             min_edge_overrides=min_edge_overrides,
         )
         candidate_pool_size = len(candidates)
+        # Backfill ladders for today/future days that only have legacy parlays.
+        if (
+            target_date >= date.today()
+            and candidates
+            and not _ladder_slips_exist(
+                db,
+                slip_date=target_date,
+                model_version=model_version,
+                model_name=resolved_model_name,
+            )
+        ):
+            ladders, ladder_warnings = generate_ladders(candidates)
+            warnings.extend(ladder_warnings)
+            if ladders:
+                _persist_slips(
+                    db,
+                    slip_date=target_date,
+                    model_version=model_version,
+                    model_name=resolved_model_name,
+                    generated_slips=ladders,
+                )
 
     slip_count = len(
         _load_slips(
@@ -1313,7 +2133,7 @@ def refresh_betting_slips(
     db: Session,
     *,
     slip_date: date | None = None,
-    model_version: ModelVersion = "v2",
+    model_version: ModelVersion = DEFAULT_ACTIVE_MATCH_WINNER_VERSION,
     model_name: str | None = None,
     stake: float = DEFAULT_STAKE,
     days_back: int = 1,
@@ -1403,7 +2223,7 @@ def _slip_profit_units(slip: BettingSlipRead, stake: float) -> float:
 def compute_betting_slip_stats(
     db: Session,
     *,
-    model_version: ModelVersion = "v2",
+    model_version: ModelVersion = DEFAULT_ACTIVE_MATCH_WINNER_VERSION,
     model_name: str | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
@@ -1464,8 +2284,39 @@ def compute_betting_slip_stats(
             "slips_pending": 0,
             "slips_void": 0,
             "slips_total": 0,
+            "slip_kind": "parlay",
         }
     )
+    kind_stats: dict[SlipKind, dict[str, float | int]] = {
+        "parlay": {
+            "slips_won": 0,
+            "slips_lost": 0,
+            "slips_pending": 0,
+            "slips_void": 0,
+            "slips_total": 0,
+            "picks_total": 0,
+            "picks_won": 0,
+            "picks_lost": 0,
+            "picks_pending": 0,
+            "picks_void": 0,
+            "profit_units": 0.0,
+            "resolved_count": 0,
+        },
+        "ladder": {
+            "slips_won": 0,
+            "slips_lost": 0,
+            "slips_pending": 0,
+            "slips_void": 0,
+            "slips_total": 0,
+            "picks_total": 0,
+            "picks_won": 0,
+            "picks_lost": 0,
+            "picks_pending": 0,
+            "picks_void": 0,
+            "profit_units": 0.0,
+            "resolved_count": 0,
+        },
+    }
 
     summary_slips_won = 0
     summary_slips_lost = 0
@@ -1489,6 +2340,7 @@ def compute_betting_slip_stats(
 
         profile = profile_stats[slip.slip_key]
         profile["label"] = slip.label
+        profile["slip_kind"] = slip_kind_from_key(slip.slip_key)
         profile["slips_total"] = int(profile["slips_total"]) + 1
         if slip_read.slip_status == "won":
             profile["slips_won"] = int(profile["slips_won"]) + 1
@@ -1508,6 +2360,27 @@ def compute_betting_slip_stats(
         summary_picks_pending += slip_read.picks_pending
         summary_picks_void += slip_read.picks_void
         summary_picks_total += slip_read.picks_total
+
+        kind_bucket = kind_stats[slip_read.slip_kind]
+        kind_bucket["slips_total"] = int(kind_bucket["slips_total"]) + 1
+        kind_bucket["picks_total"] = int(kind_bucket["picks_total"]) + slip_read.picks_total
+        kind_bucket["picks_won"] = int(kind_bucket["picks_won"]) + slip_read.picks_won
+        kind_bucket["picks_lost"] = int(kind_bucket["picks_lost"]) + slip_read.picks_lost
+        kind_bucket["picks_pending"] = int(kind_bucket["picks_pending"]) + slip_read.picks_pending
+        kind_bucket["picks_void"] = int(kind_bucket["picks_void"]) + slip_read.picks_void
+        if slip_read.slip_status == "won":
+            kind_bucket["slips_won"] = int(kind_bucket["slips_won"]) + 1
+        elif slip_read.slip_status == "lost":
+            kind_bucket["slips_lost"] = int(kind_bucket["slips_lost"]) + 1
+        elif slip_read.slip_status == "void":
+            kind_bucket["slips_void"] = int(kind_bucket["slips_void"]) + 1
+        else:
+            kind_bucket["slips_pending"] = int(kind_bucket["slips_pending"]) + 1
+        if slip_read.slip_status in {"won", "lost"}:
+            kind_bucket["profit_units"] = float(kind_bucket["profit_units"]) + _slip_profit_units(
+                slip_read, stake
+            )
+            kind_bucket["resolved_count"] = int(kind_bucket["resolved_count"]) + 1
 
     days: list[BettingSlipStatsDay] = []
     current = resolved_from
@@ -1576,6 +2449,11 @@ def compute_betting_slip_stats(
         BettingSlipStatsProfile(
             slip_key=slip_key,
             label=str(stats["label"]),
+            slip_kind=(
+                "ladder"
+                if stats.get("slip_kind") == "ladder"
+                else "parlay"
+            ),
             slips_won=int(stats["slips_won"]),
             slips_lost=int(stats["slips_lost"]),
             slips_pending=int(stats["slips_pending"]),
@@ -1586,7 +2464,49 @@ def compute_betting_slip_stats(
                 int(stats["slips_won"]) + int(stats["slips_lost"]),
             ),
         )
-        for slip_key, stats in sorted(profile_stats.items())
+        for slip_key, stats in sorted(
+            profile_stats.items(),
+            key=lambda item: (
+                item[1].get("slip_kind") != "ladder",
+                str(item[1].get("label") or item[0]),
+            ),
+        )
+    ]
+    by_kind = [
+        BettingSlipStatsKind(
+            slip_kind=kind,
+            label=slip_kind_label(kind),
+            slips_total=int(stats["slips_total"]),
+            slips_won=int(stats["slips_won"]),
+            slips_lost=int(stats["slips_lost"]),
+            slips_pending=int(stats["slips_pending"]),
+            slips_void=int(stats["slips_void"]),
+            slip_win_rate_pct=_pct(
+                int(stats["slips_won"]),
+                int(stats["slips_won"]) + int(stats["slips_lost"]),
+            ),
+            picks_total=int(stats["picks_total"]),
+            picks_won=int(stats["picks_won"]),
+            picks_lost=int(stats["picks_lost"]),
+            picks_pending=int(stats["picks_pending"]),
+            picks_void=int(stats["picks_void"]),
+            pick_hit_rate_pct=_pct(
+                int(stats["picks_won"]),
+                int(stats["picks_won"]) + int(stats["picks_lost"]),
+            ),
+            theoretical_profit_units=round(float(stats["profit_units"]), 2),
+            theoretical_roi_pct=(
+                round(
+                    (float(stats["profit_units"]) / (stake * int(stats["resolved_count"])))
+                    * 100,
+                    1,
+                )
+                if int(stats["resolved_count"]) and stake
+                else None
+            ),
+        )
+        for kind, stats in kind_stats.items()
+        if int(stats["slips_total"]) > 0
     ]
 
     return BettingSlipStatsResponse(
@@ -1612,6 +2532,7 @@ def compute_betting_slip_stats(
             if total_stake
             else None,
             by_profile=by_profile,
+            by_kind=by_kind,
         ),
     )
 
@@ -1684,9 +2605,413 @@ def compute_betting_slip_model_stats(
             )
         )
 
+    by_market = _aggregate_slip_picks_by_market(
+        db,
+        from_date=resolved_from,
+        to_date=resolved_to,
+        stake=stake,
+    )
+    by_kind, by_profile = _aggregate_slip_stats_by_kind_and_profile(
+        db,
+        from_date=resolved_from,
+        to_date=resolved_to,
+        stake=stake,
+    )
+
     return BettingSlipModelStatsResponse(
         from_date=resolved_from,
         to_date=resolved_to,
         stake=stake,
         rows=rows,
+        by_market=by_market,
+        by_kind=by_kind,
+        by_profile=by_profile,
     )
+
+
+def _aggregate_slip_stats_by_kind_and_profile(
+    db: Session,
+    *,
+    from_date: date,
+    to_date: date,
+    stake: float,
+) -> tuple[list[BettingSlipStatsKind], list[BettingSlipStatsProfile]]:
+    """Cross-model aggregates for Schedine vs Scalate and profile labels."""
+    slips = list(
+        db.scalars(
+            select(BettingSlip)
+            .options(selectinload(BettingSlip.picks))
+            .where(
+                BettingSlip.slip_date >= from_date,
+                BettingSlip.slip_date <= to_date,
+            )
+            .order_by(BettingSlip.slip_date.asc(), BettingSlip.id.asc())
+        ).all()
+    )
+    if not slips:
+        return [], []
+
+    event_keys = [pick.event_key for slip in slips for pick in slip.picks]
+    predictions: dict[int, MatchPrediction] = {}
+    fixtures: dict[int, Fixture] = {}
+    next_fixtures: dict[int, NextFixture] = {}
+    for model_version, model_name in {
+        (slip.model_version, slip.model_name) for slip in slips
+    }:
+        model_predictions, model_fixtures, model_next_fixtures = _load_outcome_context(
+            db,
+            event_keys,
+            model_version,  # type: ignore[arg-type]
+            model_name,
+        )
+        predictions.update(model_predictions)
+        fixtures.update(model_fixtures)
+        next_fixtures.update(model_next_fixtures)
+
+    kind_stats: dict[SlipKind, dict[str, float | int]] = {
+        "parlay": {
+            "slips_won": 0,
+            "slips_lost": 0,
+            "slips_pending": 0,
+            "slips_void": 0,
+            "slips_total": 0,
+            "picks_total": 0,
+            "picks_won": 0,
+            "picks_lost": 0,
+            "picks_pending": 0,
+            "picks_void": 0,
+            "profit_units": 0.0,
+            "resolved_count": 0,
+        },
+        "ladder": {
+            "slips_won": 0,
+            "slips_lost": 0,
+            "slips_pending": 0,
+            "slips_void": 0,
+            "slips_total": 0,
+            "picks_total": 0,
+            "picks_won": 0,
+            "picks_lost": 0,
+            "picks_pending": 0,
+            "picks_void": 0,
+            "profit_units": 0.0,
+            "resolved_count": 0,
+        },
+    }
+    profile_stats: dict[str, dict[str, int | str]] = defaultdict(
+        lambda: {
+            "slips_won": 0,
+            "slips_lost": 0,
+            "slips_pending": 0,
+            "slips_void": 0,
+            "slips_total": 0,
+            "slip_kind": "parlay",
+            "label": "",
+        }
+    )
+
+    for slip in slips:
+        slip_read = _slip_read(
+            slip,
+            predictions=predictions,
+            fixtures=fixtures,
+            next_fixtures=next_fixtures,
+            stake=stake,
+        )
+        kind = slip_read.slip_kind
+        kind_bucket = kind_stats[kind]
+        kind_bucket["slips_total"] = int(kind_bucket["slips_total"]) + 1
+        kind_bucket["picks_total"] = int(kind_bucket["picks_total"]) + slip_read.picks_total
+        kind_bucket["picks_won"] = int(kind_bucket["picks_won"]) + slip_read.picks_won
+        kind_bucket["picks_lost"] = int(kind_bucket["picks_lost"]) + slip_read.picks_lost
+        kind_bucket["picks_pending"] = int(kind_bucket["picks_pending"]) + slip_read.picks_pending
+        kind_bucket["picks_void"] = int(kind_bucket["picks_void"]) + slip_read.picks_void
+        if slip_read.slip_status == "won":
+            kind_bucket["slips_won"] = int(kind_bucket["slips_won"]) + 1
+        elif slip_read.slip_status == "lost":
+            kind_bucket["slips_lost"] = int(kind_bucket["slips_lost"]) + 1
+        elif slip_read.slip_status == "void":
+            kind_bucket["slips_void"] = int(kind_bucket["slips_void"]) + 1
+        else:
+            kind_bucket["slips_pending"] = int(kind_bucket["slips_pending"]) + 1
+        if slip_read.slip_status in {"won", "lost"}:
+            kind_bucket["profit_units"] = float(kind_bucket["profit_units"]) + _slip_profit_units(
+                slip_read, stake
+            )
+            kind_bucket["resolved_count"] = int(kind_bucket["resolved_count"]) + 1
+
+        profile = profile_stats[slip.slip_key]
+        profile["label"] = slip.label
+        profile["slip_kind"] = kind
+        profile["slips_total"] = int(profile["slips_total"]) + 1
+        if slip_read.slip_status == "won":
+            profile["slips_won"] = int(profile["slips_won"]) + 1
+        elif slip_read.slip_status == "lost":
+            profile["slips_lost"] = int(profile["slips_lost"]) + 1
+        elif slip_read.slip_status == "void":
+            profile["slips_void"] = int(profile["slips_void"]) + 1
+        else:
+            profile["slips_pending"] = int(profile["slips_pending"]) + 1
+
+    by_kind = [
+        BettingSlipStatsKind(
+            slip_kind=kind,
+            label=slip_kind_label(kind),
+            slips_total=int(stats["slips_total"]),
+            slips_won=int(stats["slips_won"]),
+            slips_lost=int(stats["slips_lost"]),
+            slips_pending=int(stats["slips_pending"]),
+            slips_void=int(stats["slips_void"]),
+            slip_win_rate_pct=_pct(
+                int(stats["slips_won"]),
+                int(stats["slips_won"]) + int(stats["slips_lost"]),
+            ),
+            picks_total=int(stats["picks_total"]),
+            picks_won=int(stats["picks_won"]),
+            picks_lost=int(stats["picks_lost"]),
+            picks_pending=int(stats["picks_pending"]),
+            picks_void=int(stats["picks_void"]),
+            pick_hit_rate_pct=_pct(
+                int(stats["picks_won"]),
+                int(stats["picks_won"]) + int(stats["picks_lost"]),
+            ),
+            theoretical_profit_units=round(float(stats["profit_units"]), 2),
+            theoretical_roi_pct=(
+                round(
+                    (float(stats["profit_units"]) / (stake * int(stats["resolved_count"])))
+                    * 100,
+                    1,
+                )
+                if int(stats["resolved_count"]) and stake
+                else None
+            ),
+        )
+        for kind, stats in kind_stats.items()
+        if int(stats["slips_total"]) > 0
+    ]
+    by_profile = [
+        BettingSlipStatsProfile(
+            slip_key=slip_key,
+            label=str(stats["label"] or slip_key),
+            slip_kind="ladder" if stats.get("slip_kind") == "ladder" else "parlay",
+            slips_won=int(stats["slips_won"]),
+            slips_lost=int(stats["slips_lost"]),
+            slips_pending=int(stats["slips_pending"]),
+            slips_void=int(stats["slips_void"]),
+            slips_total=int(stats["slips_total"]),
+            slip_win_rate_pct=_pct(
+                int(stats["slips_won"]),
+                int(stats["slips_won"]) + int(stats["slips_lost"]),
+            ),
+        )
+        for slip_key, stats in sorted(
+            profile_stats.items(),
+            key=lambda item: (
+                item[1].get("slip_kind") != "ladder",
+                str(item[1].get("label") or item[0]),
+            ),
+        )
+    ]
+    return by_kind, by_profile
+
+
+def _aggregate_slip_picks_by_market(
+    db: Session,
+    *,
+    from_date: date,
+    to_date: date,
+    stake: float,
+) -> list[BettingSlipMarketStatsRow]:
+    slips = list(
+        db.scalars(
+            select(BettingSlip)
+            .options(selectinload(BettingSlip.picks))
+            .where(
+                BettingSlip.slip_date >= from_date,
+                BettingSlip.slip_date <= to_date,
+            )
+            .order_by(BettingSlip.slip_date.asc(), BettingSlip.id.asc())
+        ).all()
+    )
+    if not slips:
+        return []
+
+    event_keys = [pick.event_key for slip in slips for pick in slip.picks]
+    predictions: dict[int, MatchPrediction] = {}
+    fixtures: dict[int, Fixture] = {}
+    next_fixtures: dict[int, NextFixture] = {}
+    for model_version, model_name in {
+        (slip.model_version, slip.model_name) for slip in slips
+    }:
+        model_predictions, model_fixtures, model_next_fixtures = _load_outcome_context(
+            db,
+            event_keys,
+            model_version,  # type: ignore[arg-type]
+            model_name,
+        )
+        predictions.update(model_predictions)
+        fixtures.update(model_fixtures)
+        next_fixtures.update(model_next_fixtures)
+
+    tallies: dict[str, dict[str, int]] = {}
+    for slip in slips:
+        slip_read = _slip_read(
+            slip,
+            predictions=predictions,
+            fixtures=fixtures,
+            next_fixtures=next_fixtures,
+            stake=stake,
+        )
+        for pick in slip_read.picks:
+            market = pick.market or "match_winner"
+            bucket = tallies.setdefault(
+                market,
+                {
+                    "picks_total": 0,
+                    "picks_won": 0,
+                    "picks_lost": 0,
+                    "picks_pending": 0,
+                    "picks_void": 0,
+                },
+            )
+            bucket["picks_total"] += 1
+            if pick.pick_status == "won":
+                bucket["picks_won"] += 1
+            elif pick.pick_status == "lost":
+                bucket["picks_lost"] += 1
+            elif pick.pick_status == "void":
+                bucket["picks_void"] += 1
+            else:
+                bucket["picks_pending"] += 1
+
+    market_order = ("match_winner", "first_set_winner", "over_under_games")
+    rows: list[BettingSlipMarketStatsRow] = []
+    for market in market_order:
+        if market not in tallies:
+            continue
+        bucket = tallies[market]
+        resolved = bucket["picks_won"] + bucket["picks_lost"]
+        rows.append(
+            BettingSlipMarketStatsRow(
+                market=market,
+                picks_total=bucket["picks_total"],
+                picks_won=bucket["picks_won"],
+                picks_lost=bucket["picks_lost"],
+                picks_pending=bucket["picks_pending"],
+                picks_void=bucket["picks_void"],
+                pick_hit_rate_pct=_pct(bucket["picks_won"], resolved),
+            )
+        )
+    for market, bucket in sorted(tallies.items()):
+        if market in market_order:
+            continue
+        resolved = bucket["picks_won"] + bucket["picks_lost"]
+        rows.append(
+            BettingSlipMarketStatsRow(
+                market=market,
+                picks_total=bucket["picks_total"],
+                picks_won=bucket["picks_won"],
+                picks_lost=bucket["picks_lost"],
+                picks_pending=bucket["picks_pending"],
+                picks_void=bucket["picks_void"],
+                pick_hit_rate_pct=_pct(bucket["picks_won"], resolved),
+            )
+        )
+    return rows
+
+
+class BettingSlipImageExportError(ValueError):
+    """Raised when a betting-slip image export cannot be produced."""
+
+
+def _slip_payload_for_image(slip: BettingSlipRead) -> dict:
+    return slip.model_dump(mode="json")
+
+
+def render_daily_betting_slip_png(
+    db: Session,
+    *,
+    slip_key: str,
+    slip_date: date | None = None,
+    model_version: ModelVersion = DEFAULT_ACTIVE_MATCH_WINNER_VERSION,
+    model_name: str | None = None,
+    stake: float = DEFAULT_STAKE,
+    min_edge_percent: float | None = None,
+) -> tuple[bytes, str]:
+    """Render a single daily slip as PNG (same layout as Telegram)."""
+    from backend.src.app.telegram.images import BettingSlipImageError, render_betting_slip_png
+
+    daily = get_daily_betting_slips(
+        db=db,
+        slip_date=slip_date,
+        model_version=model_version,
+        model_name=model_name,
+        stake=stake,
+        min_edge_percent=min_edge_percent,
+        regenerate=False,
+    )
+    slip = next((item for item in daily.slips if item.slip_key == slip_key), None)
+    if slip is None:
+        raise BettingSlipImageExportError(f"Schedina '{slip_key}' non trovata per la data selezionata.")
+    try:
+        image = render_betting_slip_png(
+            _slip_payload_for_image(slip),
+            slip_date=daily.date.isoformat(),
+            stake=daily.stake,
+            min_edge_percent=min_edge_percent if min_edge_percent is not None else 2.0,
+        )
+    except BettingSlipImageError as exc:
+        raise BettingSlipImageExportError(str(exc)) from exc
+    filename = getattr(image, "name", None) or f"{slip_key}.png"
+    return image.getvalue(), filename
+
+
+def render_daily_betting_slip_images_zip(
+    db: Session,
+    *,
+    slip_date: date | None = None,
+    model_version: ModelVersion = DEFAULT_ACTIVE_MATCH_WINNER_VERSION,
+    model_name: str | None = None,
+    stake: float = DEFAULT_STAKE,
+    min_edge_percent: float | None = None,
+) -> tuple[bytes, str]:
+    """Render all daily slips as a ZIP of PNG files (same layout as Telegram)."""
+    import zipfile
+
+    from backend.src.app.telegram.images import BettingSlipImageError, render_betting_slip_png
+
+    daily = get_daily_betting_slips(
+        db=db,
+        slip_date=slip_date,
+        model_version=model_version,
+        model_name=model_name,
+        stake=stake,
+        min_edge_percent=min_edge_percent,
+        regenerate=False,
+    )
+    if not daily.slips:
+        raise BettingSlipImageExportError("Nessuna schedina disponibile da esportare.")
+
+    buffer = BytesIO()
+    used_names: set[str] = set()
+    try:
+        with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for index, slip in enumerate(daily.slips, start=1):
+                image = render_betting_slip_png(
+                    _slip_payload_for_image(slip),
+                    slip_date=daily.date.isoformat(),
+                    stake=daily.stake,
+                    min_edge_percent=min_edge_percent if min_edge_percent is not None else 2.0,
+                )
+                name = getattr(image, "name", None) or f"{slip.slip_key}.png"
+                if name in used_names:
+                    stem = name[:-4] if name.lower().endswith(".png") else name
+                    name = f"{stem}_{index}.png"
+                used_names.add(name)
+                archive.writestr(name, image.getvalue())
+    except BettingSlipImageError as exc:
+        raise BettingSlipImageExportError(str(exc)) from exc
+
+    date_label = daily.date.isoformat()
+    filename = f"schedine_{date_label}_{daily.model_version}_{daily.model_name}.zip"
+    return buffer.getvalue(), filename

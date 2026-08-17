@@ -4,6 +4,7 @@ import { MetricCard } from "../components/MetricCard";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient, ApiError } from "../services/apiClient";
 import type { GlobalUpdateReportRead, GlobalUpdateStatus } from "../types/api";
+import { marketLabel, uiVersionOrMarketLabel } from "../utils/markets";
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -59,6 +60,11 @@ function statusClass(status: string) {
 function asText(value: unknown) {
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
+}
+
+function phaseDisplayName(phase: string) {
+  if (phase === "extra_market_predictions") return "Mercati extra (1° set, O/U)";
+  return phase;
 }
 
 export function GlobalUpdateReportPage() {
@@ -123,6 +129,27 @@ export function GlobalUpdateReportPage() {
     summary.walk_forward && typeof summary.walk_forward === "object"
       ? (summary.walk_forward as Record<string, unknown>)
       : null;
+  const extraMarkets =
+    summary.extra_markets && typeof summary.extra_markets === "object"
+      ? (summary.extra_markets as Record<string, unknown>)
+      : null;
+  const extraByMarket =
+    extraMarkets?.by_market && typeof extraMarkets.by_market === "object"
+      ? (extraMarkets.by_market as Record<string, Record<string, number>>)
+      : {};
+  const extraMarketsStatus =
+    extraMarkets?.available === false || extraMarkets?.error
+      ? "failed"
+      : extraMarkets
+        ? "completed"
+        : "skipped";
+  const extraMarketRows = Object.entries(extraByMarket).map(([market, counts]) => ({
+    market,
+    published: Number(counts.published ?? 0),
+    skipped: Object.entries(counts)
+      .filter(([key]) => key.startsWith("skipped"))
+      .reduce((sum, [, value]) => sum + Number(value ?? 0), 0)
+  }));
 
   return (
     <section className="page">
@@ -130,7 +157,8 @@ export function GlobalUpdateReportPage() {
         <div>
           <h2>Report aggiornamento</h2>
           <p>
-            Esito dell&apos;ultima run globale: fasi, combo modello, errori e warning salvati.
+            Esito dell&apos;ultima run globale: mercati aggiornati (Match / 1° set / O/U), fasi,
+            errori e warning.
           </p>
         </div>
         <div className="header-actions">
@@ -141,7 +169,7 @@ export function GlobalUpdateReportPage() {
       </header>
 
       <p className="note">
-        Gli errori qui sotto sono fallimenti della run (import o combo modello). Lo stato{" "}
+        Gli errori qui sotto sono fallimenti della run (import o generazione mercati). Lo stato{" "}
         <strong>Da generare</strong> in Partite è diverso: indica solo che quella partita non ha
         ancora una previsione salvata (spesso per dati mancanti), non necessariamente un errore di
         aggiornamento.
@@ -164,9 +192,9 @@ export function GlobalUpdateReportPage() {
       </div>
 
       <div className="metrics-grid">
-        <MetricCard label="Combo ok" value={completed} />
-        <MetricCard label="Combo fallite" value={failed} />
-        <MetricCard label="Combo saltate" value={skipped} />
+        <MetricCard label="Mercati ok" value={completed} />
+        <MetricCard label="Mercati falliti" value={failed} />
+        <MetricCard label="Mercati saltati" value={skipped} />
         <MetricCard label="Partite processate" value={fixtures} />
         <MetricCard label="Schedine generate" value={slips} />
         <MetricCard label="Errori" value={report.errors.length} />
@@ -236,31 +264,35 @@ export function GlobalUpdateReportPage() {
 
       <article className="panel">
         <div className="panel-header">
-          <h3>Combo modello</h3>
-          <span className="pill">{report.items.length} combinazioni</span>
+          <h3>Mercati aggiornati</h3>
+          <span className="pill">{report.items.length + (extraMarketRows.length ? 1 : 0)} mercati</span>
         </div>
-        {report.items.length === 0 ? (
-          <EmptyState title="Nessuna combo" message="La run non ha elaborato combinazioni modello." />
+        {report.items.length === 0 && extraMarketRows.length === 0 ? (
+          <EmptyState
+            title="Nessun mercato"
+            message="La run non ha elaborato mercati (Match / 1° set / O/U)."
+          />
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Versione</th>
-                  <th>Modello</th>
+                  <th>Mercato</th>
                   <th>Stato</th>
-                  <th>Previsioni</th>
+                  <th>Previsioni / tip</th>
                   <th>Schedine</th>
                   <th>Durata</th>
-                  <th>Errore</th>
-                  <th>Warning</th>
+                  <th>Dettaglio</th>
                 </tr>
               </thead>
               <tbody>
                 {report.items.map((item) => (
                   <tr key={`${item.model_version}-${item.model_name}`}>
-                    <td>{item.model_version}</td>
-                    <td>{item.model_name}</td>
+                    <td>
+                      <span className="market-badge market-match_winner">
+                        {uiVersionOrMarketLabel(item.model_version)}
+                      </span>
+                    </td>
                     <td>
                       <span className={`slip-status-badge ${statusClass(item.status)}`}>
                         {statusLabel(item.status)}
@@ -270,9 +302,30 @@ export function GlobalUpdateReportPage() {
                     <td>{item.slips_generated}</td>
                     <td>{formatDuration(item.duration_seconds)}</td>
                     <td className={item.error_message ? "action-error" : undefined}>
-                      {item.error_message ?? "-"}
+                      {item.error_message ??
+                        (item.warnings.length ? item.warnings.join("; ") : "-")}
                     </td>
-                    <td>{item.warnings.length ? item.warnings.join("; ") : "-"}</td>
+                  </tr>
+                ))}
+                {extraMarketRows.map((row) => (
+                  <tr key={row.market}>
+                    <td>
+                      <span className={`market-badge market-${row.market}`}>
+                        {marketLabel(row.market)}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`slip-status-badge ${statusClass(extraMarketsStatus)}`}>
+                        {statusLabel(extraMarketsStatus)}
+                      </span>
+                    </td>
+                    <td>{row.published}</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>
+                      pubblicati {row.published}
+                      {row.skipped ? ` · saltati ${row.skipped}` : ""}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -304,12 +357,14 @@ export function GlobalUpdateReportPage() {
               </thead>
               <tbody>
                 {report.phases.map((phase, index) => {
-                  const phaseName = asText(phase.phase ?? `fase-${index + 1}`);
+                  const phaseName = phaseDisplayName(asText(phase.phase ?? `fase-${index + 1}`));
                   const phaseStatus = asText(phase.status);
                   const phaseError = phase.error ? String(phase.error) : null;
                   const extraKeys = Object.entries(phase).filter(
                     ([key]) =>
-                      !["phase", "status", "duration_seconds", "error"].includes(key)
+                      !["phase", "status", "duration_seconds", "error", "extra_markets"].includes(
+                        key
+                      )
                   );
                   const detailParts = [
                     ...(phaseError ? [`errore: ${phaseError}`] : []),
