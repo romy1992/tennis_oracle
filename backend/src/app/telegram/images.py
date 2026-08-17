@@ -5,16 +5,18 @@ from pathlib import Path
 from typing import Any
 
 from .messages import (
-    VALUE_LEGEND,
+    MARKETS_LEGEND,
     _format_decimal,
     _format_event_time,
     _format_percent,
-    _format_signed_percent,
-    _format_signed_roi,
     _match_title,
+    market_label,
+    market_text_color,
     predicted_winner_name,
+    slip_kind_of,
     slip_pick_winner_name,
     slip_status_label,
+    surface_label,
 )
 
 
@@ -29,24 +31,29 @@ _STATUS_COLORS = {
     "void": "#64748b",
 }
 
-_VALUE_COLORS = {
-    "PLAY": "#0f766e",
-    "BORDERLINE": "#b45309",
-    "NO BET": "#64748b",
-}
-
+# Colonne leggibili su Telegram: predizione + % + quota, con mercato esplicito
+# (Match / 1° set / O/U). Void/Edge/ROI/Valore restano fuori dall'immagine.
 _TABLE_COLUMNS: list[tuple[str, int]] = [
     ("", 36),
     ("Ora", 70),
     ("Torneo", 200),
-    ("Match", 260),
-    ("Pick", 150),
-    ("Media quote\nbookmakers", 100),
-    ("Void", 72),
-    ("Edge", 84),
-    ("ROI", 84),
-    ("Valore", 120),
-    ("Conf.", 72),
+    ("Match", 280),
+    ("Mercato", 100),
+    ("Predizione", 190),
+    ("Percentuale\ndi riuscita", 120),
+    ("Quota", 90),
+]
+
+_LADDER_TABLE_COLUMNS: list[tuple[str, int]] = [
+    ("", 36),
+    ("Step", 50),
+    ("Ora", 70),
+    ("Torneo", 180),
+    ("Match", 250),
+    ("Mercato", 100),
+    ("Predizione", 170),
+    ("Puntata", 110),
+    ("Quota", 90),
 ]
 
 
@@ -63,10 +70,11 @@ def render_betting_slip_png(
     except ImportError as exc:
         raise BettingSlipImageError("Pillow non installato.") from exc
 
-    width = 1580
+    del min_edge_percent  # kept for call-site compatibility; not shown on image
+    width = 1280
     margin = 36
     row_height = 46
-    header_height = 44
+    header_height = 48
     background = "#f6f8fb"
     card = "#ffffff"
     text = "#16202a"
@@ -90,15 +98,27 @@ def render_betting_slip_png(
     picks = list(slip.get("picks") or [])
     picks_won = slip.get("picks_won")
     picks_total = slip.get("picks_total") or len(picks)
+    is_ladder = slip_kind_of(slip) == "ladder"
 
-    metrics = [
-        ("Quota combinata", _format_decimal(slip.get("combined_odds"))),
-        ("Puntata", _format_decimal(stake if stake is not None else None)),
-        ("Vincita pot.", _format_decimal(slip.get("potential_return"))),
-        ("Profitto", _format_decimal(slip.get("potential_profit"))),
-    ]
+    if is_ladder:
+        metrics = [
+            ("Moltiplicatore", _format_decimal(slip.get("combined_odds"))),
+            ("Puntata iniz.", _format_decimal(stake if stake is not None else None)),
+            ("Ritorno se presa", _format_decimal(slip.get("potential_return"))),
+            ("Profitto", _format_decimal(slip.get("potential_profit"))),
+        ]
+        badge_text = f"{status} · {picks_won}/{picks_total} step"
+    else:
+        metrics = [
+            ("Quota combinata", _format_decimal(slip.get("combined_odds"))),
+            ("Puntata", _format_decimal(stake if stake is not None else None)),
+            ("Vincita pot.", _format_decimal(slip.get("potential_return"))),
+            ("Profitto", _format_decimal(slip.get("potential_profit"))),
+        ]
+        badge_text = f"{status} · {picks_won}/{picks_total} pick"
 
-    table_width = sum(col_width for _, col_width in _TABLE_COLUMNS)
+    table_columns = _LADDER_TABLE_COLUMNS if is_ladder else _TABLE_COLUMNS
+    table_width = sum(col_width for _, col_width in table_columns)
     content_width = width - (margin * 2)
     table_left = margin + max(0, (content_width - table_width) // 2)
 
@@ -120,7 +140,6 @@ def render_betting_slip_png(
 
     y = margin
     draw.text((margin, y), label, font=fonts["title"], fill=accent)
-    badge_text = f"{status} · {picks_won}/{picks_total} pick"
     badge_bbox = draw.textbbox((0, 0), badge_text, font=fonts["small"])
     badge_w = badge_bbox[2] - badge_bbox[0] + 24
     badge_h = badge_bbox[3] - badge_bbox[1] + 12
@@ -142,7 +161,9 @@ def render_betting_slip_png(
         meta_parts.append(f"Data: {slip_date}")
     if series_label:
         meta_parts.append(series_label)
-    meta_parts.append(f"Margine sicurezza: {min_edge_percent:.1f}%")
+    if is_ladder:
+        meta_parts.append("Scalata · reinvestimento progressivo")
+    meta_parts.append(MARKETS_LEGEND)
     if meta_parts:
         draw.text((margin, y), " · ".join(meta_parts), font=fonts["tiny"], fill=muted)
         y += 24
@@ -164,13 +185,11 @@ def render_betting_slip_png(
     # Table header
     x = table_left
     draw.rectangle((table_left, y, table_left + table_width, y + header_height), fill=header_bg)
-    for col_label, col_width in _TABLE_COLUMNS:
+    for col_label, col_width in table_columns:
         if col_label:
-            label_lines = col_label.split("\n")
-            line_gap = 14 if len(label_lines) > 1 else 0
-            text_y = y + (4 if len(label_lines) > 1 else 10)
-            for line_index, line in enumerate(label_lines):
-                draw.text((x + 6, text_y + line_index * line_gap), line, font=fonts["tiny"], fill=muted)
+            _draw_column_header(
+                draw, x, y, col_label, fonts["tiny"], muted, header_height
+            )
         draw.line((x, y, x, y + header_height), fill=grid, width=1)
         x += col_width
     draw.line((table_left + table_width, y, table_left + table_width, y + header_height), fill=grid, width=1)
@@ -179,14 +198,15 @@ def render_betting_slip_png(
 
     if not picks:
         draw.rectangle((table_left, y, table_left + table_width, y + row_height), outline=grid)
-        draw.text((table_left + 12, y + 12), "Nessun pick disponibile.", font=fonts["body"], fill=muted)
+        empty_msg = "Nessun step disponibile." if is_ladder else "Nessun pick disponibile."
+        draw.text((table_left + 12, y + 12), empty_msg, font=fonts["body"], fill=muted)
         y += row_height
     else:
         for pick in picks:
             draw.rectangle((table_left, y, table_left + table_width, y + row_height), outline=grid)
-            cells = _pick_cells(pick)
+            cells = _ladder_pick_cells(pick) if is_ladder else _pick_cells(pick)
             x = table_left
-            for (cell_text, cell_fill), (_, col_width) in zip(cells, _TABLE_COLUMNS):
+            for (cell_text, cell_fill), (_, col_width) in zip(cells, table_columns):
                 if cell_text == "__DOT__":
                     color = _STATUS_COLORS.get(str(pick.get("pick_status") or "pending"), _STATUS_COLORS["pending"])
                     cx = x + col_width // 2
@@ -218,7 +238,7 @@ def render_betting_slip_png(
         draw.text((lx + 20, y), name, font=fonts["small"], fill=text)
         lx += 120
     y += 28
-    draw.text((margin, y), VALUE_LEGEND, font=fonts["tiny"], fill=muted)
+    draw.text((margin, y), MARKETS_LEGEND, font=fonts["tiny"], fill=muted)
 
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
@@ -240,22 +260,23 @@ def render_fixtures_png(
     except ImportError as exc:
         raise BettingSlipImageError("Pillow non installato.") from exc
 
+    del min_edge_percent  # kept for call-site compatibility; not shown on image
     columns: list[tuple[str, int]] = [
         ("", 36),
         ("Ora", 70),
-        ("Torneo", 180),
-        ("Surface", 90),
-        ("Match", 250),
-        ("Predetto", 140),
-        ("Conf.", 70),
-        ("Void", 72),
-        ("Valore", 110),
-        ("Stato", 120),
+        ("Torneo", 170),
+        ("Superficie", 100),
+        ("Match", 260),
+        ("Mercato", 100),
+        ("Predizione", 170),
+        ("Percentuale\ndi riuscita", 120),
+        ("Quota", 80),
+        ("Stato", 110),
     ]
-    width = 1580
+    width = 1280
     margin = 36
     row_height = 44
-    header_height = 40
+    header_height = 48
     background = "#f6f8fb"
     card = "#ffffff"
     text = "#16202a"
@@ -297,7 +318,7 @@ def render_fixtures_png(
     meta = f"{start_index}-{end_index}"
     if series_label:
         meta = f"{meta} · {series_label}"
-    meta = f"{meta} · Margine sicurezza: {min_edge_percent:.1f}%"
+    meta = f"{meta} · {MARKETS_LEGEND}"
     draw.text((margin, y), meta, font=fonts["tiny"], fill=muted)
     y += 28
 
@@ -305,7 +326,9 @@ def render_fixtures_png(
     draw.rectangle((table_left, y, table_left + table_width, y + header_height), fill=header_bg)
     for col_label, col_width in columns:
         if col_label:
-            draw.text((x + 6, y + 10), col_label, font=fonts["tiny"], fill=muted)
+            _draw_column_header(
+                draw, x, y, col_label, fonts["tiny"], muted, header_height
+            )
         draw.line((x, y, x, y + header_height), fill=grid, width=1)
         x += col_width
     draw.line((table_left + table_width, y, table_left + table_width, y + header_height), fill=grid, width=1)
@@ -353,7 +376,7 @@ def render_fixtures_png(
         draw.text((lx + 20, y), name, font=fonts["small"], fill=text)
         lx += 120
     y += 28
-    draw.text((margin, y), VALUE_LEGEND, font=fonts["tiny"], fill=muted)
+    draw.text((margin, y), MARKETS_LEGEND, font=fonts["tiny"], fill=muted)
 
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
@@ -554,23 +577,46 @@ def _fixture_status_label(item: dict[str, Any]) -> str:
     return str(lifecycle_label or "Da giocare")
 
 
+def _draw_column_header(
+    draw: Any,
+    x: int,
+    y: int,
+    label: str,
+    font: Any,
+    fill: str,
+    header_height: int,
+) -> None:
+    lines = [line for line in str(label).split("\n") if line]
+    if not lines:
+        return
+    line_h = 14
+    total = line_h * len(lines)
+    start = y + max(2, (header_height - total) // 2)
+    for index, line in enumerate(lines):
+        draw.text((x + 4, start + index * line_h), line, font=font, fill=fill)
+
+
 def _fixture_cells(item: dict[str, Any]) -> list[tuple[str, str]]:
     text = "#16202a"
     muted = "#5d6b78"
     prediction = item.get("prediction") or {}
     winner = predicted_winner_name(item) if prediction else "-"
-    value = str(item.get("value_decision") or "-")
-    value_color = _VALUE_COLORS.get(value, muted)
+    odds = item.get("market_odds")
+    if odds is None:
+        odds = prediction.get("predicted_winner_odds")
+    market_key = item.get("market") or prediction.get("market")
+    market = market_label(market_key)
+    pred_color = market_text_color(market_key) if prediction else muted
     return [
         ("__DOT__", text),
         (_format_event_time(item.get("event_time")), muted),
         (_truncate(str(item.get("tournament_name") or "-"), 20), text),
-        (_truncate(str(item.get("surface") or "-"), 10), muted),
-        (_truncate(_match_title(item), 26), text),
-        (_truncate(str(winner or "-"), 15), text),
+        (_truncate(surface_label(item.get("surface")), 10), muted),
+        (_truncate(_match_title(item), 28), text),
+        (_truncate(market, 12), pred_color),
+        (_truncate(str(winner or "-"), 18), pred_color),
         (_format_percent(prediction.get("confidence")) if prediction else "-", muted),
-        (_format_decimal(item.get("void_odds")), muted),
-        (value, value_color),
+        (_format_decimal(odds), text),
         (_fixture_status_label(item), muted),
     ]
 
@@ -579,24 +625,37 @@ def _pick_cells(pick: dict[str, Any]) -> list[tuple[str, str]]:
     text = "#16202a"
     muted = "#5d6b78"
     winner = slip_pick_winner_name(pick) or "-"
-    value = str(pick.get("value_decision") or "-")
-    value_color = _VALUE_COLORS.get(value, muted)
-    edge = pick.get("edge_percent")
-    roi = pick.get("expected_roi")
-    edge_color = "#1f9d55" if isinstance(edge, (int, float)) and edge >= 0 else "#e02424" if edge is not None else muted
-    roi_color = "#1f9d55" if isinstance(roi, (int, float)) and roi >= 0 else "#e02424" if roi is not None else muted
+    market_key = pick.get("market")
+    pred_color = market_text_color(market_key)
     return [
         ("__DOT__", text),
         (_format_event_time(pick.get("event_time")), muted),
         (_truncate(str(pick.get("tournament_name") or "-"), 22), text),
-        (_truncate(_match_title(pick), 28), text),
-        (_truncate(winner, 16), text),
-        (_format_decimal(pick.get("odds")), text),
-        (_format_decimal(pick.get("void_odds")), muted),
-        (_format_signed_percent(edge), edge_color),
-        (_format_signed_roi(roi), roi_color),
-        (value, value_color),
+        (_truncate(_match_title(pick), 30), text),
+        (_truncate(market_label(market_key), 12), pred_color),
+        (_truncate(winner, 18), pred_color),
         (_format_percent(pick.get("confidence")), muted),
+        (_format_decimal(pick.get("odds")), text),
+    ]
+
+
+def _ladder_pick_cells(pick: dict[str, Any]) -> list[tuple[str, str]]:
+    text = "#16202a"
+    muted = "#5d6b78"
+    winner = slip_pick_winner_name(pick) or "-"
+    market_key = pick.get("market")
+    pred_color = market_text_color(market_key)
+    step = pick.get("ladder_step_index")
+    return [
+        ("__DOT__", text),
+        (str(step) if step is not None else "-", muted),
+        (_format_event_time(pick.get("event_time")), muted),
+        (_truncate(str(pick.get("tournament_name") or "-"), 20), text),
+        (_truncate(_match_title(pick), 26), text),
+        (_truncate(market_label(market_key), 12), pred_color),
+        (_truncate(winner, 16), pred_color),
+        (_format_decimal(pick.get("ladder_step_stake")), muted),
+        (_format_decimal(pick.get("odds")), text),
     ]
 
 

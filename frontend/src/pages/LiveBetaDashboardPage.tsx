@@ -2,15 +2,22 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { MetricCard } from "../components/MetricCard";
+import { MarketTabs } from "../components/MarketTabs";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
 import type {
   LiveBetaDashboardResponse,
+  LiveDashboardMarket,
+  LivePublicationEmptyReason,
   OddsBand,
-  PublishedSettledTip
+  PublishedSettledTip,
+  SingleMatchValueDecision
 } from "../types/api";
-import { MODEL_NAMES, MODEL_VERSIONS } from "../utils/modelVersion";
+import { DEFAULT_LIVE_MARKET, marketLabel } from "../utils/markets";
 import { todayLocalISODate } from "../utils/tennis";
+
+const EM_DASH = "—";
+const TIP_LIMIT = 25;
 
 const ODDS_BAND_OPTIONS: Array<{ value: "" | OddsBand; label: string }> = [
   { value: "", label: "Tutte" },
@@ -30,12 +37,12 @@ function daysAgoIso(days: number) {
 }
 
 function formatPct(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return EM_DASH;
   return `${value.toLocaleString("it-IT", { maximumFractionDigits: 2 })}%`;
 }
 
 function formatNum(value: number | null | undefined, digits = 2) {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return EM_DASH;
   return value.toLocaleString("it-IT", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits
@@ -43,10 +50,19 @@ function formatNum(value: number | null | undefined, digits = 2) {
 }
 
 function formatDateTime(value: string | null | undefined) {
-  if (!value) return "-";
+  if (!value) return EM_DASH;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString("it-IT");
+}
+
+function formatEventDate(tip: PublishedSettledTip) {
+  if (!tip.event_date) return EM_DASH;
+  const parsed = new Date(`${tip.event_date}T00:00:00`);
+  const dateLabel = Number.isNaN(parsed.getTime())
+    ? tip.event_date
+    : parsed.toLocaleDateString("it-IT");
+  return tip.event_time ? `${dateLabel} ${tip.event_time.slice(0, 5)}` : dateLabel;
 }
 
 function outcomeLabel(outcome: PublishedSettledTip["outcome"]) {
@@ -62,64 +78,176 @@ function outcomeLabel(outcome: PublishedSettledTip["outcome"]) {
   }
 }
 
+function decisionClass(decision: SingleMatchValueDecision | "NON_PLAY") {
+  if (decision === "PLAY") return "play";
+  if (decision === "BORDERLINE") return "borderline";
+  if (decision === "NO BET") return "no-bet";
+  return "unavailable";
+}
+
+function playIndicator(tip: PublishedSettledTip) {
+  if (tip.official_play === true) {
+    return { label: "PLAY", className: decisionClass("PLAY") };
+  }
+  if (tip.value_decision) {
+    return { label: tip.value_decision, className: decisionClass(tip.value_decision) };
+  }
+  if (tip.official_play === false) {
+    return { label: "Non PLAY", className: decisionClass("NON_PLAY") };
+  }
+  return null;
+}
+
+function pipelineStatusLabel(status: string | null | undefined) {
+  switch (status) {
+    case "completed":
+      return "Completato";
+    case "running":
+      return "In esecuzione";
+    case "pending":
+      return "In attesa";
+    case "failed":
+      return "Fallito";
+    case "completed_with_errors":
+      return "Completato con errori";
+    case "cancelled":
+      return "Annullato";
+    default:
+      return status || "Nessun aggiornamento";
+  }
+}
+
+function healthStatusLabel(reason: LivePublicationEmptyReason) {
+  switch (reason) {
+    case "ok":
+      return "Operativa";
+    case "publication_disabled":
+      return "Pubblicazione disabilitata";
+    case "public_model_unconfigured":
+      return "Configurazione mancante";
+    case "public_model_invalid":
+      return "Configurazione non valida";
+    case "pipeline_never_run":
+      return "Pipeline mai eseguita";
+    case "pipeline_run_no_qualified_plays":
+      return "Nessun PLAY qualificato";
+    case "publication_errors":
+      return "Errori di pubblicazione";
+    case "table_unavailable":
+      return "Registro non disponibile";
+  }
+}
+
+function closingStatusLabel(status: string) {
+  switch (status) {
+    case "available":
+      return "disponibile";
+    case "partial":
+      return "parziale";
+    case "missing":
+      return "mancante";
+    default:
+      return "non determinato";
+  }
+}
+
+function errorSourceLabel(source: string) {
+  return source === "global_update" ? "Aggiornamento" : "Telegram";
+}
+
 function TipsTable({
   title,
   tips,
-  emptyMessage
+  emptyMessage,
+  market
 }: {
   title: string;
   tips: PublishedSettledTip[];
   emptyMessage: string;
+  market: LiveDashboardMarket;
 }) {
+  const orderedTips = [...tips].sort((left, right) => {
+    const leftTime = Date.parse(left.published_at);
+    const rightTime = Date.parse(right.published_at);
+    if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) return right.id - left.id;
+    return rightTime - leftTime || right.id - left.id;
+  });
+
   return (
-    <article className="panel">
-      <div className="panel-header">
-        <h3>{title}</h3>
-        <span className="pill">{tips.length}</span>
+    <article className="panel live-tips-panel">
+      <div className="panel-header live-tips-header">
+        <div>
+          <h3>{title}</h3>
+          <p className="note">Ordine: pubblicazione più recente.</p>
+        </div>
+        <span className="pill" aria-label={`${orderedTips.length} righe mostrate, limite ${TIP_LIMIT}`}>
+          {orderedTips.length} mostrati · limite {TIP_LIMIT}
+        </span>
       </div>
-      {tips.length === 0 ? (
-        <EmptyState title="Nessun tip" message={emptyMessage} />
+      {orderedTips.length === 0 ? (
+        <EmptyState title="Nessun pronostico" message={emptyMessage} />
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="live-tips-table">
             <thead>
               <tr>
+                <th>Pubblicato</th>
                 <th>Evento</th>
+                <th>Mercato</th>
                 <th>Selezione</th>
-                <th>Modello</th>
-                <th>Quota</th>
-                <th>Quota pubbl.</th>
+                <th>Valore</th>
+                <th>Quota tip</th>
+                <th>Snapshot pubblicazione</th>
                 <th>Closing</th>
                 <th>CLV</th>
                 <th>Esito</th>
-                <th>Profitto</th>
+                <th>Profitto (unità)</th>
                 <th>Superficie</th>
               </tr>
             </thead>
             <tbody>
-              {tips.map((tip) => (
-                <tr key={tip.id}>
-                  <td>
-                    {tip.player_1_name && tip.player_2_name
-                      ? `${tip.player_1_name} vs ${tip.player_2_name}`
-                      : tip.event_key}
-                    {tip.tournament_name ? (
-                      <div className="note">{tip.tournament_name}</div>
-                    ) : null}
-                  </td>
-                  <td>{tip.selection}</td>
-                  <td>
-                    {tip.model_version} / {tip.model_name}
-                  </td>
-                  <td>{formatNum(tip.odds)}</td>
-                  <td>{formatNum(tip.publication_odds)}</td>
-                  <td>{formatNum(tip.closing_odds)}</td>
-                  <td>{formatPct(tip.clv_pct)}</td>
-                  <td>{outcomeLabel(tip.outcome)}</td>
-                  <td>{formatNum(tip.profit)}</td>
-                  <td>{tip.surface || "-"}</td>
-                </tr>
-              ))}
+              {orderedTips.map((tip) => {
+                const indicator = playIndicator(tip);
+                const tipMarket = tip.market || market;
+                return (
+                  <tr key={tip.id}>
+                    <td>{formatDateTime(tip.published_at)}</td>
+                    <td>
+                      {tip.player_1_name && tip.player_2_name
+                        ? `${tip.player_1_name} vs ${tip.player_2_name}`
+                        : tip.event_key}
+                      <div className="note">{formatEventDate(tip)}</div>
+                      {tip.tournament_name ? (
+                        <div className="note">{tip.tournament_name}</div>
+                      ) : null}
+                    </td>
+                    <td>
+                      <span className={`market-badge market-${tipMarket}`}>
+                        {marketLabel(tipMarket)}
+                      </span>
+                    </td>
+                    <td>{tip.selection}</td>
+                    <td>
+                      {indicator ? (
+                        <span className={`value-decision-badge ${indicator.className}`}>
+                          {indicator.label}
+                        </span>
+                      ) : (
+                        EM_DASH
+                      )}
+                    </td>
+                    <td>{formatNum(tip.odds)}</td>
+                    <td>{formatNum(tip.publication_odds)}</td>
+                    <td>{formatNum(tip.closing_odds)}</td>
+                    <td>{formatPct(tip.clv_pct)}</td>
+                    <td>{outcomeLabel(tip.outcome)}</td>
+                    <td>
+                      {tip.outcome !== "pending" ? formatNum(tip.profit) : EM_DASH}
+                    </td>
+                    <td>{tip.surface || EM_DASH}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -130,188 +258,123 @@ function TipsTable({
 
 export function LiveBetaDashboardPage() {
   const [data, setData] = useState<LiveBetaDashboardResponse | null>(null);
+  const [market, setMarket] = useState<LiveDashboardMarket>(DEFAULT_LIVE_MARKET);
   const [fromDate, setFromDate] = useState(() => daysAgoIso(89));
   const [toDate, setToDate] = useState(() => todayLocalISODate());
-  const [modelVersion, setModelVersion] = useState("");
-  const [modelName, setModelName] = useState("");
   const [tournamentDraft, setTournamentDraft] = useState("");
   const [tournamentName, setTournamentName] = useState("");
   const [surface, setSurface] = useState("");
   const [oddsBand, setOddsBand] = useState<"" | OddsBand>("");
-  const [latestOnly, setLatestOnly] = useState(true);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       try {
         setLoading(true);
         const response = await apiClient.getLiveBetaDashboard({
           from: fromDate,
           to: toDate,
-          model_version: modelVersion || undefined,
-          model_name: modelName || undefined,
+          market,
+          include_archived: market === "match_winner" ? includeArchived : false,
+          official_only: false,
           tournament_name: tournamentName.trim() || undefined,
           surface: surface || undefined,
           odds_band: oddsBand || undefined,
-          latest_only: latestOnly
+          latest_only: true,
+          tip_limit: TIP_LIMIT
         });
-        setData(response);
-        setError(null);
+        if (!cancelled) {
+          setData(response);
+          setError(null);
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Errore inatteso.");
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Errore inatteso.");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
+
     void load();
-  }, [fromDate, toDate, modelVersion, modelName, tournamentName, surface, oddsBand, latestOnly]);
+    return () => {
+      cancelled = true;
+    };
+  }, [fromDate, toDate, market, tournamentName, surface, oddsBand, includeArchived]);
 
   function applyTournamentFilter() {
     setTournamentName(tournamentDraft.trim());
   }
 
+  function selectMarket(nextMarket: LiveDashboardMarket) {
+    if (nextMarket === market) return;
+    setData(null);
+    setError(null);
+    setMarket(nextMarket);
+    setIncludeArchived(false);
+  }
+
   if (loading && !data) {
-    return <LoadingState title="Caricamento dashboard beta live..." />;
+    return <LoadingState title="Caricamento dashboard live..." />;
   }
 
   if (error && !data) {
-    return <ErrorState title="Dashboard beta live non disponibile" message={error} />;
+    return <ErrorState title="Dashboard live non disponibile" message={error} />;
   }
 
   if (!data) {
-    return (
-      <EmptyState
-        title="Nessun dato"
-        message="La dashboard beta live non ha restituito contenuti."
-      />
-    );
+    return <EmptyState title="Nessun dato" message="La dashboard live non ha restituito contenuti." />;
   }
 
   const stats = data.live_stats;
+  const officialStats = data.official_live_stats ?? null;
   const pipelineRun = data.pipeline.active_run || data.pipeline.latest_run;
   const health = data.publication_health;
-  const showRegistryEmptyBanner = health.empty_reason !== "ok";
+  const legacyContract = data.market === undefined || data.official_live_stats === undefined;
+  const publicModelConfigured = Boolean(health.public_model_version && health.public_model_name);
 
   return (
-    <section className="page">
+    <section className="page" aria-busy={loading}>
       <header className="page-header">
         <div>
           <div className="mode-badge-row">
             <span className="mode-badge mode-badge-live">LIVE</span>
-            <span className="mode-badge mode-badge-muted">Beta tipbook</span>
+            <span className="mode-badge mode-badge-muted">Registro pubblicazioni</span>
           </div>
-          <h2>Dashboard beta live</h2>
+          <h2>Dashboard live</h2>
           <p>
-            Vista operativa sul registro immutabile delle pubblicazioni: pipeline, KPI live,
-            bot e completezza dati. Non include metriche di training o backtest.
+            Risultati realmente pubblicati, separando l'accuratezza di tutti i pronostici dalla
+            performance finanziaria dei soli PLAY ufficiali.
           </p>
         </div>
       </header>
 
-      {showRegistryEmptyBanner ? (
-        <article className="panel mode-panel mode-panel-live" data-testid="live-empty-state">
-          <div className="panel-header">
-            <h3>Stato registro live</h3>
-            <span className="pill">{health.empty_reason}</span>
-          </div>
-          <EmptyState title="Registro senza tip pubblicati" message={health.message} />
-          <div className="metrics-grid">
-            <MetricCard
-              label="Pubblicazione automatica"
-              value={health.live_publication_enabled ? "Abilitata" : "Disabilitata"}
-            />
-            <MetricCard
-              label="Modello pubblico"
-              value={
-                health.public_model_version && health.public_model_name
-                  ? `${health.public_model_version} / ${health.public_model_name}`
-                  : "Non configurato"
-              }
-            />
-            <MetricCard
-              label="Inizio validazione live"
-              value={formatDateTime(health.validation_started_at)}
-            />
-            <MetricCard
-              label="Pubblicazioni ultimo run"
-              value={
-                health.last_run_publications_created == null
-                  ? "-"
-                  : String(health.last_run_publications_created)
-              }
-            />
-          </div>
-        </article>
-      ) : (
-        <article className="panel mode-panel mode-panel-live">
-          <div className="panel-header">
-            <h3>Validazione live</h3>
-            <span className="pill pill-ok">attiva</span>
-          </div>
-          <div className="metrics-grid">
-            <MetricCard
-              label="Inizio validazione live"
-              value={formatDateTime(health.validation_started_at)}
-            />
-            <MetricCard
-              label="Modello pubblico"
-              value={
-                health.public_model_version && health.public_model_name
-                  ? `${health.public_model_version} / ${health.public_model_name}`
-                  : "-"
-              }
-            />
-            <MetricCard
-              label="Pubblicazioni ultimo run"
-              value={
-                health.last_run_publications_created == null
-                  ? "-"
-                  : String(health.last_run_publications_created)
-              }
-            />
-            <MetricCard
-              label="Duplicati ignorati (ultimo run)"
-              value={
-                health.last_run_duplicates_skipped == null
-                  ? "-"
-                  : String(health.last_run_duplicates_skipped)
-              }
-            />
-          </div>
-        </article>
-      )}
+      <MarketTabs
+        value={market}
+        onChange={selectMarket}
+        ariaLabel="Mercato live"
+        disabled={loading}
+      />
 
-      <div className="filters-grid">
+      {legacyContract ? (
+        <p className="live-contract-warning" role="status">
+          Il server ha restituito il formato precedente: i dati restano consultabili, ma le
+          metriche dei PLAY ufficiali non sono disponibili finché il backend non viene aggiornato.
+        </p>
+      ) : null}
+
+      <div className="filters-grid live-dashboard-filters">
         <label>
-          Da
-          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+          Data pubblicazione da
+          <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
         </label>
         <label>
-          A
-          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-        </label>
-        <label>
-          Versione modello
-          <select value={modelVersion} onChange={(e) => setModelVersion(e.target.value)}>
-            <option value="">Tutte</option>
-            {MODEL_VERSIONS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Modello
-          <select value={modelName} onChange={(e) => setModelName(e.target.value)}>
-            <option value="">Tutti</option>
-            {MODEL_NAMES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
+          Data pubblicazione a
+          <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
         </label>
         <label>
           Torneo
@@ -319,11 +382,11 @@ export function LiveBetaDashboardPage() {
             type="text"
             value={tournamentDraft}
             placeholder="es. Roland Garros"
-            onChange={(e) => setTournamentDraft(e.target.value)}
+            onChange={(event) => setTournamentDraft(event.target.value)}
             onBlur={applyTournamentFilter}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
                 applyTournamentFilter();
               }
             }}
@@ -331,7 +394,7 @@ export function LiveBetaDashboardPage() {
         </label>
         <label>
           Superficie
-          <select value={surface} onChange={(e) => setSurface(e.target.value)}>
+          <select value={surface} onChange={(event) => setSurface(event.target.value)}>
             {SURFACE_OPTIONS.map((item) => (
               <option key={item || "all"} value={item}>
                 {item || "Tutte"}
@@ -343,7 +406,7 @@ export function LiveBetaDashboardPage() {
           Fascia quota
           <select
             value={oddsBand}
-            onChange={(e) => setOddsBand(e.target.value as "" | OddsBand)}
+            onChange={(event) => setOddsBand(event.target.value as "" | OddsBand)}
           >
             {ODDS_BAND_OPTIONS.map((item) => (
               <option key={item.value || "all"} value={item.value}>
@@ -352,91 +415,127 @@ export function LiveBetaDashboardPage() {
             ))}
           </select>
         </label>
-        <label className="checkbox-field">
-          <input
-            type="checkbox"
-            checked={latestOnly}
-            onChange={(e) => setLatestOnly(e.target.checked)}
-          />{" "}
-          Solo versione più recente
-        </label>
+        {market === "match_winner" ? (
+          <label className="checkbox-field live-history-filter">
+            <input
+              type="checkbox"
+              checked={includeArchived}
+              onChange={(event) => setIncludeArchived(event.target.checked)}
+            />
+            <span>
+              Includi storico
+              <small>Aggiunge le pubblicazioni dei modelli non più attivi.</small>
+            </span>
+          </label>
+        ) : null}
       </div>
 
-      {error ? <p className="note">Aggiornamento filtri non riuscito: {error}</p> : null}
+      {error ? (
+        <p className="live-contract-warning" role="alert">
+          Aggiornamento filtri non riuscito. I dati mostrati sono quelli caricati in precedenza:
+          {" "}
+          {error}
+        </p>
+      ) : null}
 
-      <article className="panel mode-panel mode-panel-live">
+      <article className="panel live-metric-section">
         <div className="panel-header">
-          <h3>Pipeline LIVE</h3>
-          <span className={`pill ${pipelineRun?.status === "completed" ? "pill-ok" : ""}`}>
-            {pipelineRun?.status || "nessun run"}
-          </span>
+          <div>
+            <h3>Tutti i pronostici</h3>
+            <p className="note">
+              Conteggi e accuratezza di tutte le pubblicazioni del mercato, indipendentemente
+              dall'indicazione PLAY.
+            </p>
+          </div>
+          <span className={`market-badge market-${market}`}>{marketLabel(market)}</span>
         </div>
         <div className="metrics-grid">
+          <MetricCard label="Pronostici pubblicati" value={String(stats.predictions_total)} />
+          <MetricCard label="Aperti" value={String(stats.open)} />
           <MetricCard
-            label="Ultimo aggiornamento"
-            value={formatDateTime(data.pipeline.last_updated_at)}
+            label="Chiusi (vinti o persi)"
+            value={String(stats.closed)}
+            hint="I void sono conteggiati a parte."
           />
-          <MetricCard label="Fase corrente" value={pipelineRun?.current_phase || "-"} />
-          <MetricCard
-            label="Import next fixtures oggi"
-            value={data.pipeline.import_status.next_fixtures_imported_today ? "Sì" : "No"}
-          />
-          <MetricCard
-            label="Ultimo import fixtures"
-            value={formatDateTime(data.pipeline.import_status.fixtures_last_imported_at)}
-          />
+          <MetricCard label="Void" value={String(stats.void)} />
+          <MetricCard label="Vinti / persi" value={`${stats.won} / ${stats.lost}`} />
+          <MetricCard label="Hit rate (%)" value={formatPct(stats.hit_rate_pct)} />
         </div>
-        {pipelineRun ? (
-          <p className="note">
-            Run #{pipelineRun.id} · origine {pipelineRun.origin} ·{" "}
-            <Link to="/global-update-report">Apri report aggiornamento</Link>
-          </p>
-        ) : null}
       </article>
 
-      <div className="metrics-grid">
-        <MetricCard label="Pronostici totali" value={String(stats.predictions_total)} />
-        <MetricCard label="Aperti" value={String(stats.open)} />
-        <MetricCard label="Chiusi" value={String(stats.closed)} />
-        <MetricCard label="Void" value={String(stats.void)} />
-        <MetricCard label="Hit rate" value={formatPct(stats.hit_rate_pct)} />
-        <MetricCard label="Profitto" value={formatNum(stats.profit)} />
-        <MetricCard label="ROI" value={formatPct(stats.roi_pct)} />
-        <MetricCard label="Yield" value={formatPct(stats.yield_pct)} />
-        <MetricCard label="CLV medio" value={formatPct(stats.clv_avg_pct)} />
-        <MetricCard label="CLV copertura" value={formatPct(stats.clv_coverage_pct)} />
-        <MetricCard label="Max drawdown" value={formatNum(stats.max_drawdown)} />
-        <MetricCard
-          label="Serie +/-"
-          value={`${stats.max_winning_streak} / ${stats.max_losing_streak}`}
-        />
-        <MetricCard label="Eventi bot oggi" value={String(data.bot_usage.events_today)} />
-        <MetricCard label="Utenti bot unici" value={String(data.bot_usage.unique_users)} />
-      </div>
+      <article className="panel live-metric-section live-official-section">
+        <div className="panel-header">
+          <div>
+            <h3>PLAY ufficiali</h3>
+            <p className="note">
+              Solo pronostici pubblicati come PLAY ufficiali; le metriche finanziarie usano quote
+              reali e stake liquidato.
+            </p>
+          </div>
+          <span className="value-decision-badge play">PLAY</span>
+        </div>
+        {!officialStats ? (
+          <p className="live-finance-note">
+            Il riepilogo PLAY ufficiale non è presente nella risposta del server.
+          </p>
+        ) : null}
+        <div className="metrics-grid">
+          <MetricCard
+            label="PLAY pubblicati"
+            value={officialStats ? String(officialStats.predictions_total) : EM_DASH}
+          />
+          <MetricCard
+            label="Stake liquidato (unità)"
+            value={officialStats ? formatNum(officialStats.stake_settled) : EM_DASH}
+          />
+          <MetricCard
+            label="Profitto (unità)"
+            value={officialStats ? formatNum(officialStats.profit) : EM_DASH}
+          />
+          <MetricCard
+            label="ROI (%)"
+            value={officialStats ? formatPct(officialStats.roi_pct) : EM_DASH}
+          />
+          <MetricCard
+            label="Max drawdown (unità)"
+            value={officialStats ? formatNum(officialStats.max_drawdown) : EM_DASH}
+          />
+          <MetricCard
+            label="CLV medio (%)"
+            value={officialStats ? formatPct(officialStats.clv_avg_pct) : EM_DASH}
+          />
+        </div>
+      </article>
 
       <TipsTable
-        title="Pronostici pubblicati oggi"
+        title="Pubblicazioni di oggi"
         tips={data.published_today}
-        emptyMessage="Nessuna pubblicazione con data odierna."
+        emptyMessage="Nessun pronostico pubblicato oggi per questo mercato e questi filtri."
+        market={market}
       />
       <TipsTable
-        title="Pronostici aperti"
+        title="Pronostici aperti più recenti"
         tips={data.open_predictions}
-        emptyMessage="Nessun tip ancora da liquidare nel periodo filtrato."
+        emptyMessage="Nessun pronostico ancora da liquidare nel periodo filtrato."
+        market={market}
       />
       <TipsTable
-        title="Pronostici chiusi"
+        title="Pronostici chiusi più recenti"
         tips={data.closed_predictions}
-        emptyMessage="Nessun tip chiuso (won/lost/void) nel periodo filtrato."
+        emptyMessage="Nessun pronostico vinto, perso o void nel periodo filtrato."
+        market={market}
       />
 
       <article className="panel">
         <div className="panel-header">
-          <h3>Completezza dati</h3>
+          <div>
+            <h3>Completezza dati</h3>
+            <p className="note">Calcolata sui pronostici del mercato e del periodo selezionati.</p>
+          </div>
         </div>
         <div className="metrics-grid">
           <MetricCard
-            label="Tip con quota"
+            label="Tip con quota dedicata"
             value={formatPct(data.data_completeness.tips_with_odds_pct)}
           />
           <MetricCard
@@ -448,18 +547,19 @@ export function LiveBetaDashboardPage() {
             value={formatPct(data.data_completeness.tips_with_match_context_pct)}
           />
           <MetricCard
-            label="Coverage snapshot quote"
+            label="Eventi con snapshot quote"
             value={formatPct(data.data_completeness.odds_snapshot_coverage_pct)}
+            hint="Percentuale di eventi distinti, non di tip."
           />
         </div>
         <p className="note">
-          Snapshot: opening {data.data_completeness.snapshots_opening}, observed{" "}
-          {data.data_completeness.snapshots_observed}, publication{" "}
+          Snapshot quote: apertura {data.data_completeness.snapshots_opening}, osservati{" "}
+          {data.data_completeness.snapshots_observed}, pubblicazione{" "}
           {data.data_completeness.snapshots_publication}, closing{" "}
-          {data.data_completeness.snapshots_closing}. Closing:{" "}
-          {data.data_completeness.closing_odds_status}
+          {data.data_completeness.snapshots_closing}. Copertura closing{" "}
+          {closingStatusLabel(data.data_completeness.closing_odds_status)}
           {data.data_completeness.tips_with_closing_snapshot_pct != null
-            ? ` (${formatPct(data.data_completeness.tips_with_closing_snapshot_pct)} tip)`
+            ? ` (${formatPct(data.data_completeness.tips_with_closing_snapshot_pct)} dei tip)`
             : ""}
           .
         </p>
@@ -468,22 +568,103 @@ export function LiveBetaDashboardPage() {
         ) : null}
       </article>
 
-      <article className="panel">
+      <article className="panel mode-panel mode-panel-live">
         <div className="panel-header">
-          <h3>Utilizzo bot</h3>
-          <Link to="/telegram-bot">Dettaglio bot</Link>
+          <div>
+            <h3>Stato pubblicazione live</h3>
+            <p className="note">Stato globale: non cambia con i filtri del mercato.</p>
+          </div>
+          <span className={`pill ${health.empty_reason === "ok" ? "pill-ok" : ""}`}>
+            {healthStatusLabel(health.empty_reason)}
+          </span>
+        </div>
+        <p>{health.message}</p>
+        <div className="metrics-grid">
+          <MetricCard
+            label="Pubblicazione automatica"
+            value={health.live_publication_enabled ? "Abilitata" : "Disabilitata"}
+          />
+          <MetricCard
+            label="Modello pubblico"
+            value={publicModelConfigured ? "Configurato" : "Non configurato"}
+          />
+          <MetricCard
+            label="Inizio registro live"
+            value={formatDateTime(health.validation_started_at)}
+          />
+          <MetricCard
+            label="Pubblicazioni ultimo run"
+            value={
+              health.last_run_publications_created == null
+                ? EM_DASH
+                : String(health.last_run_publications_created)
+            }
+          />
+          <MetricCard
+            label="Duplicati ignorati (ultimo run)"
+            value={
+              health.last_run_duplicates_skipped == null
+                ? EM_DASH
+                : String(health.last_run_duplicates_skipped)
+            }
+          />
+        </div>
+      </article>
+
+      <article className="panel mode-panel mode-panel-live">
+        <div className="panel-header">
+          <div>
+            <h3>Pipeline LIVE</h3>
+            <p className="note">Stato globale dell'aggiornamento dati.</p>
+          </div>
+          <span className={`pill ${pipelineRun?.status === "completed" ? "pill-ok" : ""}`}>
+            {pipelineStatusLabel(pipelineRun?.status)}
+          </span>
         </div>
         <div className="metrics-grid">
-          <MetricCard label="Eventi totali" value={String(data.bot_usage.total_events)} />
-          <MetricCard label="Eventi oggi" value={String(data.bot_usage.events_today)} />
-          <MetricCard label="Utenti unici" value={String(data.bot_usage.unique_users)} />
-          <MetricCard label="Azione top" value={data.bot_usage.top_action || "-"} />
+          <MetricCard
+            label="Ultima attività pipeline"
+            value={formatDateTime(data.pipeline.last_updated_at)}
+          />
+          <MetricCard label="Fase corrente" value={pipelineRun?.current_phase || EM_DASH} />
+          <MetricCard
+            label="Next fixtures importate oggi"
+            value={data.pipeline.import_status.next_fixtures_imported_today ? "Sì" : "No"}
+          />
+          <MetricCard
+            label="Ultimo import fixtures"
+            value={formatDateTime(data.pipeline.import_status.fixtures_last_imported_at)}
+          />
         </div>
+        <p className="note live-panel-link">
+          <Link to="/global-update-report">Apri il report aggiornamento</Link>
+        </p>
+      </article>
+
+      <article className="panel live-bot-panel">
+        <div className="panel-header">
+          <h3>Bot Telegram</h3>
+          <Link to="/telegram-bot">Apri dettaglio bot</Link>
+        </div>
+        <p className="live-bot-status">
+          <strong>{data.bot_usage.events_today}</strong> eventi oggi
+          <span aria-hidden="true">·</span>
+          <strong>{data.bot_usage.unique_users}</strong> utenti unici nel periodo
+          {data.bot_usage.top_action ? (
+            <>
+              <span aria-hidden="true">·</span>
+              azione più usata <strong>{data.bot_usage.top_action}</strong>
+            </>
+          ) : null}
+        </p>
       </article>
 
       <article className="panel">
         <div className="panel-header">
-          <h3>Errori recenti</h3>
+          <div>
+            <h3>Errori operativi recenti</h3>
+            <p className="note">Ultimo aggiornamento globale e fallimenti Telegram recenti.</p>
+          </div>
         </div>
         {data.recent_errors.length === 0 ? (
           <EmptyState
@@ -505,33 +686,15 @@ export function LiveBetaDashboardPage() {
                 {data.recent_errors.map((item, index) => (
                   <tr key={`${item.source}-${item.created_at}-${index}`}>
                     <td>{formatDateTime(item.created_at)}</td>
-                    <td>{item.source}</td>
+                    <td>{errorSourceLabel(item.source)}</td>
                     <td>{item.message}</td>
-                    <td>{item.detail || "-"}</td>
+                    <td>{item.detail || EM_DASH}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-      </article>
-
-      <article className="panel mode-panel mode-panel-backtest">
-        <div className="panel-header">
-          <h3>
-            <span className="mode-badge mode-badge-backtest">BACKTEST</span> Area separata
-          </h3>
-        </div>
-        <p>{data.backtest.message}</p>
-        <p className="note">
-          Pagine correlate:{" "}
-          {data.backtest.related_paths.map((path, index) => (
-            <span key={path}>
-              {index > 0 ? " · " : null}
-              <Link to={path}>{path}</Link>
-            </span>
-          ))}
-        </p>
       </article>
     </section>
   );

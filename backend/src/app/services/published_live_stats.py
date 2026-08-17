@@ -8,15 +8,18 @@ Does not use training/backtest metrics (``value_bet_metrics``) or mutable
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
 from statistics import median
 from typing import Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from backend.src.app.ml.datasets.score_parser import parse_fixture_score
+from backend.src.app.ml.model_versioning import ACTIVE_MATCH_WINNER_VERSIONS
 from backend.src.app.schemas.published_prediction import (
     OddsBand,
     PublishedLiveStatsBucket,
@@ -74,6 +77,12 @@ class _MatchContext:
     player_2_name: str | None
     surface: str | None
     event_date: date | None
+    # Extra-market settlement (first_set_winner / over_under_games): populated
+    # only when the fixture score parses as valid (see score_parser.py).
+    # None means "not settleable yet" for these markets (stays pending),
+    # regardless of the overall match-winner ``actual_winner`` above.
+    first_set_winner_side: str | None = None
+    total_games: int | None = None
 
 
 @dataclass
@@ -207,6 +216,25 @@ def _load_match_contexts(db: Session, event_keys: list[int]) -> dict[int, _Match
                 surface = surfaces_by_tournament.get(int(fixture.tournament_key))
             if surface is None and next_row is not None:
                 surface = next_row.surface
+            parsed_score = parse_fixture_score(
+                match_id=event_key,
+                scores=fixture.scores,
+                event_game_result=fixture.event_game_result,
+            )
+            first_set_winner_side = None
+            total_games = None
+            # First-set bets are resolved as soon as set 1 itself is complete
+            # and valid. A later retirement can make the whole match unusable
+            # for training/total-games settlement without invalidating a set
+            # that had already finished normally.
+            first_set = parsed_score.sets[0] if parsed_score.sets else None
+            if first_set is not None and first_set.is_valid:
+                if first_set.winner == "player_1":
+                    first_set_winner_side = "First Player"
+                elif first_set.winner == "player_2":
+                    first_set_winner_side = "Second Player"
+            if parsed_score.is_valid_for_training:
+                total_games = parsed_score.total_games
             contexts[event_key] = _MatchContext(
                 lifecycle=lifecycle,
                 actual_winner=fixture.event_winner
@@ -216,6 +244,8 @@ def _load_match_contexts(db: Session, event_keys: list[int]) -> dict[int, _Match
                 player_2_name=fixture.event_second_player,
                 surface=surface,
                 event_date=fixture.event_date,
+                first_set_winner_side=first_set_winner_side,
+                total_games=total_games,
             )
             continue
 
@@ -261,6 +291,10 @@ def _load_published_rows(
     publication_source: str | None,
     tournament_name: str | None,
     latest_only: bool,
+    market: str | None,
+    include_archived: bool,
+    official_only: bool,
+    initial_status: str | None,
 ) -> list[PublishedPrediction]:
     from datetime import time as time_cls
 
@@ -287,6 +321,24 @@ def _load_published_rows(
         needle = tournament_name.strip()
         if needle:
             stmt = stmt.where(PublishedPrediction.tournament_name.ilike(f"%{needle}%"))
+    if market:
+        stmt = stmt.where(PublishedPrediction.market == market)
+    if official_only:
+        stmt = stmt.where(
+            PublishedPrediction.official_play.is_(True),
+            PublishedPrediction.value_decision == "PLAY",
+        )
+    if initial_status:
+        stmt = stmt.where(PublishedPrediction.initial_status == initial_status)
+    if not include_archived:
+        # Archive policy currently applies only to match-winner versions. Extra
+        # markets have their own explicit market identity and remain visible.
+        stmt = stmt.where(
+            or_(
+                PublishedPrediction.market != "match_winner",
+                PublishedPrediction.model_version.in_(ACTIVE_MATCH_WINNER_VERSIONS),
+            )
+        )
 
     if latest_only:
         latest_subq = (
@@ -382,6 +434,10 @@ def settle_published_tips(
     surface: str | None = None,
     odds_band: str | None = None,
     latest_only: bool = True,
+    market: str | None = None,
+    include_archived: bool = True,
+    official_only: bool = False,
+    initial_status: str | None = None,
 ) -> list[_SettledTip]:
     """Load published tips, settle at read time, apply surface/odds-band filters."""
     band = _normalize_odds_band(odds_band)
@@ -396,6 +452,10 @@ def settle_published_tips(
         publication_source=publication_source,
         tournament_name=tournament_name,
         latest_only=latest_only,
+        market=market,
+        include_archived=include_archived,
+        official_only=official_only,
+        initial_status=initial_status,
     )
     contexts = _load_match_contexts(db, [row.event_key for row in rows])
     snapshots = _load_odds_snapshots(db, [row.event_key for row in rows])
@@ -452,6 +512,9 @@ def settled_tip_to_read(item: _SettledTip, *, is_latest: bool) -> PublishedSettl
         content_version=tip.content_version,
         previous_version_id=tip.previous_version_id,
         event_key=tip.event_key,
+        market=tip.market,
+        value_decision=tip.value_decision,
+        official_play=bool(tip.official_play),
         selection=tip.selection,
         model_version=tip.model_version,
         model_name=tip.model_name,
@@ -503,6 +566,10 @@ def list_settled_published_tips(
     surface: str | None = None,
     odds_band: str | None = None,
     latest_only: bool = True,
+    market: str | None = None,
+    include_archived: bool = True,
+    official_only: bool = False,
+    initial_status: str | None = None,
     outcome: Literal["pending", "won", "lost", "void"] | None = None,
     limit: int | None = None,
 ) -> list[PublishedSettledTipRead]:
@@ -519,6 +586,10 @@ def list_settled_published_tips(
         surface=surface,
         odds_band=odds_band,
         latest_only=latest_only,
+        market=market,
+        include_archived=include_archived,
+        official_only=official_only,
+        initial_status=initial_status,
     )
     if outcome is not None:
         settled = [tip for tip in settled if tip.outcome == outcome]
@@ -531,6 +602,21 @@ def list_settled_published_tips(
     return items
 
 
+_OVER_UNDER_SELECTION_RE = re.compile(r"^(Over|Under)\s+([\d.]+)$", re.IGNORECASE)
+
+
+def _market_line_for_tip(tip: PublishedPrediction) -> float | None:
+    if tip.market != "over_under_games":
+        return None
+    match = _OVER_UNDER_SELECTION_RE.match((tip.selection or "").strip())
+    if match is None:
+        return None
+    try:
+        return float(match.group(2))
+    except ValueError:
+        return None
+
+
 def _no_vig_probability(
     *,
     event_snapshots: list[PrematchOddsSnapshot],
@@ -538,13 +624,20 @@ def _no_vig_probability(
     bookmaker: str,
     selection: str,
     counterpart_selection: str | None,
+    market: str,
+    market_line: float | None,
+    captured_at: datetime,
 ) -> float | None:
     if not counterpart_selection:
         return None
     same_market = [
         row
         for row in event_snapshots
-        if row.snapshot_type == snapshot_type and row.bookmaker == bookmaker
+        if row.snapshot_type == snapshot_type
+        and row.bookmaker == bookmaker
+        and row.market == market
+        and row.market_line == market_line
+        and row.captured_at == captured_at
     ]
     selected = next((row for row in same_market if row.selection == selection), None)
     opposite = next(
@@ -567,7 +660,14 @@ def _resolve_clv(
     event_snapshots: list[PrematchOddsSnapshot],
 ) -> _TipClv:
     selection = tip.selection
-    same_selection = [row for row in event_snapshots if row.selection == selection]
+    market_line = _market_line_for_tip(tip)
+    same_selection = [
+        row
+        for row in event_snapshots
+        if row.selection == selection
+        and row.market == tip.market
+        and row.market_line == market_line
+    ]
     publication_rows = [row for row in same_selection if row.snapshot_type == "publication"]
     closing_rows = [row for row in same_selection if row.snapshot_type == "closing"]
 
@@ -605,7 +705,17 @@ def _resolve_clv(
     closing_bookmaker = closing_row.bookmaker if closing_row is not None else None
 
     counterpart_selection = None
-    if context.player_1_name and context.player_2_name:
+    if tip.market == "over_under_games" and market_line is not None:
+        match = _OVER_UNDER_SELECTION_RE.match((selection or "").strip())
+        if match is not None:
+            opposite = "Under" if match.group(1).lower() == "over" else "Over"
+            counterpart_selection = f"{opposite} {market_line:g}"
+    elif tip.market == "first_set_winner":
+        if selection == "First Player":
+            counterpart_selection = "Second Player"
+        elif selection == "Second Player":
+            counterpart_selection = "First Player"
+    elif context.player_1_name and context.player_2_name:
         selected_key = selection.strip().lower()
         p1 = context.player_1_name.strip().lower()
         p2 = context.player_2_name.strip().lower()
@@ -622,6 +732,9 @@ def _resolve_clv(
             bookmaker=publication_row.bookmaker,
             selection=selection,
             counterpart_selection=counterpart_selection,
+            market=tip.market,
+            market_line=market_line,
+            captured_at=publication_row.captured_at,
         )
     no_vig_closing = None
     if closing_row is not None:
@@ -631,6 +744,9 @@ def _resolve_clv(
             bookmaker=closing_row.bookmaker,
             selection=selection,
             counterpart_selection=counterpart_selection,
+            market=tip.market,
+            market_line=market_line,
+            captured_at=closing_row.captured_at,
         )
 
     clv_pct = None
@@ -653,6 +769,47 @@ def _resolve_clv(
     )
 
 
+def _settle_first_set_winner(
+    tip: PublishedPrediction,
+    context: _MatchContext,
+    player_1: str | None,
+    player_2: str | None,
+) -> tuple[str | None, str | None, bool]:
+    """(predicted, actual, has_result) for the first-set-winner extra market.
+
+    ``actual`` comes from the parsed set-by-set score (first_set_winner_side),
+    NEVER from the overall match winner: a player can win set 1 and still
+    lose the match, so reusing ``context.actual_winner`` here would settle
+    this market incorrectly.
+    """
+    predicted = selection_to_predicted_winner(tip.selection, player_1, player_2)
+    actual = context.first_set_winner_side
+    return predicted, actual, actual is not None
+
+
+def _settle_over_under_games(
+    tip: PublishedPrediction, context: _MatchContext
+) -> tuple[str | None, str | None, bool]:
+    """(predicted_side, actual_side, has_result) for the over/under-games market.
+
+    ``selection`` is "Over {line}" / "Under {line}" (no player name involved),
+    so it cannot be resolved via ``selection_to_predicted_winner``/
+    ``COMPLETED_WINNERS``. Settled against the parsed total games count.
+    """
+    match = _OVER_UNDER_SELECTION_RE.match((tip.selection or "").strip())
+    if match is None:
+        return None, None, False
+    predicted_side = match.group(1).capitalize()
+    try:
+        line = float(match.group(2))
+    except ValueError:
+        return predicted_side, None, False
+    if context.total_games is None:
+        return predicted_side, None, False
+    actual_side = "Over" if context.total_games > line else "Under"
+    return predicted_side, actual_side, True
+
+
 def _settle_tip(
     tip: PublishedPrediction,
     context: _MatchContext,
@@ -661,21 +818,37 @@ def _settle_tip(
 ) -> _SettledTip:
     player_1 = tip.player_1_name or context.player_1_name
     player_2 = tip.player_2_name or context.player_2_name
-    predicted = selection_to_predicted_winner(tip.selection, player_1, player_2)
+    has_result: bool | None = None
+    if tip.market == "first_set_winner":
+        predicted, actual, has_result = _settle_first_set_winner(
+            tip, context, player_1, player_2
+        )
+    elif tip.market == "over_under_games":
+        predicted, actual, has_result = _settle_over_under_games(tip, context)
+    else:
+        predicted = selection_to_predicted_winner(tip.selection, player_1, player_2)
+        actual = context.actual_winner
     settlement = settle_simulated_bet(
         lifecycle=context.lifecycle,
         predicted_winner=predicted,
-        actual_winner=context.actual_winner,
+        actual_winner=actual,
         market_odds=tip.odds,
         stake_units=float(tip.unit_stake),
+        has_result=has_result,
     )
     sort_date = tip.event_date or context.event_date or tip.published_at.date()
     clv = _resolve_clv(tip, context, event_snapshots=snapshots)
+    # A score can still resolve the sporting outcome (and therefore the hit
+    # rate) when the exact market quote was unavailable at publication time.
+    # It was not, however, a financially simulatable bet: treating a missing
+    # quote as 1.00 would charge stake on losses and zero-return wins, producing
+    # a fictitious ROI. Keep the outcome, but exclude all realized P/L fields.
+    has_financial_odds = tip.odds is not None
     return _SettledTip(
         tip=tip,
         outcome=settlement.outcome,
-        profit=float(settlement.profit_units),
-        stake_settled=float(settlement.stake_units),
+        profit=float(settlement.profit_units) if has_financial_odds else 0.0,
+        stake_settled=float(settlement.stake_units) if has_financial_odds else 0.0,
         surface=context.surface,
         lifecycle=context.lifecycle,
         clv=clv,
@@ -690,7 +863,11 @@ def _aggregate(tips: list[_SettledTip], *, key: str, label: str) -> PublishedLiv
     void = sum(1 for tip in tips if tip.outcome == "void")
     open_count = sum(1 for tip in tips if tip.outcome == "pending")
     closed = won + lost
-    stake_total = sum(float(tip.tip.unit_stake) for tip in tips)
+    # Quote-less predictions (currently first-set winner) remain useful for
+    # accuracy, but are not bets and must not enter any financial denominator.
+    stake_total = sum(
+        float(tip.tip.unit_stake) for tip in tips if tip.tip.odds is not None
+    )
     stake_settled = sum(tip.stake_settled for tip in tips)
     profit = sum(tip.profit for tip in tips)
     odds_values = [float(tip.tip.odds) for tip in tips if tip.tip.odds is not None]
@@ -772,6 +949,10 @@ def compute_published_live_stats(
     surface: str | None = None,
     odds_band: str | None = None,
     latest_only: bool = True,
+    market: str | None = None,
+    include_archived: bool = True,
+    official_only: bool = False,
+    initial_status: str | None = None,
 ) -> PublishedLiveStatsSummary:
     band = _normalize_odds_band(odds_band)
     settled = settle_published_tips(
@@ -787,6 +968,10 @@ def compute_published_live_stats(
         surface=surface,
         odds_band=band,
         latest_only=latest_only,
+        market=market,
+        include_archived=include_archived,
+        official_only=official_only,
+        initial_status=initial_status,
     )
 
     summary_bucket = _aggregate(settled, key="all", label="Tutti")
@@ -809,6 +994,9 @@ def compute_published_live_stats(
         tournament_name=tournament_name,
         surface=surface,
         odds_band=band,
+        market=market,
+        include_archived=include_archived,
+        official_only=official_only,
         predictions_total=summary_bucket.predictions_total,
         closed=summary_bucket.closed,
         open=summary_bucket.open,

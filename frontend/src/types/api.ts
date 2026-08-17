@@ -98,9 +98,22 @@ export type MatchPrediction = {
   warnings: string[];
 };
 
+export type ExtraMarketPrediction = {
+  market: string;
+  model_version: string;
+  model_name: string | null;
+  selection: string;
+  probability: number | null;
+  odds: number | null;
+  void_odds: number | null;
+  edge: number | null;
+  published_at: string | null;
+};
+
 export type NextFixtureWithPrediction = NextFixture & {
   prediction: MatchPrediction | null;
   prediction_warning: string | null;
+  extra_markets: ExtraMarketPrediction[];
 };
 
 export type FixturesWithPredictionsPage = {
@@ -164,7 +177,7 @@ export type PredictionModelBreakdown = {
 };
 
 export type PredictionQueryParams = {
-  model_version?: MLModelVersion;
+  model_version?: MLModelVersion | string;
   model_name?: string;
   from?: string;
   to?: string;
@@ -253,7 +266,7 @@ export type SingleMatchValueQueryParams = PredictionQueryParams & {
 };
 
 export type DailyStatsParams = {
-  model_version?: MLModelVersion;
+  model_version?: MLModelVersion | string;
   model_name?: string;
   from_day?: number;
   to_day?: number;
@@ -488,6 +501,7 @@ export type SlipStatus = "pending" | "won" | "lost" | "void";
 
 export type BettingSlipPick = {
   event_key: number;
+  market: string;
   event_date: string | null;
   event_time: string | null;
   tournament_name: string | null;
@@ -517,13 +531,19 @@ export type BettingSlipPick = {
   match_lifecycle_label?: string | null;
   event_status?: string | null;
   void_reason?: string | null;
+  ladder_step_index?: number | null;
+  ladder_step_stake?: number | null;
+  ladder_step_return_if_won?: number | null;
 };
+
+export type SlipKind = "parlay" | "ladder";
 
 export type BettingSlip = {
   id: string;
   slip_key: string;
   label: string;
   description: string | null;
+  slip_kind?: SlipKind;
   picks: BettingSlipPick[];
   pick_count: number;
   combined_odds: number;
@@ -583,11 +603,31 @@ export type BettingSlipStatsDay = {
 export type BettingSlipStatsProfile = {
   slip_key: string;
   label: string;
+  slip_kind?: SlipKind;
   slips_won: number;
   slips_lost: number;
   slips_pending: number;
   slips_total: number;
   slip_win_rate_pct: number | null;
+};
+
+export type BettingSlipStatsKind = {
+  slip_kind: SlipKind;
+  label: string;
+  slips_total: number;
+  slips_won: number;
+  slips_lost: number;
+  slips_pending?: number;
+  slips_void?: number;
+  slip_win_rate_pct: number | null;
+  picks_total?: number;
+  picks_won?: number;
+  picks_lost?: number;
+  picks_pending?: number;
+  picks_void?: number;
+  pick_hit_rate_pct?: number | null;
+  theoretical_profit_units?: number;
+  theoretical_roi_pct?: number | null;
 };
 
 export type BettingSlipStatsSummary = {
@@ -604,6 +644,7 @@ export type BettingSlipStatsSummary = {
   theoretical_profit_units: number;
   theoretical_roi_pct: number | null;
   by_profile: BettingSlipStatsProfile[];
+  by_kind?: BettingSlipStatsKind[];
 };
 
 export type BettingSlipStatsResponse = {
@@ -621,11 +662,13 @@ export type BettingSlipModelStatsRow = {
   slips_won: number;
   slips_lost: number;
   slips_pending: number;
+  slips_void?: number;
   slip_win_rate_pct: number | null;
   picks_total: number;
   picks_won: number;
   picks_lost: number;
   picks_pending: number;
+  picks_void?: number;
   pick_hit_rate_pct: number | null;
   theoretical_profit_units: number;
   theoretical_roi_pct: number | null;
@@ -633,11 +676,24 @@ export type BettingSlipModelStatsRow = {
   last_date: string;
 };
 
+export type BettingSlipMarketStatsRow = {
+  market: string;
+  picks_total: number;
+  picks_won: number;
+  picks_lost: number;
+  picks_pending: number;
+  picks_void: number;
+  pick_hit_rate_pct: number | null;
+};
+
 export type BettingSlipModelStatsResponse = {
   from_date: string;
   to_date: string;
   stake: number;
   rows: BettingSlipModelStatsRow[];
+  by_market?: BettingSlipMarketStatsRow[];
+  by_kind?: BettingSlipStatsKind[];
+  by_profile?: BettingSlipStatsProfile[];
 };
 
 export type BettingSlipsQueryParams = {
@@ -973,6 +1029,10 @@ export type PublishedPrediction = {
   betting_slip_pick_id: number | null;
   is_latest: boolean;
   match_started: boolean;
+  /** Market metadata is optional so the UI can still read legacy dashboard payloads. */
+  market?: LiveDashboardMarket | string;
+  value_decision?: SingleMatchValueDecision | null;
+  official_play?: boolean;
 };
 
 export type PublishedPredictionListResponse = {
@@ -995,6 +1055,9 @@ export type PublishedPredictionsParams = {
   model_name?: string;
   publication_source?: string;
   latest_only?: boolean;
+  market?: LiveDashboardMarket | string;
+  include_archived?: boolean;
+  official_only?: boolean;
   limit?: number;
   offset?: number;
 };
@@ -1065,9 +1128,18 @@ export type PublishedLiveStatsSummary = {
   by_edge: PublishedLiveStatsBucket[];
   by_surface: PublishedLiveStatsBucket[];
   by_period: PublishedLiveStatsBucket[];
+  /** Echoed by the market-aware live dashboard; absent on legacy stats responses. */
+  market?: LiveDashboardMarket | string;
+  include_archived?: boolean;
+  official_only?: boolean;
 };
 
 export type OddsBand = "lt_1_50" | "1_50_2_00" | "2_00_3_00" | "gte_3_00" | "missing";
+
+export type LiveDashboardMarket =
+  | "match_winner"
+  | "first_set_winner"
+  | "over_under_games";
 
 export type PublishedSettledTip = PublishedPrediction & {
   outcome: "pending" | "won" | "lost" | "void";
@@ -1088,6 +1160,9 @@ export type PublishedLiveStatsParams = {
   surface?: string;
   odds_band?: OddsBand | string;
   latest_only?: boolean;
+  market?: LiveDashboardMarket | string;
+  include_archived?: boolean;
+  official_only?: boolean;
 };
 
 export type LiveBetaPipelineStatus = {
@@ -1168,9 +1243,14 @@ export type LiveBetaDashboardResponse = {
   surface: string | null;
   odds_band: OddsBand | null;
   latest_only: boolean;
+  /** New market-aware fields remain optional for legacy response compatibility. */
+  market?: LiveDashboardMarket;
+  include_archived?: boolean;
+  official_only?: boolean;
   pipeline: LiveBetaPipelineStatus;
   publication_health: LiveBetaPublicationHealth;
   live_stats: PublishedLiveStatsSummary;
+  official_live_stats?: PublishedLiveStatsSummary | null;
   published_today: PublishedSettledTip[];
   open_predictions: PublishedSettledTip[];
   closed_predictions: PublishedSettledTip[];
@@ -1190,6 +1270,9 @@ export type LiveBetaDashboardParams = {
   odds_band?: OddsBand | string;
   latest_only?: boolean;
   tip_limit?: number;
+  market?: LiveDashboardMarket;
+  include_archived?: boolean;
+  official_only?: boolean;
 };
 
 export type WeeklyBetaTelegramStatus = "pending" | "sent" | "skipped" | "failed";
@@ -1230,6 +1313,8 @@ export type WeeklyBetaLiveTipsMetrics = {
   roi_pct: number | null;
   yield_pct: number | null;
   max_drawdown: number;
+  market?: string;
+  by_market?: WeeklyBetaLiveTipsMetrics[];
 };
 
 export type WeeklyBetaPipelineMetrics = {
@@ -1664,6 +1749,7 @@ export type ProbabilityBandAnalysis = {
   min_bin_samples: number;
   model_version: string | null;
   model_name: string | null;
+  market?: string | null;
   from_date: string | null;
   to_date: string | null;
   event_date_from: string | null;
@@ -1696,6 +1782,8 @@ export type ProbabilityBandAnalysisParams = {
   surface?: string;
   odds_band?: string;
   latest_only?: boolean;
+  market?: LiveDashboardMarket | string;
+  include_archived?: boolean;
   n_bins?: number;
   min_bin_samples?: number;
   include_comparison?: boolean;
@@ -1759,6 +1847,7 @@ export type SegmentRoiAnalysis = {
   min_segment_samples: number;
   model_version: string | null;
   model_name: string | null;
+  market?: string | null;
   from_date: string | null;
   to_date: string | null;
   event_date_from: string | null;
@@ -1789,6 +1878,8 @@ export type SegmentRoiAnalysisParams = {
   surface?: string;
   odds_band?: string;
   latest_only?: boolean;
+  market?: LiveDashboardMarket | string;
+  include_archived?: boolean;
   min_segment_samples?: number;
   group_by_fold?: boolean;
   group_by_period?: boolean;

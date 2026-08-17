@@ -86,6 +86,14 @@ describe("SegmentRoiPage", () => {
 
     pending.resolve(segmentRoiAnalysis);
     expect(await screen.findByRole("heading", { name: "ROI per segmento" })).toBeInTheDocument();
+    expect(apiMocks.getSegmentRoiAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "live",
+        market: "match_winner",
+        include_archived: false
+      })
+    );
+    expect(screen.getByRole("tab", { name: "Vincitore partita" })).toBeInTheDocument();
     expect(await screen.findByText("Hard")).toBeInTheDocument();
     expect(await screen.findByText(/ROI per superficie/i)).toBeInTheDocument();
   });

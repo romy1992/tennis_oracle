@@ -37,6 +37,7 @@ COMMAND_FEEDBACK = "feedback"
 COMMAND_NOTIFICHE = "notifiche"
 COMMAND_PARTITE = "partite"
 COMMAND_SCHEDINE = "schedine"
+COMMAND_SCALATE = "scalate"
 COMMAND_STATISTICHE = "statistiche"
 COMMAND_PIANO = "piano"
 COMMAND_ABBONATI = "abbonati"
@@ -109,6 +110,12 @@ _TELEGRAM_COMMAND_POLICIES: dict[str, TelegramCommandPolicy] = {
     ),
     COMMAND_SCHEDINE: TelegramCommandPolicy(
         command_key=COMMAND_SCHEDINE,
+        tier="premium",
+        entitlement_code=TELEGRAM_ENTITLEMENT_SCHEDINE,
+        feature_flag_key=FEATURE_TELEGRAM_SLIPS,
+    ),
+    COMMAND_SCALATE: TelegramCommandPolicy(
+        command_key=COMMAND_SCALATE,
         tier="premium",
         entitlement_code=TELEGRAM_ENTITLEMENT_SCHEDINE,
         feature_flag_key=FEATURE_TELEGRAM_SLIPS,

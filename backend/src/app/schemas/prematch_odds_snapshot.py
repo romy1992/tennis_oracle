@@ -25,6 +25,8 @@ class PrematchOddsSnapshotCreate(BaseModel):
     """Single detection to append (skipped if duplicate fingerprint)."""
 
     event_key: int
+    market: str = Field(default="match_winner", min_length=1, max_length=64)
+    market_line: float | None = None
     selection: str = Field(min_length=1, max_length=255)
     bookmaker: str = Field(min_length=1, max_length=128)
     odds: float = Field(gt=1.0)
@@ -56,6 +58,8 @@ class PrematchOddsSnapshotRead(BaseModel):
 
     id: int
     event_key: int
+    market: str = "match_winner"
+    market_line: float | None = None
     selection: str
     bookmaker: str
     odds: float

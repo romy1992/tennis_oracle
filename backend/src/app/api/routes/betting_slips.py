@@ -1,12 +1,13 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.src.app.api.deps import require_admin, require_admin_or_service
 from backend.src.app.db.session import get_db
-from backend.src.app.ml.model_versioning import ModelVersion
+from backend.src.app.ml.model_versioning import DEFAULT_ACTIVE_MATCH_WINNER_VERSION, ModelVersion
 from backend.src.app.schemas.betting_slips import (
     BettingSlipCalendarResponse,
     BettingSlipModelStatsResponse,
@@ -16,11 +17,15 @@ from backend.src.app.schemas.betting_slips import (
     BettingSlipStatsResponse,
 )
 from backend.src.app.services.betting_slips import (
+    BettingSlipImageExportError,
+    MAX_SLIP_COUNT,
     compute_betting_slip_model_stats,
     compute_betting_slip_stats,
     get_betting_slip_calendar,
     get_daily_betting_slips,
     refresh_betting_slips,
+    render_daily_betting_slip_images_zip,
+    render_daily_betting_slip_png,
 )
 from backend.src.entity.admin_user import AdminUser
 
@@ -31,11 +36,11 @@ router = APIRouter(prefix="/betting-slips", tags=["betting-slips"])
 @router.get("/daily", response_model=BettingSlipsDailyResponse)
 def read_daily_betting_slips(
     slip_date: date | None = Query(default=None, alias="date"),
-    model_version: ModelVersion = Query(default="v2"),
+    model_version: ModelVersion = Query(default=DEFAULT_ACTIVE_MATCH_WINNER_VERSION),
     model_name: str | None = Query(default=None),
     stake: float = Query(default=10.0, ge=0.01),
-    slip_count: int = Query(default=9, ge=1, le=9),
-    picks_per_slip: int = Query(default=5, ge=4, le=5),
+    slip_count: int = Query(default=MAX_SLIP_COUNT, ge=1, le=MAX_SLIP_COUNT),
+    picks_per_slip: int = Query(default=5, ge=2, le=5),
     min_edge_percent: float = Query(default=2.0, ge=0.0, le=100.0),
     regenerate: bool = Query(default=False),
     db: Session = Depends(get_db),
@@ -67,11 +72,11 @@ def read_daily_betting_slips(
 def generate_daily_betting_slips(
     body: BettingSlipsGenerateRequest | None = None,
     slip_date: date | None = Query(default=None, alias="date"),
-    model_version: ModelVersion = Query(default="v2"),
+    model_version: ModelVersion = Query(default=DEFAULT_ACTIVE_MATCH_WINNER_VERSION),
     model_name: str | None = Query(default=None),
     stake: float = Query(default=10.0, ge=0.01),
-    slip_count: int = Query(default=9, ge=1, le=9),
-    picks_per_slip: int = Query(default=5, ge=4, le=5),
+    slip_count: int = Query(default=MAX_SLIP_COUNT, ge=1, le=MAX_SLIP_COUNT),
+    picks_per_slip: int = Query(default=5, ge=2, le=5),
     min_edge_percent: float = Query(default=2.0, ge=0.0, le=100.0),
     regenerate: bool = Query(default=True),
     db: Session = Depends(get_db),
@@ -97,9 +102,75 @@ def generate_daily_betting_slips(
         ) from exc
 
 
+@router.get("/daily/image.png", dependencies=[Depends(require_admin)])
+def download_daily_betting_slip_image(
+    slip_key: str = Query(..., min_length=1),
+    slip_date: date | None = Query(default=None, alias="date"),
+    model_version: ModelVersion = Query(default=DEFAULT_ACTIVE_MATCH_WINNER_VERSION),
+    model_name: str | None = Query(default=None),
+    stake: float = Query(default=10.0, ge=0.01),
+    min_edge_percent: float = Query(default=2.0, ge=0.0, le=100.0),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        content, filename = render_daily_betting_slip_png(
+            db=db,
+            slip_key=slip_key,
+            slip_date=slip_date,
+            model_version=model_version,
+            model_name=model_name,
+            stake=stake,
+            min_edge_percent=min_edge_percent,
+        )
+    except BettingSlipImageExportError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Database table for betting slips is not available.",
+        ) from exc
+    return Response(
+        content=content,
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/daily/images.zip", dependencies=[Depends(require_admin)])
+def download_daily_betting_slip_images_zip(
+    slip_date: date | None = Query(default=None, alias="date"),
+    model_version: ModelVersion = Query(default=DEFAULT_ACTIVE_MATCH_WINNER_VERSION),
+    model_name: str | None = Query(default=None),
+    stake: float = Query(default=10.0, ge=0.01),
+    min_edge_percent: float = Query(default=2.0, ge=0.0, le=100.0),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        content, filename = render_daily_betting_slip_images_zip(
+            db=db,
+            slip_date=slip_date,
+            model_version=model_version,
+            model_name=model_name,
+            stake=stake,
+            min_edge_percent=min_edge_percent,
+        )
+    except BettingSlipImageExportError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Database table for betting slips is not available.",
+        ) from exc
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/calendar", response_model=BettingSlipCalendarResponse, dependencies=[Depends(require_admin)])
 def read_betting_slip_calendar(
-    model_version: ModelVersion = Query(default="v2"),
+    model_version: ModelVersion = Query(default=DEFAULT_ACTIVE_MATCH_WINNER_VERSION),
     model_name: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> BettingSlipCalendarResponse:
@@ -119,7 +190,7 @@ def read_betting_slip_calendar(
 @router.post("/refresh", response_model=BettingSlipsRefreshResponse, dependencies=[Depends(require_admin)])
 def refresh_daily_betting_slips(
     slip_date: date | None = Query(default=None, alias="date"),
-    model_version: ModelVersion = Query(default="v2"),
+    model_version: ModelVersion = Query(default=DEFAULT_ACTIVE_MATCH_WINNER_VERSION),
     model_name: str | None = Query(default=None),
     stake: float = Query(default=10.0, ge=0.01),
     days_back: int = Query(default=1, ge=0, le=14),
@@ -154,7 +225,7 @@ def refresh_daily_betting_slips(
 def read_betting_slip_stats(
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
-    model_version: ModelVersion = Query(default="v2"),
+    model_version: ModelVersion = Query(default=DEFAULT_ACTIVE_MATCH_WINNER_VERSION),
     model_name: str | None = Query(default=None),
     stake: float = Query(default=10.0, ge=0.01),
     all_time: bool = Query(default=False),

@@ -68,20 +68,27 @@ class BettingSlipDay(Base):
 
 
 class BettingSlipPick(Base):
-    """Single pick within a persisted betting slip."""
+    """Single pick within a persisted betting slip.
+
+    ``market`` distinguishes multiple picks on the SAME fixture within one
+    slip (match_winner, over_under_games, ...): the unique constraint is on
+    (betting_slip_id, event_key, market), not just (betting_slip_id, event_key).
+    """
 
     __tablename__ = "betting_slip_pick"
     __table_args__ = (
         UniqueConstraint(
             "betting_slip_id",
             "event_key",
-            name="uq_betting_slip_pick_event",
+            "market",
+            name="uq_betting_slip_pick_event_market",
         ),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     betting_slip_id = Column(Integer, ForeignKey("betting_slip.id"), nullable=False, index=True)
     event_key = Column(Integer, nullable=False, index=True)
+    market = Column(String, nullable=False, default="match_winner")
     event_date = Column(Date, nullable=True)
     event_time = Column(Time, nullable=True)
     tournament_name = Column(String, nullable=True)

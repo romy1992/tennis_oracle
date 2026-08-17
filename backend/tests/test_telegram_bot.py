@@ -1,13 +1,14 @@
 import unittest
 from datetime import date, datetime, timezone
 
-from backend.src.app.telegram.bot import MENU_HELP, MENU_PARTITE, main_menu_keyboard
+from backend.src.app.telegram.bot import MENU_HELP, MENU_PARTITE, MENU_SCALATE, main_menu_keyboard
 from backend.src.app.telegram.dates import parse_date_or_offset
-from backend.src.app.telegram.fixture_value import enrich_fixture_value
+from backend.src.app.telegram.fixture_value import enrich_fixture_value, expand_fixtures_by_market
 from backend.src.app.telegram.messages import (
     DISCLAIMER,
     account_status_label,
     append_message_footer,
+    filter_slips_by_kind,
     format_betting_slips,
     format_betting_slip_photo_caption,
     format_betting_slip_text,
@@ -25,6 +26,7 @@ from backend.src.app.telegram.messages import (
     format_user_error,
     format_welcome_text,
     predicted_winner_name,
+    slip_kind_of,
     split_message,
 )
 from backend.src.app.telegram.public_labels import (
@@ -122,6 +124,8 @@ class TelegramFormattingTest(unittest.TestCase):
                     "event_second_player": "Alcaraz C.",
                     "tournament_name": "Wimbledon",
                     "surface": "Grass",
+                    "market": "match_winner",
+                    "market_odds": 1.52,
                     "void_odds": 1.40,
                     "value_decision": "PLAY",
                     "prediction": {
@@ -134,11 +138,13 @@ class TelegramFormattingTest(unittest.TestCase):
             start_index=21,
         )
 
-        self.assertIn("21. 14:30 | Wimbledon | Grass", message)
+        self.assertIn("21. 14:30 | Wimbledon | Erba", message)
         self.assertIn("Sinner J. vs Alcaraz C.", message)
-        self.assertIn("Predetto: Sinner J.", message)
-        self.assertIn("Void 1.40", message)
-        self.assertIn("Valore PLAY", message)
+        self.assertIn("Match: Sinner J.", message)
+        self.assertIn("Percentuale di riuscita 74%", message)
+        self.assertIn("Quota 1.52", message)
+        self.assertNotIn("Void", message)
+        self.assertNotIn("Valore", message)
 
     def test_format_fixtures_intro_is_public_and_coherent(self):
         message = format_fixtures_intro(
@@ -148,7 +154,7 @@ class TelegramFormattingTest(unittest.TestCase):
         )
         self.assertIn("Partite di oggi (2026-07-19)", message)
         self.assertIn("Verde = Presa", message)
-        self.assertIn("PLAY = valore", message)
+        self.assertIn("Mercati: Match", message)
         self.assertIn("Ultimo aggiornamento:", message)
         self.assertIn(DISCLAIMER, message)
         self.assertNotIn("logistic", message)
@@ -171,6 +177,49 @@ class TelegramFormattingTest(unittest.TestCase):
         self.assertAlmostEqual(enriched["void_odds"], 1 / 0.7, places=4)
         self.assertEqual(enriched["value_decision"], "PLAY")
         self.assertEqual(enriched["pick_status"], "pending")
+        self.assertEqual(enriched["market"], "match_winner")
+
+    def test_expand_fixtures_by_market_emits_match_first_set_and_ou(self):
+        items = [
+            {
+                "event_key": 42,
+                "event_first_player": "Sinner J.",
+                "event_second_player": "Alcaraz C.",
+                "tournament_name": "Wimbledon",
+                "prediction": {
+                    "predicted_winner": "First Player",
+                    "prob_player_1_win": 0.62,
+                    "predicted_winner_odds": 1.55,
+                    "confidence": 0.62,
+                },
+                "extra_markets": [
+                    {
+                        "market": "over_under_games",
+                        "selection": "Over 20.5",
+                        "probability": 0.57,
+                        "odds": 1.90,
+                        "void_odds": 1.7544,
+                    },
+                    {
+                        "market": "first_set_winner",
+                        "selection": "First Player",
+                        "probability": 0.61,
+                        "odds": 1.70,
+                        "void_odds": 1.6393,
+                    },
+                ],
+            }
+        ]
+        rows = expand_fixtures_by_market(items, min_edge_percent=2.0)
+        self.assertEqual([row["market"] for row in rows], [
+            "match_winner",
+            "first_set_winner",
+            "over_under_games",
+        ])
+        self.assertEqual(rows[1]["predicted_winner_label"], "Sinner J.")
+        self.assertEqual(rows[2]["predicted_winner_label"], "Over 20.5")
+        self.assertAlmostEqual(rows[2]["market_odds"], 1.90)
+        self.assertNotIn("extra_markets", rows[0])
 
     def test_select_distinct_fixture_models_keeps_both_when_winners_differ(self):
         left = [
@@ -214,6 +263,7 @@ class TelegramFormattingTest(unittest.TestCase):
                         "tournament_name": "Wimbledon",
                         "player_1": "Sinner J.",
                         "player_2": "Alcaraz C.",
+                        "market": "first_set_winner",
                         "predicted_winner": "First Player",
                         "predicted_winner_label": "Sinner J.",
                         "odds": 1.52,
@@ -231,11 +281,12 @@ class TelegramFormattingTest(unittest.TestCase):
         self.assertIn("Schedina: Play · Sicura", message)
         self.assertIn("Stato: In corso", message)
         self.assertIn("Quota combinata: 1.52", message)
-        self.assertIn("Pick: Sinner J.", message)
-        self.assertIn("Void 1.40", message)
-        self.assertIn("Edge +8.5%", message)
-        self.assertIn("ROI +12.0%", message)
-        self.assertIn("PLAY", message)
+        self.assertIn("1° set: Sinner J.", message)
+        self.assertIn("Percentuale di riuscita 74%", message)
+        self.assertIn("Quota 1.52", message)
+        self.assertNotIn("Void", message)
+        self.assertNotIn("Edge", message)
+        self.assertNotIn("ROI", message)
 
     def test_format_betting_slips_intro_is_public_and_coherent(self):
         message = format_betting_slips_intro(
@@ -254,7 +305,7 @@ class TelegramFormattingTest(unittest.TestCase):
         self.assertIn("Verde = Presa", message)
         self.assertIn("Rosso = Persa", message)
         self.assertIn("Grigio = In corso", message)
-        self.assertIn("PLAY = valore", message)
+        self.assertIn("Mercati: Match", message)
         self.assertIn(DISCLAIMER, message)
         self.assertIn("Feedback / segnalazioni:", message)
         self.assertNotIn("logistic_regression", message)
@@ -468,8 +519,9 @@ class TelegramBotUxTest(unittest.TestCase):
         )
         labels = [button.text for row in markup.inline_keyboard for button in row]
         data = [button.callback_data for row in markup.inline_keyboard for button in row]
-        self.assertEqual(labels, ["Partite", "Schedine", "Statistiche", "Aiuto"])
+        self.assertEqual(labels, ["Partite", "Schedine", "Scalate", "Statistiche", "Aiuto"])
         self.assertIn(MENU_PARTITE, data)
+        self.assertIn(MENU_SCALATE, data)
         self.assertIn(MENU_HELP, data)
 
     def test_help_and_welcome_are_synthetic_and_public(self):
@@ -477,6 +529,7 @@ class TelegramBotUxTest(unittest.TestCase):
         welcome = format_welcome_text()
         self.assertIn("/partite", help_text)
         self.assertIn("/schedine", help_text)
+        self.assertIn("/scalate", help_text)
         self.assertIn("/statistiche", help_text)
         self.assertIn("/piano", help_text)
         self.assertIn("/abbonati", help_text)
@@ -487,11 +540,36 @@ class TelegramBotUxTest(unittest.TestCase):
         self.assertIn(DISCLAIMER, help_text)
         self.assertIn("Feedback / segnalazioni:", help_text)
         self.assertIn("/partite", welcome)
+        self.assertIn("/scalate", welcome)
         self.assertIn("/piano", welcome)
         self.assertIn("/feedback", welcome)
         self.assertNotIn("logistic_regression", help_text)
         self.assertNotIn("random_forest", welcome)
         self.assertNotIn("v3", welcome)
+
+    def test_filter_slips_by_kind_separates_ladders(self):
+        payload = {
+            "date": "2026-06-28",
+            "slips": [
+                {"slip_key": "play_safe", "label": "Play · Sicura", "picks": []},
+                {
+                    "slip_key": "ladder_play_3",
+                    "slip_kind": "ladder",
+                    "label": "Scalata · Play 3",
+                    "picks": [],
+                },
+            ],
+        }
+        parlays = filter_slips_by_kind(payload, slip_kind="parlay")
+        ladders = filter_slips_by_kind(payload, slip_kind="ladder")
+        self.assertEqual([s["slip_key"] for s in parlays["slips"]], ["play_safe"])
+        self.assertEqual([s["slip_key"] for s in ladders["slips"]], ["ladder_play_3"])
+        self.assertEqual(slip_kind_of(ladders["slips"][0]), "ladder")
+        intro = format_betting_slips_intro(slip_date="2026-06-28", slip_kind="ladder")
+        self.assertIn("Scalate di oggi", intro)
+        self.assertIn("reinvestito", intro)
+        caption = format_betting_slip_photo_caption(ladders["slips"][0])
+        self.assertIn("step", caption)
 
     def test_help_and_welcome_hide_subscription_commands_when_disabled(self):
         help_text = format_help_text(include_subscription_commands=False)

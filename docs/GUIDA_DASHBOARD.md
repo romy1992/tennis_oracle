@@ -13,7 +13,7 @@ Il menu laterale replica l’ordine delle sezioni qui sotto. Due famiglie di dat
 
 | Famiglia | Cosa misura | Pagine tipiche |
 |----------|-------------|----------------|
-| **LIVE** | Tip salvati nel registro immutabile (`published_prediction`) | Dashboard beta live, Registro modello pubblico, Storico pubblicazioni, Statistiche live |
+| **LIVE** | Tip salvati nel registro immutabile (`published_prediction`) | Dashboard live, Storico pubblicazioni, Statistiche live |
 | **Operativo / backtest** | Previsioni salvate, schedine simulate, validazione ML offline | Partite, Consiglio schedina, Statistiche previsioni, Walk-forward, … |
 
 Non confondere **previsioni operative** (tutte le partite con modello salvato) con **pubblicazioni live** (solo tip PLAY del modello pubblico, se abilitato).
@@ -41,35 +41,37 @@ Definizioni allineate al registro live e alle pagine di analisi:
 
 # Principale
 
-## Dashboard beta live — `/live-beta-dashboard`
+## Dashboard live — `/live-beta-dashboard`
 
 ### A cosa serve
 
-Vista unica **operativa LIVE**: stato pipeline, salute del registro pubblicazioni, KPI sui tip pubblicati, tip di oggi/aperti/chiusi, uso bot, completezza dati ed errori recenti. È il punto di ingresso per capire se la validazione live funziona e come stanno performando i tip realmente pubblicati.
+Vista unica **operativa LIVE** sui tre mercati attivi: Vincitore partita, Vincitore 1° set e Over/Under Games. Separa sempre le prestazioni di tutti i pronostici pubblicati da quelle dei soli **PLAY ufficiali**, oltre a mostrare stato pipeline, completezza dati, stato essenziale del bot ed errori recenti.
 
 ### Quando aprirla
 
 - Ogni mattina, dopo **Aggiorna tutto**, per un colpo d’occhio su pipeline e tip del giorno.
 - Quando sospetti che le pubblicazioni automatiche non partano o il registro sia vuoto.
-- Per monitorare drawdown e hit rate live filtrati per periodo, modello o superficie.
+- Per monitorare hit rate e risultati di un singolo mercato senza mescolare popolazioni diverse.
 - Prima di una riunione settimanale, insieme al report settimanale beta.
 
 ### Cosa NON fa / con cosa non confonderla
 
-- **Non** include metriche di training, walk-forward o backtest (in fondo c’è un richiamo alle pagine BACKTEST).
+- **Non** include metriche di training, walk-forward o backtest.
 - **Non** sostituisce **Partite** (previsioni su tutto il calendario) né **Statistiche live** (analisi più profonda delle distribuzioni).
-- I KPI live qui sono gli stessi concetti di **Statistiche live**, ma in layout operativo con più contesto pipeline/bot.
+- **Non** aggrega ROI o hit rate di mercati diversi: si consulta sempre un mercato alla volta.
+- I nomi tecnici degli artefatti ML restano nelle pagine amministrative dedicate, non sono controlli operativi di questa pagina.
 
 ### Filtri e controlli
 
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
-| Da / A | Periodo su data **pubblicazione** | Default ~ultimi 90 giorni; allarga per trend lunghi |
-| Versione modello / Modello | Limita ai tip di quella combo | Lascia “Tutte” per vista globale; restringi per audit modello pubblico |
+| Mercato | Vincitore partita / Vincitore 1° set / Over/Under Games | Nessuna vista “Tutti”: evita KPI misti |
+| Data pubblicazione da / a | Periodo su data **pubblicazione** | Default ~ultimi 90 giorni; non è la data dell’evento |
 | Torneo | Filtro testuale (Invio o blur) | Es. “Roland Garros”; match parziale |
 | Superficie | Hard, Clay, Grass, Carpet | Utile per confrontare segmenti |
 | Fascia quota | &lt;1.50, 1.50–2.00, 2.00–3.00, ≥3.00, senza quota | Per capire se il ROI live viene da favoriti o outsider |
-| Solo versione più recente | Esclude versioni supersedute dello stesso tip | **Consigliato ON** per KPI “ufficiali” |
+| Solo revisione più recente | Sempre attiva: i KPI usano l’ultima revisione di ogni pubblicazione | Non è un interruttore in pagina |
+| Includi storico | Include versioni Match Winner archiviate | OFF nell’uso quotidiano; visibile solo sul mercato Vincitore partita; serve per audit |
 
 ### Metriche e colonne principali
 
@@ -77,19 +79,19 @@ Vista unica **operativa LIVE**: stato pipeline, salute del registro pubblicazion
 |------|-------------|-------------------|
 | Stato registro / Validazione live | Perché il registro è vuoto o attivo | Se `publication_disabled` o modello non configurato, i KPI resteranno a zero per design |
 | Pipeline LIVE | Ultimo run globale, fase, import calendario | Link al report aggiornamento; verifica “import oggi = Sì” |
-| Pronostici totali / Aperti / Chiusi / Void | Conteggi settlement | Void alti → molte partite annullate, non “perse” |
-| Hit rate, Profitto, ROI, Yield | Performance tip chiusi | ROI negativo con hit rate alto → quote basse o campione corto |
-| CLV medio / CLV copertura | Qualità quota presa vs chiusura mercato | CLV medio > 0 = prezzo mediamente migliore del closing; copertura bassa = segnale poco affidabile |
-| Max drawdown, Serie +/- | Rischio e streak | Drawdown in unità di stake, non in % |
-| Tip oggi / aperti / chiusi (tabelle) | Dettaglio singoli tip | Colonne: evento, selezione, modello, quota, quota pubblicazione, closing, CLV, esito, profitto, superficie |
+| Tutti i pronostici | Totali, aperti, risolti, void e hit rate del mercato | Misura il segnale predittivo, non la redditività delle giocate consigliate |
+| PLAY ufficiali | Conteggi e hit rate dei soli tip classificati PLAY | È la popolazione usata per i KPI finanziari |
+| Profitto / ROI / Max drawdown | Performance dei PLAY con quota reale | Valori in **unità di stake**, non euro; il Primo set mostra `—` |
+| CLV medio / CLV copertura | Qualità della quota presa rispetto al closing dello stesso mercato | CLV medio > 0 = prezzo migliore; assenza di snapshot market-aware → `—` |
+| Pubblicazioni recenti | Dettaglio singoli tip, ordinati dal più recente | La pagina dichiara esplicitamente il limite delle righe mostrate |
 | Completezza dati | % tip con quota, data, match, snapshot quote | Coverage closing bassa → analisi CLV limitata |
-| Utilizzo bot | Eventi, utenti, comando top | Complementare a **Bot Telegram** |
+| Stato bot | Segnale sintetico di utilizzo/fallimenti | Il dettaglio resta nella pagina **Bot Telegram** |
 | Errori recenti | Pipeline o bot | Investiga subito se compaiono messaggi ripetuti |
 
-### CLV nella Dashboard beta live
+### CLV nella Dashboard live
 
-- **Quota pubblicazione**: quota associata al tip al momento publish (snapshot `publication` più vicino al timestamp del tip; fallback alla quota del tip se snapshot assente).  
-- **Closing odds**: quota di chiusura rilevata su snapshot `closing` (priorità stesso bookmaker; fallback cross-bookmaker sull’ultimo timestamp disponibile).  
+- **Quota pubblicazione**: quota associata al tip al momento publish per lo stesso mercato e, se presente, la stessa linea.  
+- **Closing odds**: quota di chiusura rilevata su snapshot `closing` dello stesso mercato; non vengono riutilizzate quote Match Winner per il Primo set.  
 - **CLV %**: `((quota_pubblicazione / closing_odds) - 1) * 100`.  
 - **Interpretazione rapida**:
   - CLV positivo: hai preso un prezzo migliore del closing;
@@ -101,23 +103,24 @@ Per capire se il segnale è robusto, guarda sempre **CLV copertura** insieme a *
 ### Esempio pratico
 
 1. Esegui **Aggiorna tutto** dalla sidebar.  
-2. Apri la dashboard: banner “Validazione live attiva” e tip pubblicati oggi > 0.  
-3. Imposta superficie **Clay** e fascia quota **≥ 3.00**.  
-4. Confronta hit rate e ROI del filtro con i KPI globali (senza filtro).  
-5. Se ROI Clay/outsider è positivo ma campione &lt; 20 chiusi, passa a **ROI per segmento** con soglia campione più alta.
+2. Apri la dashboard e seleziona **Vincitore partita**.  
+3. Controlla separatamente hit rate di tutti i pronostici e ROI dei PLAY ufficiali.  
+4. Passa a **Over/Under Games** senza confrontare direttamente campioni o quote con il mercato precedente.  
+5. Sul **Vincitore 1° set** leggi hit rate e, quando c’è quota `Home/Away (1st Set)`, anche ROI/CLV dei PLAY ufficiali.
 
 ### Segnali da tenere d’occhio
 
 - Banner registro vuoto con messaggio esplicativo (pubblicazione disabilitata, nessun PLAY qualificato, errori).  
 - `closing_odds_status: missing` → non usare questi tip per studi di chiusura linea.  
-- ROI molto diverso tra filtri modello → verifica quale combo è “modello pubblico”.  
+- Storico Match Winner necessario per spiegare i KPI correnti → abilita temporaneamente “Includi storico”.  
 - Errori recenti in `global_update` dopo ogni run.
 
 ### Limiti noti
 
-- Dipende da `LIVE_PUBLICATION_ENABLED` e dal **modello attivo** nel registro ML-07 (fallback env `PUBLIC_MODEL_*` solo se non c’è voce active).  
-- Solo tip **PLAY** entrano nel registro automatico.  
-- Quote e contesto torneo live possono essere incompleti su eventi minori.
+- La salute della pubblicazione Match Winner dipende da `LIVE_PUBLICATION_ENABLED` e dal modello attivo nel registro ML-07.
+- Il Primo set usa le quote `Home/Away (1st Set)` per void/edge/ROI/CLV; i tip storici senza quota restano solo nell’hit rate.
+- Il closing Over/Under resta best-effort finché non esiste una cattura pre-kickoff frequente per quel mercato.
+- Quote e contesto torneo possono essere incompleti su eventi minori.
 
 ---
 
@@ -191,12 +194,13 @@ Dettaglio su margine, void e stati partita: [GUIDA_UTENTE.md — Margine di sicu
 
 ### A cosa serve
 
-Propone fino a **9 schedine** al giorno a difficoltà crescente (3 solo Play, 3 Play+Borderline, 3 miste), con quote combinate, edge, ROI atteso ed esito pick/schedina. Simula puntate e mostra statistiche giorno/storico per modello.
+Propone fino a **10 schedine** multi-leg al giorno e fino a **3 scalate** progressive (tab dedicato): in cima alle schedine **Play · Doppia**, poi difficoltà crescente; le scalate reinvestono il ritorno di ogni step nello step successivo (ordine di orario).
 
 ### Quando aprirla
 
 - Dopo l’aggiornamento globale, per scegliere profilo rischio (sicura vs value).  
 - Per copiare testo schedina (pulsante **Copia schedina**) verso app o bot.  
+- Per scaricare le immagini PNG (**Scarica immagini** = tutte; **Scarica immagine** = singola), uguali a quelle del bot.  
 - Per rivedere performance storica per profilo (Play sicura, bilanciata, …).
 
 ### Cosa NON fa / con cosa non confonderla
@@ -216,13 +220,15 @@ Profili e regole settlement: [GUIDA_UTENTE.md — Consiglio schedine](GUIDA_UTEN
 | Calendario (storico / prossime) | Giorno da analizzare | Rigenera solo **oggi/futuro** |
 | Margine sicurezza | Ricalifica PLAY/BORDERLINE/NO BET | Coerente con pagina Partite |
 | Simula puntata (€) | Ricalcola vincita/profitto | Default 10 €; preset 1–50 |
-| Rigenera schedine | Ricrea 9 profili sul pool del giorno | Disabilitato su giorni passati |
+| Rigenera schedine | Ricrea fino a 10 profili sul pool del giorno (Doppia + Play / Border / Miste) | Disabilitato su giorni passati |
+| Scarica immagini | ZIP PNG di tutte le schedine del giorno selezionato | Stesso layout del bot Telegram |
+| Scarica immagine (per schedina) | PNG della singola schedina | Accanto a **Copia schedina** |
 
 ### Metriche e colonne principali
 
 | Nome | Significato | Come interpretarlo |
 |------|-------------|-------------------|
-| Label profilo | Es. Play sicura, Mista value | 9 varianti documentate in GUIDA_UTENTE |
+| Label profilo | Es. Play · Doppia, Play sicura, Mista value | 10 varianti documentate in GUIDA_UTENTE |
 | Media quote / Void / Edge / ROI | Valore singolo pick | Edge % = distanza da void; ROI atteso da quota vs probabilità |
 | Valore | PLAY / BORDERLINE / NO BET | Rispetta margine pagina |
 | Quota combinata / effettiva | Prodotto quote pick attive | Con pick annullate → quota effettiva ricalcolata |
@@ -233,8 +239,8 @@ Profili e regole settlement: [GUIDA_UTENTE.md — Consiglio schedine](GUIDA_UTEN
 ### Esempio pratico
 
 1. Seleziona **oggi**, modello **logistic_regression**, v3.  
-2. Leggi pool PLAY: se &lt; 9, aspettati meno di 9 schedine.  
-3. Confronta profilo **Play sicura** vs **Mista bilanciata**.  
+2. Leggi pool PLAY: se basso, aspettati meno schedine (la Doppia richiede almeno 2 PLAY).  
+3. Confronta profilo **Play · Doppia** vs **Play sicura** vs **Mista bilanciata**.  
 4. Copia schedina scelta e monitora esiti (pallini verde/rosso/grigio).
 
 ### Segnali da tenere d’occhio
@@ -247,44 +253,20 @@ Profili e regole settlement: [GUIDA_UTENTE.md — Consiglio schedine](GUIDA_UTEN
 
 - Profitto/ROI schedine = **simulazione** storica, non registro live.  
 - Rigenerazione sovrascrive schedine del giorno per quel modello.  
-- Una pick persa invalida l’intera schedina.
+- Una pick persa invalida l’intera schedina.  
+- In generazione/rigenerazione il pool esclude partite già **annullate / rinviate / abbandonate / esito mancante / in corso** (status noto al momento dell’update).
 
 ---
 
 # LIVE
 
-## Registro modello pubblico — `/public-model-registry`
-
-### A cosa serve
-
-Registro ufficiale (ML-07) della **combinazione versione/modello** usata dal bot Telegram e dalla pubblicazione live automatica. Stati: **candidato**, **attivo**, **ritirato**. Ogni attivazione registra motivazione, metriche di approvazione e riferimenti agli artefatti (`.pkl`, metrics JSON).
-
-### Quando aprirla
-
-- Dopo walk-forward/calibrazione: registrare un **candidato** e **attivarlo** se approvato.  
-- Per **rollback** al modello precedente senza riscrivere le pubblicazioni già salvate.  
-- Per verificare quale combo è attiva oggi (sorgente unica per bot + live).
-
-### Cosa NON fa
-
-- **Non** modifica retroattivamente le righe in **Storico pubblicazioni**.  
-- **Non** sostituisce walk-forward/calibrazione (solo promuove una combo già addestrata).  
-- La dashboard **Partite** / **Consiglio schedina** continua a permettere il confronto tra tutti i modelli.
-
-### Flusso consigliato
-
-1. Addestra o verifica artefatti su disco (`v3` + `logistic_regression`, ecc.).  
-2. **Aggiungi candidato** con motivazione.  
-3. **Attiva** (ritira automaticamente l’attivo precedente).  
-4. Abilita `LIVE_PUBLICATION_ENABLED` e verifica **Dashboard beta live** dopo un global update.
-
----
+Il modello pubblico attivo (bot + pubblicazione automatica) è gestito via **API** `/api/public-model-registry` (ML-07), non da una pagina UI: in LIVE si sceglie il **mercato**, non il modello.
 
 ## Storico pubblicazioni — `/published-predictions`
 
 ### A cosa serve
 
-Registro **immutabile** di ogni tip pubblicato: probabilità, quote, edge, hash contenuto, versione e fonte. Audit trail per validazione live e conformità (“cosa abbiamo detto prima dell’inizio match?”).
+Registro **immutabile** di ogni tip pubblicato: probabilità, quote, edge, hash contenuto, versione e fonte. Audit trail per validazione live e conformità (“cosa abbiamo detto prima dell’inizio match?”). Un mercato alla volta (Match / 1° set / O/U).
 
 ### Quando aprirla
 
@@ -296,12 +278,14 @@ Registro **immutabile** di ogni tip pubblicato: probabilità, quote, edge, hash 
 
 - **Non** mostra previsioni mai pubblicate (vedi **Partite**).  
 - Dopo inizio partita la riga è **congelata**; modifiche = nuova versione, non edit in place.  
-- KPI aggregati → **Statistiche live** o **Dashboard beta live**.
+- KPI aggregati → **Statistiche live** o **Dashboard beta live**.  
+- **Non** mescola mercati: usa i tab Mercato.
 
 ### Filtri e controlli
 
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
+| Tab Mercato | Match / 1° set / Over-Under | Default **Vincitore partita**; KPI non misti |
 | Da / A | Intervallo date pubblicazione | Default ultimi 30 giorni |
 | Event key | ID tecnico partita | Da log o tabella Partite |
 | Fonte | Filtro `publication_source` | Es. `global_update` |
@@ -313,6 +297,7 @@ Registro **immutabile** di ogni tip pubblicato: probabilità, quote, edge, hash 
 | Nome | Significato | Come interpretarlo |
 |------|-------------|-------------------|
 | UTC | Timestamp pubblicazione | Orario UTC in tabella |
+| Mercato | Match / 1° set / O/U | Badge allineato al tab selezionato |
 | P | Probabilità modello al publish | Confronta tra versioni se corrette |
 | Quota / Void / Edge | Snapshot al momento publish | Edge in % punti |
 | Stake | `unit_stake` registrato | Unità base profitto/ROI live |
@@ -343,7 +328,7 @@ Registro **immutabile** di ogni tip pubblicato: probabilità, quote, edge, hash 
 
 ### A cosa serve
 
-KPI e **distribuzioni** (per modello, quota, edge, superficie, mese) calcolati **solo** dal registro pubblicazioni. È l’analisi performance “ufficiale” del tipbook live.
+KPI e **distribuzioni** (per modello, quota, edge, superficie, mese) calcolati **solo** dal registro pubblicazioni, **un mercato alla volta**. È l’analisi performance “ufficiale” del tipbook live.
 
 ### Quando aprirla
 
@@ -363,6 +348,7 @@ Regole settlement: [GUIDA_UTENTE.md — Statistiche live](GUIDA_UTENTE.md#statis
 
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
+| Tab Mercato | Match / 1° set / Over-Under | Default **Vincitore partita**; un mercato alla volta |
 | Da / A | Periodo pubblicazione | Default ~90 giorni |
 | Solo versione più recente | Esclude tip corretti/superseduti | **ON** per KPI ufficiali |
 
@@ -370,9 +356,9 @@ Regole settlement: [GUIDA_UTENTE.md — Statistiche live](GUIDA_UTENTE.md#statis
 
 | Nome | Significato | Come interpretarlo |
 |------|-------------|-------------------|
-| Cards riepilogo | Totali, chiusi, void, hit rate, ROI, drawdown | Void ≠ perdite |
+| Cards riepilogo | Totali, chiusi, void, hit rate, ROI, drawdown | Void ≠ perdite; solo mercato selezionato |
 | Cards CLV | Copertura, CLV medio, CLV mediano, % CLV positivo | Leggi il CLV insieme al campione disponibile |
-| Per modello | KPI per versione/nome modello | Confronta combo pubblica vs altre se presenti |
+| Per modello | KPI per versione/nome modello | Breakdown interno (non scegli il modello da UI) |
 | Per quota | Fascia odds del tip | ROI alto su ≥3.00 spesso campione piccolo |
 | Per edge | Fascia edge al publish | Verifica se PLAY alti edge performano |
 | Per superficie / periodo | Segmentazione | Incrocia con **ROI per segmento** live |
@@ -658,7 +644,8 @@ Snapshot **settimana ISO (lun–dom)** con KPI utenti, retention, comandi bot, t
 ### Cosa NON fa / con cosa non confonderla
 
 - **Non** sostituisce drill-down giornaliero (**Dashboard beta live**).  
-- ROI settimanale tip live ≠ ROI schedine simulate.  
+- ROI settimanale tip live headline = **Vincitore partita**; tabella `by_market` per 1° set / O/U senza mischiare.  
+- ROI tip live ≠ ROI schedine simulate.  
 - Generazione **force** sovrascrive snapshot esistente stessa settimana.
 
 ### Filtri e controlli
@@ -706,7 +693,7 @@ Snapshot **settimana ISO (lun–dom)** con KPI utenti, retention, comandi bot, t
 
 ### A cosa serve
 
-Dettaglio **ultima run** “Aggiorna tutto”: fasi eseguite, combo modello/versione, errori, warning, conteggi partite e schedine.
+Dettaglio **ultima run** “Aggiorna tutto”: mercati aggiornati (Vincitore partita, 1° set, O/U), fasi, errori, warning, conteggi partite e schedine.
 
 ### Quando aprirla
 
@@ -718,7 +705,8 @@ Dettaglio **ultima run** “Aggiorna tutto”: fasi eseguite, combo modello/vers
 
 - **Non** elenca singole partite “Da generare” (vedi **Partite**).  
 - Mostra solo **ultima** run (non storico completo in UI).  
-- Walk-forward qui = solo riepilogo; dettaglio fold in **Walk-forward**.
+- Walk-forward qui = solo riepilogo; dettaglio fold in **Walk-forward**.  
+- **Non** parla di versioni modello (`v*`): in UI vedi solo **mercati**.
 
 ### Filtri e controlli
 
@@ -732,18 +720,18 @@ Dettaglio **ultima run** “Aggiorna tutto”: fasi eseguite, combo modello/vers
 | Nome | Significato | Come interpretarlo |
 |------|-------------|-------------------|
 | Stato run | completed / completed_with_errors / failed | Parziale successo possibile |
-| Combo ok / fallite / saltate | Per coppia versione×modello | Isola quale modello non trainato |
+| Mercati ok / falliti / saltati | Per mercato aggiornato | Isola quale mercato non ha girato |
 | Partite processate / Schedine | Volume lavoro | Zero schedine → pochi PLAY o errore |
-| Fasi (tabella) | Import, predict, slips, … | Durata anomala → collo bottiglia |
-| Items combo | Dettaglio per modello | `error_message` per diagnosi |
+| Tabella mercati | Match + tip 1° set / O/U | Conteggio previsioni/tip per mercato |
+| Fasi | Import, predict, slips, mercati extra… | Durata anomala → collo bottiglia |
 | Errori / Warning | Testo libero | Clic from sidebar = stesso contenuto |
 | Walk-forward (pannello) | Solo osservabilità | Non attiva modello pubblico |
 
 ### Esempio pratico
 
-1. Run con “2 errori” → apri report → tabella items → identifica combo v3/random_forest.  
+1. Run con “2 errori” → apri report → tabella mercati → identifica quale mercato ha fallito.  
 2. Se errore import API tennis → verifica chiave e timeout.  
-3. Se solo una combo fallisce, resto calendario è comunque utilizzabile.
+3. Se solo i mercati extra falliscono, Match e schedine possono restare utilizzabili.
 
 ### Segnali da tenere d’occhio
 
@@ -764,40 +752,39 @@ Dettaglio **ultima run** “Aggiorna tutto”: fasi eseguite, combo modello/vers
 
 ### A cosa serve
 
-Accuratezza e **profitto teorico** di tutte le **previsioni salvate** (non solo tip live), aggregate per giorno e per modello/versione.
+Accuratezza e KPI per **mercato** (tab Match / 1° set / O/U). Sul Vincitore partita usa le previsioni operative; su 1° set e O/U usa i tip del registro live.
 
 ### Quando aprirla
 
-- Valutare se il modello indovina abbastanza spesso **indipendentemente** dal value bet.  
-- Confrontare v1/v2/v3 o logistic vs random forest sullo storico importato.  
-- Monitorare trend accuracy giornaliero.
+- Confrontare i tre mercati sullo storico.  
+- Monitorare trend accuracy / hit rate.  
+- Capire se un mercato performa peggio degli altri.
 
 ### Cosa NON fa / con cosa non confonderla
 
-- **Non** usa il registro pubblicazioni (**Statistiche live**).  
-- ROI qui = simulazione **1 unità su ogni pick con quota**, non criterio PLAY.  
-- Non sostituisce validazione temporale (**Walk-forward**).
+- Match = previsioni operative; 1° set / O/U = tip pubblicati (non tutte le predizioni intermedie).  
+- ROI Match = simulazione flat stake, non criterio PLAY.  
+- Non sostituisce **Statistiche live** (tipbook ufficiale) né **Walk-forward**.
 
 ### Filtri e controlli
 
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
-| Tab versione | v1 / v2 / v3 | Breakdown sotto include tutti i modelli della versione |
+| Tab mercato | Match / 1° set / O/U | Un mercato alla volta; niente `v*` |
 
 ### Metriche e colonne principali
 
 | Nome | Significato | Come interpretarlo |
 |------|-------------|-------------------|
-| Accuracy globale | Prese ÷ risolte | Ignora pending |
-| Profitto / ROI teorico | Simulazione flat stake su pick con odds | Può essere negativo con accuracy &gt;50% se quote basse |
-| Tabella per giorno | Serie temporale | Giorni senza risolte → ROI “-” |
-| Breakdown modello | Confronto logistic vs RF | Scegli combo migliore prima di live |
+| Accuracy / Hit rate | Prese ÷ risolte | Ignora pending/void |
+| Profitto / ROI | Teorico o tipbook | Dipende dal tab mercato |
+| Andamento per giorno | Solo Match | Serie temporale operativa |
 
 ### Esempio pratico
 
-1. Seleziona **v3**.  
-2. Confronta accuracy RF vs LR nel breakdown.  
-3. Se accuracy alta ma ROI teorico negativo → mercato già efficiente; serve filtro value (Partite/PLAY).
+1. Tab **Vincitore partita** → accuracy e ROI teorico giornalieri.  
+2. Tab **Vincitore 1° set** → tip live di quel mercato.  
+3. Se un mercato è vuoto → verifica pubblicazione / global update.
 
 ### Segnali da tenere d’occhio
 
@@ -816,19 +803,20 @@ Accuratezza e **profitto teorico** di tutte le **previsioni salvate** (non solo 
 
 ### A cosa serve
 
-Confronto **aggregato** tra tutte le combo versione×modello sulle schedine generate: win rate schedina, hit pick, profitto e ROI teorico nel periodo scelto.
+Hit rate delle **pick per mercato** (Match / 1° set / O/U) e esito complessivo delle schedine nel periodo scelto. Nessuna colonna versione modello in UI.
 
 ### Quando aprirla
 
-- Scegliere quale modello alimentare bot o comunicazione.  
-- Valutare se profili schedina complessivi rendono nel lungo periodo.  
-- Ranking modelli per ROI o win rate.
+- Capire quale mercato contribuisce di più alle gambe vinte/perse.  
+- Valutare se le schedine multi-mercato rendono nel lungo periodo.  
+- Ranking periodo per ROI o win rate schedina.
 
 ### Cosa NON fa / con cosa non confonderla
 
 - **Non** mostra singole schedine (→ **Consiglio schedina**).  
 - **Non** è performance live tipbook.  
-- Pending esclusi dalle percentuali in header.
+- Pending esclusi dalle percentuali in header.  
+- Le schedine possono mescolare mercati: la tabella mercati è sulle **pick**, non sulle schedine intere.
 
 ### Filtri e controlli
 
@@ -842,16 +830,15 @@ Confronto **aggregato** tra tutte le combo versione×modello sulle schedine gene
 
 | Nome | Significato | Come interpretarlo |
 |------|-------------|-------------------|
-| % schedine | Win rate intero coupon | Molto più basso dell’hit pick singolo |
-| % pick | Hit rate gambe | Confronto tra modelli |
+| Pick per mercato | Hit rate gambe per Match / 1° set / O/U | Confronta i tre mercati |
+| % schedine | Win rate intero coupon | Più basso dell’hit pick singolo |
 | Profitto / ROI | Teorico su stake simulato | Una schedina persa = −stake intero |
-| Prima / Ultima data | Copertura storica | Combo nuova → campione corto |
 
 ### Esempio pratico
 
-1. Periodo **ultimi 30 giorni**, stake 10 €.  
-2. Ordina per **ROI** decrescente.  
-3. Verifica che la combo top abbia almeno decine di schedine **perse+vinte**.  
+1. Periodo **ultimi 30 giorni**.  
+2. Guarda **Pick per mercato**: se O/U ha hit basso, rivedi i profili.  
+3. Poi guarda esito schedine complessivo (ROI).
 4. Allinea scelta con profilo rischio (win rate vs ROI).
 
 ### Segnali da tenere d’occhio
@@ -871,7 +858,7 @@ Confronto **aggregato** tra tutte le combo versione×modello sulle schedine gene
 
 ### A cosa serve
 
-Validazione **temporale multi-fold** (expanding o rolling): ad ogni fold il modello è trainato sul passato e testato sul periodo successivo, con metriche ML e flag possibile leakage. Non modifica il modello in produzione.
+Validazione **temporale multi-fold** sul mercato **Vincitore partita** (default: modello live; le nuove run non includono più le versioni archiviate). Non modifica il modello in produzione e non include 1° set / Over-Under.
 
 ### Quando aprirla
 
@@ -890,10 +877,11 @@ Validazione **temporale multi-fold** (expanding o rolling): ad ogni fold il mode
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
 | Modalità Expanding / Rolling | Finestra training crescente vs fissa | Expanding = più dati nel tempo; rolling = adattamento recente |
-| Avvia walk-forward | Nuova run background | Una run attiva alla volta; barra avanzamento + **Annulla** |
-| Selezione run (tabella) | Storico ultime 20 run | Clic riga per dettaglio |
-| Filtro versione / contender (fold) | Tabella fold filtrata per benchmark ufficiale o modello ML | Contender: `market_favorite`, `market_no_vig`, `atp_ranking`, `elo`, `logistic_regression`, `random_forest` |
-| Paginazione versione | Naviga la tabella principale per blocchi di versione | Riduce rumore su run lunghe |
+| Avvia walk-forward | Nuova run background (solo mercato live) | Una run attiva alla volta; barra avanzamento + **Annulla** |
+| Selezione run (tabella) | Storico ultime 20 run | Clic riga per dettaglio; colonna Mercati (non v*) |
+| Tab mercato | Navigazione per mercato (Match / 1° set / O/U) | Solo Match ha fold; gli altri mercati mostrano empty state |
+| Includi archivio | Mostra fold storici v1–v3 su run vecchie | Spento di default |
+| Filtro contender | Tabella fold filtrata per benchmark ufficiale o modello ML | Contender: `market_favorite`, `market_no_vig`, `atp_ranking`, `elo`, `logistic_regression`, `random_forest` |
 | Paginazione giorno test | Naviga i fold per giorno/finestra test | Evita confronto visivo tra periodi lontani |
 
 ### Metriche e colonne principali
@@ -908,13 +896,13 @@ Validazione **temporale multi-fold** (expanding o rolling): ad ogni fold il mode
 | Sample mismatch | Segnala righe escluse per confronto comune | Se `Warning`, apri tooltip e verifica `rows_common_official` |
 | Leakage flags | Segnali sospetti feature future | **Obbligatorio** investigare se &gt;0 |
 | Stato fold | skipped / error | Non contare nel benchmark |
-| Aggregato benchmark ufficiali | Media per contender e versione | Vista sintetica multi-fold |
+| Aggregato benchmark ufficiali | Media per contender e mercato | Vista sintetica multi-fold |
 | JSON versions_detail | Dettaglio tecnico completo run | Holdout **non** sovrascritto dalla run |
 
 ### Esempio pratico
 
 1. Avvia run **expanding**, attendi completamento (poll ~12s).  
-2. Filtra **v3** + **logistic_regression**.  
+2. Resta sul tab **Vincitore partita** e filtra **logistic_regression** (o ensemble).  
 3. Controlla ultimi 3 fold: accuracy stabile? leakage vuoto?  
 4. Se ok, lancia **Calibrazione** sulla stessa base temporale.
 
@@ -935,7 +923,7 @@ Validazione **temporale multi-fold** (expanding o rolling): ad ogni fold il mode
 
 ### A cosa serve
 
-Verifica se le **probabilità** del modello corrispondono alle frequenze reali (reliability curve), confrontando probabilità **grezza**, **Platt scaling** e **isotonic regression** su dati out-of-sample del walk-forward.
+Verifica se le **probabilità** del modello **Vincitore partita** (live di default) corrispondono alle frequenze reali (reliability curve), confrontando probabilità **grezza**, **Platt scaling** e **isotonic regression** su dati out-of-sample del walk-forward.
 
 ### Quando aprirla
 
@@ -953,9 +941,11 @@ Verifica se le **probabilità** del modello corrispondono alle frequenze reali (
 
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
-| Avvia calibrazione | Nuova run (background) | Barra avanzamento + Annulla |
+| Avvia calibrazione | Nuova run (background, solo live match-winner) | Barra avanzamento + Annulla |
+| Tab mercato | Navigazione Match / 1° set / O/U | Solo Match ha risultati |
+| Includi archivio | Mostra risultati storici v1–v3 | Spento di default |
 | Run (select) | Scegli storico run | — |
-| Versione / Modello | Filtra risultati | — |
+| Modello | Filtra risultati | Ensemble / LR / RF |
 | Metodo grafico | raw / platt / isotonic | Confronta curve |
 
 ### Metriche e colonne principali
@@ -972,7 +962,7 @@ Verifica se le **probabilità** del modello corrispondono alle frequenze reali (
 
 ### Esempio pratico
 
-1. Completa walk-forward v3 LR.  
+1. Completa walk-forward sul Vincitore partita (modello live).  
 2. Avvia calibrazione, apri run completata.  
 3. Se ECE grezzo 0.08 e Platt 0.04 → Platt aiuta; valuta deploy manuale.  
 4. Fascia 50–60% con gap +10pp → evita stake alti su quel bin.
@@ -1004,18 +994,19 @@ Analizza hit rate, gap calibrazione, profitto e ROI per **fasce** di probabilit�
 
 ### Cosa NON fa / con cosa non confonderla
 
-- Live = solo tip **pubblicati**, non tutte le previsioni Partite.  
-- Backtest/walk-forward ≠ performance tipbook reale (slippage, selezione PLAY).  
+- Live = solo tip **pubblicati** del **mercato selezionato** (tab Match / 1° set / O/U), non tutte le previsioni Partite.  
+- Backtest/walk-forward = solo **Vincitore partita** OOS ≠ performance tipbook reale (slippage, selezione PLAY).  
 - Non sostituisce **Calibrazione** (qui KPI betting per bin, non solo reliability).
 
 ### Filtri e controlli
 
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
+| Tab Mercato (solo Live) | Match / 1° set / Over-Under | Default Match; KPI non misti |
 | Sorgente Live / Walk-forward / Backtest | Popolazione dati | Live per ops; WF per design strategia |
 | Dimensione fascia Probabilità / Edge | Asse binning | Edge utile per policy value |
 | Tipo prob. (offline) | raw / platt / isotonic | Disabilitato su edge |
-| Versione / Modello (offline) | Combo ML | v2 default storico |
+| Versione / Modello (offline) | Combo ML match-winner | Default **v4** / voting_ensemble |
 | Da / A | Periodo | 180 giorni default |
 | N. fasce / Min. campione | Granularità vs robustezza | Min **30** consigliato |
 | Confronta raw/platt/isotonic | Tabelle parallele | Solo prob offline |
@@ -1068,15 +1059,17 @@ Performance per **segmento** (superficie, torneo, circuito, livello, turno, favo
 
 - Segmento **torneo** live può avere campione minuscolo per evento singolo.  
 - **Bookmaker** su live = aggregato quote medie, non singolo operator.  
-- Walk-forward/backtest misura potenziale storico, non slippage esecuzione.
+- Walk-forward/backtest misura potenziale storico **match-winner**, non slippage esecuzione.  
+- Live: un mercato alla volta (stessi tab di Fasce probabilità).
 
 ### Filtri e controlli
 
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
+| Tab Mercato (solo Live) | Match / 1° set / Over-Under | Default Match; KPI non misti |
 | Sorgente | Live / Walk-forward / Backtest | Come Fasce probabilità |
 | Segmento | Dimensione analisi | Inizia da **superficie** o **favorite_role** |
-| Versione / Modello (offline) | Filtra OOS | — |
+| Versione / Modello (offline) | Filtra OOS match-winner | Default **v4** / voting_ensemble |
 | Min. campione segmento | Soglia `insufficient_sample` | Default 30; alza per report executive |
 | Raggruppa per fold / periodo | Tabelle aggiuntive | Trend stagionale |
 

@@ -13,7 +13,7 @@ import uuid
 from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.src.app.schemas.published_prediction import (
@@ -23,6 +23,7 @@ from backend.src.app.schemas.published_prediction import (
     PublishedPredictionRead,
     PublishedPredictionVersionChainResponse,
 )
+from backend.src.app.ml.model_versioning import ACTIVE_MATCH_WINNER_VERSIONS
 from backend.src.app.services.match_lifecycle import classify_match_lifecycle, is_terminal_lifecycle
 from backend.src.entity.fixture import Fixture
 from backend.src.entity.next_fixture import NextFixture
@@ -152,11 +153,17 @@ def compute_content_hash(
     initial_status: str,
     content_version: int,
     publication_id: str,
+    market: str = "match_winner",
+    value_decision: str | None = None,
+    official_play: bool = False,
 ) -> str:
     payload = {
         "publication_id": publication_id,
         "content_version": content_version,
         "event_key": event_key,
+        "market": market,
+        "value_decision": value_decision,
+        "official_play": bool(official_play),
         "selection": selection,
         "model_version": model_version,
         "model_name": model_name,
@@ -210,6 +217,9 @@ def _to_read(
         content_version=row.content_version,
         previous_version_id=row.previous_version_id,
         event_key=row.event_key,
+        market=row.market,
+        value_decision=row.value_decision,
+        official_play=bool(row.official_play),
         selection=row.selection,
         model_version=row.model_version,
         model_name=row.model_name,
@@ -272,12 +282,18 @@ def publish_prediction(
         initial_status=payload.initial_status,
         content_version=content_version,
         publication_id=publication_id,
+        market=payload.market,
+        value_decision=payload.value_decision,
+        official_play=payload.official_play,
     )
     row = PublishedPrediction(
         publication_id=publication_id,
         content_version=content_version,
         previous_version_id=None,
         event_key=payload.event_key,
+        market=payload.market,
+        value_decision=payload.value_decision,
+        official_play=payload.official_play,
         selection=payload.selection.strip(),
         model_version=payload.model_version,
         model_name=payload.model_name,
@@ -334,6 +350,17 @@ def correct_published_prediction(
         )
 
     content_version = int(previous.content_version) + 1
+    market = payload.market or previous.market
+    value_decision = (
+        payload.value_decision
+        if "value_decision" in payload.model_fields_set
+        else previous.value_decision
+    )
+    official_play = (
+        payload.official_play
+        if "official_play" in payload.model_fields_set
+        else bool(previous.official_play)
+    )
     selection = (payload.selection or previous.selection).strip()
     model_version = payload.model_version or previous.model_version
     model_name = payload.model_name or previous.model_name
@@ -361,12 +388,18 @@ def correct_published_prediction(
         initial_status=payload.initial_status,
         content_version=content_version,
         publication_id=previous.publication_id,
+        market=market,
+        value_decision=value_decision,
+        official_play=official_play,
     )
     row = PublishedPrediction(
         publication_id=previous.publication_id,
         content_version=content_version,
         previous_version_id=previous.id,
         event_key=previous.event_key,
+        market=market,
+        value_decision=value_decision,
+        official_play=official_play,
         selection=selection,
         model_version=model_version,
         model_name=model_name,
@@ -452,6 +485,10 @@ def _apply_list_filters(
     model_version: str | None,
     model_name: str | None,
     publication_source: str | None,
+    market: str | None,
+    include_archived: bool,
+    official_only: bool,
+    initial_status: str | None,
 ):
     if from_date is not None:
         start = datetime.combine(from_date, time.min)
@@ -467,7 +504,72 @@ def _apply_list_filters(
         stmt = stmt.where(PublishedPrediction.model_name == model_name)
     if publication_source:
         stmt = stmt.where(PublishedPrediction.publication_source == publication_source)
+    if market:
+        stmt = stmt.where(PublishedPrediction.market == market)
+    if official_only:
+        stmt = stmt.where(
+            PublishedPrediction.official_play.is_(True),
+            PublishedPrediction.value_decision == "PLAY",
+        )
+    if initial_status:
+        stmt = stmt.where(PublishedPrediction.initial_status == initial_status)
+    if not include_archived:
+        stmt = stmt.where(
+            or_(
+                PublishedPrediction.market != "match_winner",
+                PublishedPrediction.model_version.in_(ACTIVE_MATCH_WINNER_VERSIONS),
+            )
+        )
     return stmt
+
+
+def list_latest_published_predictions_by_event_keys(
+    db: Session,
+    event_keys: list[int],
+    *,
+    model_versions: list[str] | None = None,
+) -> dict[int, list[PublishedPrediction]]:
+    """Latest extra-market ``PublishedPrediction`` rows grouped by event_key.
+
+    Used to enrich fixture listings (Partite/Consiglio schedina) with "extra
+    market" predictions (e.g. first_set_winner_v1, over_under_games_v1) that
+    live only in this ledger, never in ``MatchPrediction``. Pass
+    ``model_versions`` to restrict to specific markets (avoids re-fetching the
+    official match-winner row already shown via ``MatchPrediction``).
+
+    The ledger can contain multiple independent ``publication_id`` values for
+    the same event/model version (for example different sources, or a changed
+    selection). First retain the latest content version of every immutable
+    publication, then collapse those competing publications to the most recent
+    row for each ``(event_key, model_version)`` market identity.
+    """
+    if not event_keys:
+        return {}
+    stmt = select(PublishedPrediction).where(PublishedPrediction.event_key.in_(event_keys))
+    if model_versions:
+        stmt = stmt.where(PublishedPrediction.model_version.in_(model_versions))
+    rows = list(db.scalars(stmt).all())
+    if not rows:
+        return {}
+
+    latest_by_publication: dict[str, PublishedPrediction] = {}
+    for row in rows:
+        current = latest_by_publication.get(row.publication_id)
+        if current is None or row.content_version > current.content_version:
+            latest_by_publication[row.publication_id] = row
+
+    latest_by_event_market: dict[tuple[int, str], PublishedPrediction] = {}
+    for row in latest_by_publication.values():
+        key = (row.event_key, row.model_version)
+        current = latest_by_event_market.get(key)
+        row_order = (row.published_at, int(row.id or 0))
+        if current is None or row_order > (current.published_at, int(current.id or 0)):
+            latest_by_event_market[key] = row
+
+    grouped: dict[int, list[PublishedPrediction]] = {}
+    for row in latest_by_event_market.values():
+        grouped.setdefault(row.event_key, []).append(row)
+    return grouped
 
 
 def list_published_predictions(
@@ -480,6 +582,10 @@ def list_published_predictions(
     model_name: str | None = None,
     publication_source: str | None = None,
     latest_only: bool = True,
+    market: str | None = None,
+    include_archived: bool = True,
+    official_only: bool = False,
+    initial_status: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> PublishedPredictionListResponse:
@@ -490,6 +596,10 @@ def list_published_predictions(
         "model_version": model_version,
         "model_name": model_name,
         "publication_source": publication_source,
+        "market": market,
+        "include_archived": include_archived,
+        "official_only": official_only,
+        "initial_status": initial_status,
     }
     stmt = _apply_list_filters(select(PublishedPrediction), **filter_kwargs)
     count_stmt = _apply_list_filters(

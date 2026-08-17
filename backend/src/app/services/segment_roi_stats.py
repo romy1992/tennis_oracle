@@ -33,9 +33,21 @@ from backend.src.app.services.walk_forward import config_from_settings
 from backend.src.entity.fixture import Fixture
 from backend.src.entity.tournaments import Tournament
 
+LIVE_MARKETS = frozenset({"match_winner", "first_set_winner", "over_under_games"})
+DEFAULT_LIVE_MARKET = "match_winner"
+
 
 def _bucket_to_read(item) -> SegmentRoiBucketRead:
     return SegmentRoiBucketRead(**item.to_dict())
+
+
+def _resolve_live_market(market: str | None) -> str:
+    resolved = (market or DEFAULT_LIVE_MARKET).strip()
+    if resolved not in LIVE_MARKETS:
+        raise ValueError(
+            f"market non valido: {market!r}. Valori ammessi: {', '.join(sorted(LIVE_MARKETS))}."
+        )
+    return resolved
 
 
 def _load_fixture_segment_metadata(
@@ -119,6 +131,8 @@ def _records_from_live_tips(
     surface: str | None,
     odds_band: str | None,
     latest_only: bool,
+    market: str,
+    include_archived: bool,
 ) -> list[SegmentAnalysisRecord]:
     settled = settle_published_tips(
         db,
@@ -133,6 +147,8 @@ def _records_from_live_tips(
         surface=surface,
         odds_band=odds_band,
         latest_only=latest_only,
+        market=market,
+        include_archived=include_archived,
     )
     event_keys = [item.tip.event_key for item in settled]
     fixture_meta = _load_fixture_segment_metadata(db, event_keys)
@@ -187,6 +203,7 @@ def _result_to_read(
     *,
     model_version: str | None,
     model_name: str | None,
+    market: str | None,
     from_date: date | None,
     to_date: date | None,
     event_date_from: date | None,
@@ -198,6 +215,7 @@ def _result_to_read(
         min_segment_samples=result.min_segment_samples,
         model_version=model_version,
         model_name=model_name,
+        market=market,
         from_date=from_date,
         to_date=to_date,
         event_date_from=event_date_from,
@@ -257,6 +275,8 @@ def compute_segment_roi_analysis(
     surface: str | None = None,
     odds_band: str | None = None,
     latest_only: bool = True,
+    market: str | None = None,
+    include_archived: bool = False,
     min_segment_samples: int | None = None,
     group_by_fold: bool = False,
     group_by_period: bool = False,
@@ -266,8 +286,10 @@ def compute_segment_roi_analysis(
     resolved_min = min_segment_samples or settings.calibration_min_bin_samples
     date_from = event_date_from or from_date
     date_to = event_date_to or to_date
+    resolved_market: str | None = None
 
     if source == "live":
+        resolved_market = _resolve_live_market(market)
         records = _records_from_live_tips(
             db,
             from_date=from_date,
@@ -281,6 +303,8 @@ def compute_segment_roi_analysis(
             surface=surface,
             odds_band=odds_band,
             latest_only=latest_only,
+            market=resolved_market,
+            include_archived=include_archived,
         )
         effective_group_by_fold = False
     else:
@@ -317,13 +341,15 @@ def compute_segment_roi_analysis(
         )
     elif source == "live":
         result.notes.append(
-            "Live: ledger PublishedPrediction con settlement a lettura (non backtest ML)."
+            f"Live · mercato {resolved_market}: ledger PublishedPrediction "
+            "(settlement a lettura; un mercato alla volta)."
         )
 
     return _result_to_read(
         result,
         model_version=model_version,
         model_name=model_name,
+        market=resolved_market,
         from_date=from_date,
         to_date=to_date,
         event_date_from=event_date_from,

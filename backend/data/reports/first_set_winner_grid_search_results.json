@@ -1,0 +1,677 @@
+{
+  "generated_at": "2026-08-15T07:28:20.008543+00:00",
+  "phase": "grid_search",
+  "market": "first_set_winner",
+  "dataset_path": "/app/backend/data/processed/tennis_winner_dataset_with_odds_v3.csv",
+  "rows_total": 94153,
+  "date_min": "2021-10-07",
+  "date_max": "2026-06-21",
+  "split": {
+    "strategy": "temporal_dev_test",
+    "dev_size": 0.8,
+    "dev_rows": 75322,
+    "test_rows": 18831,
+    "dev_date_min": "2021-10-07",
+    "dev_date_max": "2025-12-02",
+    "test_date_min": "2025-12-02",
+    "test_date_max": "2026-06-21",
+    "inner_cv": "TimeSeriesSplit(n_splits=3)"
+  },
+  "features_used": [
+    "surface",
+    "rank_diff",
+    "rank_points_diff",
+    "elo_diff",
+    "surface_elo_diff",
+    "player_1_last_5_win_rate",
+    "player_2_last_5_win_rate",
+    "player_1_last_10_win_rate",
+    "player_2_last_10_win_rate",
+    "player_1_surface_last_10_win_rate",
+    "player_2_surface_last_10_win_rate",
+    "player_1_matches_last_14_days",
+    "player_2_matches_last_14_days",
+    "player_1_days_since_last_match",
+    "player_2_days_since_last_match",
+    "h2h_player_1_wins",
+    "h2h_player_2_wins",
+    "h2h_surface_player_1_wins",
+    "h2h_surface_player_2_wins",
+    "player_1_age",
+    "player_2_age",
+    "age_diff",
+    "player_1_height",
+    "player_2_height",
+    "height_diff",
+    "player_1_hand",
+    "player_2_hand",
+    "atp_surface",
+    "atp_tourney_level",
+    "atp_round",
+    "atp_best_of",
+    "atp_match_found",
+    "avg_player_1_odds",
+    "avg_player_2_odds",
+    "avg_market_prob_player_1",
+    "avg_market_prob_player_2",
+    "avg_bookmaker_margin",
+    "odds_bookmaker_count",
+    "avg_first_set_player_1_odds",
+    "avg_first_set_player_2_odds",
+    "avg_first_set_market_prob_player_1",
+    "avg_first_set_market_prob_player_2",
+    "avg_first_set_bookmaker_margin",
+    "first_set_odds_bookmaker_count"
+  ],
+  "features_count": 44,
+  "quick_mode": false,
+  "algorithms": {
+    "logistic_regression": {
+      "best_params": {
+        "model__C": 0.01,
+        "model__class_weight": "balanced",
+        "model__l1_ratio": 0.0,
+        "model__max_iter": 3000,
+        "model__solver": "lbfgs"
+      },
+      "cv_best_roc_auc": 0.743252,
+      "cv_best_neg_log_loss": -0.59374,
+      "cv_top_combinations": [
+        {
+          "params": {
+            "model__C": 0.01,
+            "model__class_weight": "balanced",
+            "model__l1_ratio": 0.0,
+            "model__max_iter": 3000,
+            "model__solver": "lbfgs"
+          },
+          "mean_roc_auc": 0.743252,
+          "std_roc_auc": 0.012721,
+          "mean_neg_log_loss": -0.59374
+        },
+        {
+          "params": {
+            "model__C": 0.1,
+            "model__class_weight": null,
+            "model__l1_ratio": 0.5,
+            "model__max_iter": 1500,
+            "model__solver": "saga",
+            "model__tol": 0.001
+          },
+          "mean_roc_auc": 0.743251,
+          "std_roc_auc": 0.01276,
+          "mean_neg_log_loss": -0.593711
+        },
+        {
+          "params": {
+            "model__C": 0.01,
+            "model__class_weight": null,
+            "model__l1_ratio": 0.0,
+            "model__max_iter": 3000,
+            "model__solver": "lbfgs"
+          },
+          "mean_roc_auc": 0.743251,
+          "std_roc_auc": 0.012719,
+          "mean_neg_log_loss": -0.593695
+        },
+        {
+          "params": {
+            "model__C": 0.1,
+            "model__class_weight": null,
+            "model__l1_ratio": 0.0,
+            "model__max_iter": 3000,
+            "model__solver": "lbfgs"
+          },
+          "mean_roc_auc": 0.742897,
+          "std_roc_auc": 0.012975,
+          "mean_neg_log_loss": -0.593986
+        },
+        {
+          "params": {
+            "model__C": 0.1,
+            "model__class_weight": "balanced",
+            "model__l1_ratio": 0.0,
+            "model__max_iter": 3000,
+            "model__solver": "lbfgs"
+          },
+          "mean_roc_auc": 0.742878,
+          "std_roc_auc": 0.012973,
+          "mean_neg_log_loss": -0.594112
+        }
+      ],
+      "test_metrics": {
+        "accuracy": 0.675323,
+        "precision": 0.681904,
+        "recall": 0.679629,
+        "f1": 0.680764,
+        "roc_auc": 0.742865,
+        "log_loss": 0.594371,
+        "brier_score": 0.204952,
+        "confusion_matrix": [
+          [
+            6198,
+            3041
+          ],
+          [
+            3073,
+            6519
+          ]
+        ],
+        "class_distribution": {
+          "1": 9592,
+          "0": 9239
+        },
+        "eval_rows": 18831,
+        "eval_rows_total": 18831,
+        "value_bet": {
+          "accuracy": 0.675323,
+          "log_loss": 0.594371,
+          "brier_score": 0.204952,
+          "roi": -0.038051,
+          "yield": -0.038051,
+          "max_drawdown": 729.146619,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 18831,
+          "total_profit": -716.541873,
+          "avg_odds": 1.464627
+        }
+      },
+      "fit_seconds": 188.54,
+      "model_path": "/app/backend/data/reports/models_staging/first_set_winner_ensemble/search_logistic_regression.pkl"
+    },
+    "random_forest": {
+      "best_params": {
+        "model__max_depth": 10,
+        "model__max_features": "log2",
+        "model__min_samples_leaf": 10,
+        "model__n_estimators": 200
+      },
+      "cv_best_roc_auc": 0.743908,
+      "cv_best_neg_log_loss": -0.593325,
+      "cv_top_combinations": [
+        {
+          "params": {
+            "model__max_depth": 10,
+            "model__max_features": "log2",
+            "model__min_samples_leaf": 10,
+            "model__n_estimators": 200
+          },
+          "mean_roc_auc": 0.743908,
+          "std_roc_auc": 0.012841,
+          "mean_neg_log_loss": -0.593325
+        },
+        {
+          "params": {
+            "model__max_depth": 10,
+            "model__max_features": "log2",
+            "model__min_samples_leaf": 20,
+            "model__n_estimators": 100
+          },
+          "mean_roc_auc": 0.743761,
+          "std_roc_auc": 0.012927,
+          "mean_neg_log_loss": -0.593408
+        },
+        {
+          "params": {
+            "model__max_depth": 10,
+            "model__max_features": "log2",
+            "model__min_samples_leaf": 20,
+            "model__n_estimators": 200
+          },
+          "mean_roc_auc": 0.743733,
+          "std_roc_auc": 0.012889,
+          "mean_neg_log_loss": -0.59341
+        },
+        {
+          "params": {
+            "model__max_depth": 10,
+            "model__max_features": "log2",
+            "model__min_samples_leaf": 10,
+            "model__n_estimators": 100
+          },
+          "mean_roc_auc": 0.743683,
+          "std_roc_auc": 0.012971,
+          "mean_neg_log_loss": -0.593427
+        },
+        {
+          "params": {
+            "model__max_depth": 10,
+            "model__max_features": "log2",
+            "model__min_samples_leaf": 50,
+            "model__n_estimators": 200
+          },
+          "mean_roc_auc": 0.743667,
+          "std_roc_auc": 0.012817,
+          "mean_neg_log_loss": -0.593414
+        }
+      ],
+      "test_metrics": {
+        "accuracy": 0.676332,
+        "precision": 0.675359,
+        "recall": 0.702043,
+        "f1": 0.688442,
+        "roc_auc": 0.743034,
+        "log_loss": 0.594605,
+        "brier_score": 0.20497,
+        "confusion_matrix": [
+          [
+            6002,
+            3237
+          ],
+          [
+            2858,
+            6734
+          ]
+        ],
+        "class_distribution": {
+          "1": 9592,
+          "0": 9239
+        },
+        "eval_rows": 18831,
+        "eval_rows_total": 18831,
+        "value_bet": {
+          "accuracy": 0.676332,
+          "log_loss": 0.594605,
+          "brier_score": 0.20497,
+          "roi": -0.0372,
+          "yield": -0.0372,
+          "max_drawdown": 711.822359,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 18831,
+          "total_profit": -700.520791,
+          "avg_odds": 1.462592
+        }
+      },
+      "fit_seconds": 152.96,
+      "model_path": "/app/backend/data/reports/models_staging/first_set_winner_ensemble/search_random_forest.pkl"
+    },
+    "hist_gradient_boosting": {
+      "best_params": {
+        "model__l2_regularization": 0.0,
+        "model__learning_rate": 0.05,
+        "model__max_depth": null,
+        "model__max_iter": 100
+      },
+      "cv_best_roc_auc": 0.743031,
+      "cv_best_neg_log_loss": -0.593928,
+      "cv_top_combinations": [
+        {
+          "params": {
+            "model__l2_regularization": 0.0,
+            "model__learning_rate": 0.05,
+            "model__max_depth": null,
+            "model__max_iter": 100
+          },
+          "mean_roc_auc": 0.743031,
+          "std_roc_auc": 0.012975,
+          "mean_neg_log_loss": -0.593928
+        },
+        {
+          "params": {
+            "model__l2_regularization": 0.0,
+            "model__learning_rate": 0.05,
+            "model__max_depth": null,
+            "model__max_iter": 300
+          },
+          "mean_roc_auc": 0.743031,
+          "std_roc_auc": 0.012975,
+          "mean_neg_log_loss": -0.593928
+        },
+        {
+          "params": {
+            "model__l2_regularization": 1.0,
+            "model__learning_rate": 0.05,
+            "model__max_depth": null,
+            "model__max_iter": 100
+          },
+          "mean_roc_auc": 0.742998,
+          "std_roc_auc": 0.013184,
+          "mean_neg_log_loss": -0.593998
+        },
+        {
+          "params": {
+            "model__l2_regularization": 1.0,
+            "model__learning_rate": 0.05,
+            "model__max_depth": null,
+            "model__max_iter": 300
+          },
+          "mean_roc_auc": 0.742998,
+          "std_roc_auc": 0.013184,
+          "mean_neg_log_loss": -0.593998
+        },
+        {
+          "params": {
+            "model__l2_regularization": 1.0,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 10,
+            "model__max_iter": 100
+          },
+          "mean_roc_auc": 0.742786,
+          "std_roc_auc": 0.013255,
+          "mean_neg_log_loss": -0.594109
+        }
+      ],
+      "test_metrics": {
+        "accuracy": 0.675694,
+        "precision": 0.673781,
+        "recall": 0.704337,
+        "f1": 0.68872,
+        "roc_auc": 0.742884,
+        "log_loss": 0.594532,
+        "brier_score": 0.204961,
+        "confusion_matrix": [
+          [
+            5968,
+            3271
+          ],
+          [
+            2836,
+            6756
+          ]
+        ],
+        "class_distribution": {
+          "1": 9592,
+          "0": 9239
+        },
+        "eval_rows": 18831,
+        "eval_rows_total": 18831,
+        "value_bet": {
+          "accuracy": 0.675694,
+          "log_loss": 0.594532,
+          "brier_score": 0.204961,
+          "roi": -0.037436,
+          "yield": -0.037436,
+          "max_drawdown": 719.041633,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 18831,
+          "total_profit": -704.964422,
+          "avg_odds": 1.464542
+        }
+      },
+      "fit_seconds": 66.78,
+      "model_path": "/app/backend/data/reports/models_staging/first_set_winner_ensemble/search_hist_gradient_boosting.pkl"
+    },
+    "xgboost": {
+      "best_params": {
+        "model__colsample_bytree": 0.8,
+        "model__learning_rate": 0.05,
+        "model__max_depth": 3,
+        "model__n_estimators": 100,
+        "model__subsample": 1.0
+      },
+      "cv_best_roc_auc": 0.744333,
+      "cv_best_neg_log_loss": -0.593158,
+      "cv_top_combinations": [
+        {
+          "params": {
+            "model__colsample_bytree": 0.8,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 3,
+            "model__n_estimators": 100,
+            "model__subsample": 1.0
+          },
+          "mean_roc_auc": 0.744333,
+          "std_roc_auc": 0.012507,
+          "mean_neg_log_loss": -0.593158
+        },
+        {
+          "params": {
+            "model__colsample_bytree": 0.8,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 3,
+            "model__n_estimators": 100,
+            "model__subsample": 0.8
+          },
+          "mean_roc_auc": 0.744296,
+          "std_roc_auc": 0.012573,
+          "mean_neg_log_loss": -0.593109
+        },
+        {
+          "params": {
+            "model__colsample_bytree": 0.8,
+            "model__learning_rate": 0.1,
+            "model__max_depth": 3,
+            "model__n_estimators": 100,
+            "model__subsample": 1.0
+          },
+          "mean_roc_auc": 0.743947,
+          "std_roc_auc": 0.012771,
+          "mean_neg_log_loss": -0.593207
+        },
+        {
+          "params": {
+            "model__colsample_bytree": 0.8,
+            "model__learning_rate": 0.1,
+            "model__max_depth": 3,
+            "model__n_estimators": 100,
+            "model__subsample": 0.8
+          },
+          "mean_roc_auc": 0.743935,
+          "std_roc_auc": 0.012831,
+          "mean_neg_log_loss": -0.593143
+        },
+        {
+          "params": {
+            "model__colsample_bytree": 0.8,
+            "model__learning_rate": 0.05,
+            "model__max_depth": 3,
+            "model__n_estimators": 300,
+            "model__subsample": 1.0
+          },
+          "mean_roc_auc": 0.743696,
+          "std_roc_auc": 0.012901,
+          "mean_neg_log_loss": -0.593511
+        }
+      ],
+      "test_metrics": {
+        "accuracy": 0.674685,
+        "precision": 0.672851,
+        "recall": 0.703294,
+        "f1": 0.687736,
+        "roc_auc": 0.742883,
+        "log_loss": 0.594433,
+        "brier_score": 0.204977,
+        "confusion_matrix": [
+          [
+            5959,
+            3280
+          ],
+          [
+            2846,
+            6746
+          ]
+        ],
+        "class_distribution": {
+          "1": 9592,
+          "0": 9239
+        },
+        "eval_rows": 18831,
+        "eval_rows_total": 18831,
+        "value_bet": {
+          "accuracy": 0.674685,
+          "log_loss": 0.594433,
+          "brier_score": 0.204977,
+          "roi": -0.040132,
+          "yield": -0.040132,
+          "max_drawdown": 766.677585,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 18831,
+          "total_profit": -755.718018,
+          "avg_odds": 1.462835
+        }
+      },
+      "fit_seconds": 112.32,
+      "model_path": "/app/backend/data/reports/models_staging/first_set_winner_ensemble/search_xgboost.pkl"
+    },
+    "lightgbm": {
+      "best_params": {
+        "model__learning_rate": 0.05,
+        "model__max_depth": -1,
+        "model__n_estimators": 100,
+        "model__num_leaves": 31
+      },
+      "cv_best_roc_auc": 0.743075,
+      "cv_best_neg_log_loss": -0.593939,
+      "cv_top_combinations": [
+        {
+          "params": {
+            "model__learning_rate": 0.05,
+            "model__max_depth": -1,
+            "model__n_estimators": 100,
+            "model__num_leaves": 31
+          },
+          "mean_roc_auc": 0.743075,
+          "std_roc_auc": 0.013376,
+          "mean_neg_log_loss": -0.593939
+        },
+        {
+          "params": {
+            "model__learning_rate": 0.05,
+            "model__max_depth": 10,
+            "model__n_estimators": 100,
+            "model__num_leaves": 31
+          },
+          "mean_roc_auc": 0.742972,
+          "std_roc_auc": 0.013436,
+          "mean_neg_log_loss": -0.594072
+        },
+        {
+          "params": {
+            "model__learning_rate": 0.05,
+            "model__max_depth": -1,
+            "model__n_estimators": 100,
+            "model__num_leaves": 63
+          },
+          "mean_roc_auc": 0.740996,
+          "std_roc_auc": 0.014712,
+          "mean_neg_log_loss": -0.595602
+        },
+        {
+          "params": {
+            "model__learning_rate": 0.05,
+            "model__max_depth": 10,
+            "model__n_estimators": 100,
+            "model__num_leaves": 63
+          },
+          "mean_roc_auc": 0.740895,
+          "std_roc_auc": 0.01433,
+          "mean_neg_log_loss": -0.595897
+        },
+        {
+          "params": {
+            "model__learning_rate": 0.1,
+            "model__max_depth": 10,
+            "model__n_estimators": 100,
+            "model__num_leaves": 31
+          },
+          "mean_roc_auc": 0.740694,
+          "std_roc_auc": 0.014758,
+          "mean_neg_log_loss": -0.595995
+        }
+      ],
+      "test_metrics": {
+        "accuracy": 0.67665,
+        "precision": 0.674504,
+        "recall": 0.705796,
+        "f1": 0.689796,
+        "roc_auc": 0.742789,
+        "log_loss": 0.594678,
+        "brier_score": 0.205015,
+        "confusion_matrix": [
+          [
+            5972,
+            3267
+          ],
+          [
+            2822,
+            6770
+          ]
+        ],
+        "class_distribution": {
+          "1": 9592,
+          "0": 9239
+        },
+        "eval_rows": 18831,
+        "eval_rows_total": 18831,
+        "value_bet": {
+          "accuracy": 0.67665,
+          "log_loss": 0.594678,
+          "brier_score": 0.205015,
+          "roi": -0.035234,
+          "yield": -0.035234,
+          "max_drawdown": 676.122532,
+          "clv_pct": null,
+          "clv_available_count": 0,
+          "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+          "bets_settled": 18831,
+          "total_profit": -663.498988,
+          "avg_odds": 1.465373
+        }
+      },
+      "fit_seconds": 105.64,
+      "model_path": "/app/backend/data/reports/models_staging/first_set_winner_ensemble/search_lightgbm.pkl"
+    }
+  },
+  "top_algorithms_for_ensemble": [
+    "random_forest",
+    "hist_gradient_boosting",
+    "xgboost"
+  ],
+  "winner": "random_forest",
+  "winner_test_roc_auc": 0.743034,
+  "production_baseline": {
+    "model_name": "logistic_regression",
+    "source": "walk_forward._estimators (untuned production defaults)",
+    "test_metrics": {
+      "accuracy": 0.674579,
+      "precision": 0.67502,
+      "recall": 0.696414,
+      "f1": 0.68555,
+      "roc_auc": 0.742867,
+      "log_loss": 0.594294,
+      "brier_score": 0.204911,
+      "confusion_matrix": [
+        [
+          6023,
+          3216
+        ],
+        [
+          2912,
+          6680
+        ]
+      ],
+      "class_distribution": {
+        "1": 9592,
+        "0": 9239
+      },
+      "eval_rows": 18831,
+      "eval_rows_total": 18831,
+      "value_bet": {
+        "accuracy": 0.674579,
+        "log_loss": 0.594294,
+        "brier_score": 0.204911,
+        "roi": -0.039761,
+        "yield": -0.039761,
+        "max_drawdown": 759.430183,
+        "clv_pct": null,
+        "clv_available_count": 0,
+        "clv_unavailable_reason": "closing_odds_non_disponibili_nel_dataset_oos",
+        "bets_settled": 18831,
+        "total_profit": -748.731151,
+        "avg_odds": 1.46398
+      }
+    }
+  },
+  "notes": [
+    "Esplorativo: NON promuove modelli in produzione.",
+    "Top-3 selezionati per stacking/voting: ['random_forest', 'hist_gradient_boosting', 'xgboost']."
+  ]
+}

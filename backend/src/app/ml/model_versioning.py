@@ -10,6 +10,20 @@ ModelVersion = Literal["v1", "v2", "v3", "v4"]
 # odds available (v3 and v4 share the same odds-aware feature set).
 ODDS_REQUIRED_VERSIONS: frozenset[str] = frozenset({"v3", "v4"})
 
+# Match-winner versions that are still "live": triggered by the global-update
+# orchestrator (cron/UI "Aggiorna tutto") and offered in the FE version pickers.
+# v1-v3 are ARCHIVED, not deleted: code, training scripts, datasets and .pkl
+# artifacts all stay on disk/in the repo for historical backtest/comparison,
+# but they no longer run automatically and no longer appear as selectable
+# options for new predictions. To bring one back temporarily (e.g. a
+# side-by-side comparison), add it back here — no other code change needed,
+# since `global_update.list_enabled_combinations` and the FE catalog
+# (`GET /global-update/results` -> `catalog.versions`) both derive from this.
+DEFAULT_ACTIVE_MATCH_WINNER_VERSION: ModelVersion = "v4"
+ACTIVE_MATCH_WINNER_VERSIONS: frozenset[ModelVersion] = frozenset(
+    {DEFAULT_ACTIVE_MATCH_WINNER_VERSION}
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PROCESSED_DATA_DIR = REPO_ROOT / "backend" / "data" / "processed"
 MODELS_DIR = REPO_ROOT / "backend" / "data" / "models"

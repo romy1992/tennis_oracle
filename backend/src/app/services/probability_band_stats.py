@@ -29,9 +29,21 @@ from backend.src.app.services.published_live_stats import (
 )
 from backend.src.app.services.walk_forward import config_from_settings
 
+LIVE_MARKETS = frozenset({"match_winner", "first_set_winner", "over_under_games"})
+DEFAULT_LIVE_MARKET = "match_winner"
+
 
 def _bucket_to_read(item) -> ProbabilityBandBucketRead:
     return ProbabilityBandBucketRead(**item.to_dict())
+
+
+def _resolve_live_market(market: str | None) -> str:
+    resolved = (market or DEFAULT_LIVE_MARKET).strip()
+    if resolved not in LIVE_MARKETS:
+        raise ValueError(
+            f"market non valido: {market!r}. Valori ammessi: {', '.join(sorted(LIVE_MARKETS))}."
+        )
+    return resolved
 
 
 def _records_from_live_tips(
@@ -48,6 +60,8 @@ def _records_from_live_tips(
     surface: str | None,
     odds_band: str | None,
     latest_only: bool,
+    market: str,
+    include_archived: bool,
 ) -> list[BandAnalysisRecord]:
     settled = settle_published_tips(
         db,
@@ -62,6 +76,8 @@ def _records_from_live_tips(
         surface=surface,
         odds_band=odds_band,
         latest_only=latest_only,
+        market=market,
+        include_archived=include_archived,
     )
     records: list[BandAnalysisRecord] = []
     for item in settled:
@@ -98,6 +114,7 @@ def _result_to_read(
     *,
     model_version: str | None,
     model_name: str | None,
+    market: str | None,
     from_date: date | None,
     to_date: date | None,
     event_date_from: date | None,
@@ -111,6 +128,7 @@ def _result_to_read(
         min_bin_samples=result.min_bin_samples,
         model_version=model_version,
         model_name=model_name,
+        market=market,
         from_date=from_date,
         to_date=to_date,
         event_date_from=event_date_from,
@@ -175,6 +193,8 @@ def compute_probability_band_analysis(
     surface: str | None = None,
     odds_band: str | None = None,
     latest_only: bool = True,
+    market: str | None = None,
+    include_archived: bool = False,
     n_bins: int | None = None,
     min_bin_samples: int | None = None,
     include_comparison: bool = False,
@@ -187,10 +207,12 @@ def compute_probability_band_analysis(
     resolved_min = min_bin_samples or settings.calibration_min_bin_samples
     date_from = event_date_from or from_date
     date_to = event_date_to or to_date
+    resolved_market: str | None = None
 
     if source == "live":
         if probability_kind != "raw":
             probability_kind = "raw"
+        resolved_market = _resolve_live_market(market)
         records = _records_from_live_tips(
             db,
             from_date=from_date,
@@ -204,6 +226,8 @@ def compute_probability_band_analysis(
             surface=surface,
             odds_band=odds_band,
             latest_only=latest_only,
+            market=resolved_market,
+            include_archived=include_archived,
         )
         comparison_records = None
         effective_group_by_fold = False
@@ -258,13 +282,15 @@ def compute_probability_band_analysis(
         )
     elif source == "live":
         result.notes.append(
-            "Live: ledger PublishedPrediction con settlement a lettura (non backtest ML)."
+            f"Live · mercato {resolved_market}: ledger PublishedPrediction "
+            "(settlement a lettura; un mercato alla volta)."
         )
 
     return _result_to_read(
         result,
         model_version=model_version,
         model_name=model_name,
+        market=resolved_market,
         from_date=from_date,
         to_date=to_date,
         event_date_from=event_date_from,

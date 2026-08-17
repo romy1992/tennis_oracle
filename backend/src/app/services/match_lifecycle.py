@@ -75,6 +75,18 @@ _TERMINAL_LIFECYCLES: frozenset[MatchLifecycleStatus] = frozenset(
     }
 )
 
+# Status that must not enter newly generated / regenerated betting slips
+# (or live PLAY publication that reuses the same candidate pool) once known.
+_SLIP_POOL_EXCLUDED_LIFECYCLES: frozenset[MatchLifecycleStatus] = frozenset(
+    {
+        "cancelled",
+        "postponed",
+        "abandoned",
+        "unknown",
+        "started",
+    }
+)
+
 _CANCELLED_TOKENS = (
     "cancel",
     "deleted",
@@ -99,6 +111,11 @@ _RETIRED_TOKENS = ("retir", "default", "disqual")
 _FINISHED_TOKENS = ("finish", "complet", "ended", "closed", "ft", "full time")
 _LIVE_TOKENS = ("live", "in progress", "in_progress", "started", "playing")
 _LIVE_SET_RE = re.compile(r"\bset\s*[1-5]\b", re.IGNORECASE)
+# "started" in _LIVE_TOKENS is a bare substring match, so the standard
+# API-Tennis status for every not-yet-played fixture ("Not Started") would
+# otherwise be misclassified as the live "started" lifecycle. Must be
+# checked before the live-token check below.
+_NOT_STARTED_RE = re.compile(r"\bnot\s+started\b", re.IGNORECASE)
 
 _UNMAPPED_LOGGED: set[str] = set()
 
@@ -168,14 +185,20 @@ def settlement_policy(
     *,
     actual_winner: str | None = None,
     predicted_winner: str | None = None,
+    has_result: bool | None = None,
 ) -> LifecycleSettlementPolicy:
-    """Explicit impact matrix for a lifecycle (+ optional winner context)."""
+    """Explicit impact matrix for a lifecycle (+ optional winner context).
+
+    ``has_result`` lets callers settle markets whose "winner" is not a player
+    name (e.g. Over/Under games: "Over"/"Under") by overriding the default
+    ``actual_winner in COMPLETED_WINNERS`` check. ``None`` (default) preserves
+    the original match-winner behaviour.
+    """
     status = normalize_lifecycle_status(lifecycle)
-    has_winner = actual_winner in COMPLETED_WINNERS
+    has_winner = has_result if has_result is not None else actual_winner in COMPLETED_WINNERS
 
     if has_winner:
         won = predicted_winner is not None and predicted_winner == actual_winner
-        lost = predicted_winner is not None and predicted_winner != actual_winner
         if predicted_winner is None:
             outcome: BetOutcome = "pending"
         elif won:
@@ -246,17 +269,21 @@ def settle_simulated_bet(
     actual_winner: str | None,
     market_odds: float | None = None,
     stake_units: float = 1.0,
+    has_result: bool | None = None,
 ) -> SimulatedBetSettlement:
     """Idempotent settlement for one simulated single or slip pick.
 
     Repeated calls with the same inputs always yield the same result.
-    Cancelled / non-played matches never count as losses.
+    Cancelled / non-played matches never count as losses. ``has_result``
+    forwards to :func:`settlement_policy` for non-player-name markets
+    (Over/Under, etc.).
     """
     status = normalize_lifecycle_status(lifecycle)
     policy = settlement_policy(
         status,
         actual_winner=actual_winner,
         predicted_winner=predicted_winner,
+        has_result=has_result,
     )
     outcome = policy.slip_pick_outcome
     is_correct: bool | None
@@ -334,6 +361,25 @@ def _is_live_flag(event_live: str | None) -> bool:
     return str(event_live).strip().lower() in {"1", "true", "yes", "y", "live"}
 
 
+def is_eligible_for_slip_pool(
+    lifecycle: MatchLifecycleStatus,
+    *,
+    include_completed: bool = False,
+) -> bool:
+    """Whether a fixture may enter newly built slip candidate pools.
+
+    Excludes cancelled / postponed / abandoned / unknown (missing or error
+    outcome) and already-started matches. Live generation (``include_completed=
+    False``) additionally requires ``upcoming`` only. Historical replay may
+    keep completed / walkover / retired rows.
+    """
+    if lifecycle in _SLIP_POOL_EXCLUDED_LIFECYCLES:
+        return False
+    if include_completed:
+        return True
+    return lifecycle == "upcoming"
+
+
 def classify_match_lifecycle(
     *,
     event_status: str | None = None,
@@ -377,8 +423,15 @@ def classify_match_lifecycle(
         # Finished-like signal but no bettable winner → problem / void candidate.
         return "unknown"
 
-    if _is_live_flag(event_live) or _contains_any(status, _LIVE_TOKENS) or _LIVE_SET_RE.search(status):
+    not_started = bool(_NOT_STARTED_RE.search(status))
+    if (
+        _is_live_flag(event_live)
+        or (_contains_any(status, _LIVE_TOKENS) and not not_started)
+        or _LIVE_SET_RE.search(status)
+    ):
         return "started"
+    if not_started:
+        return "upcoming"
 
     if status and status not in {"", "-", "null", "none"}:
         if status not in _UNMAPPED_LOGGED:

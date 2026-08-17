@@ -1,11 +1,13 @@
-"""CLI: run temporal walk-forward validation for all model versions.
+"""CLI: run temporal walk-forward validation for every active market.
 
 Does not overwrite holdout baseline metrics or replace the public/live model.
 
 Examples:
   python -m backend.src.jobs.run_walk_forward --dry-run
   python -m backend.src.jobs.run_walk_forward
-  python -m backend.src.jobs.run_walk_forward --mode rolling --versions v2,v3
+  python -m backend.src.jobs.run_walk_forward --mode rolling --versions v4
+  python -m backend.src.jobs.run_walk_forward --versions v2,v3  # archived match-winner backtest
+  python -m backend.src.jobs.run_walk_forward --versions first_set_winner_v2  # single market
 """
 
 from __future__ import annotations
@@ -52,7 +54,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--versions",
         default=None,
-        help="Comma-separated versions (default: v1,v2,v3)",
+        help=(
+            "Comma-separated versions/markets (default: every active market — "
+            "match-winner v4 + first_set_winner_v2 + over_under_games_v1)"
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -105,10 +110,12 @@ def main(argv: list[str] | None = None) -> int:
             edge_threshold=request.edge_threshold,
             random_state=request.random_state,
         )
-        result = run_walk_forward_validation(
-            config,
-            versions=tuple(versions) if versions else None,
-        )
+        with SessionLocal() as db:
+            result = run_walk_forward_validation(
+                config,
+                versions=tuple(versions) if versions else None,
+                db=db,
+            )
         path = write_walk_forward_report(result)
         payload = walk_forward_result_to_dict(result)
         payload["report_path"] = str(path)

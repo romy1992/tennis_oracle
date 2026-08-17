@@ -60,8 +60,8 @@ def _publish_tip(
         PublishedPredictionCreate(
             event_key=event_key,
             selection=selection,
-            model_version="v2",
-            model_name="logistic_regression",
+            model_version="v4",
+            model_name="voting_ensemble",
             probability=0.62,
             odds=odds,
             edge=6.0,
@@ -111,6 +111,7 @@ def test_live_segment_roi_by_surface(db_session) -> None:
     )
 
     assert result.source == "live"
+    assert result.market == "match_winner"
     assert result.closed >= 2
     clay = next((item for item in result.segments if item.key == "Clay"), None)
     assert clay is not None

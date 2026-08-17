@@ -11,6 +11,7 @@ from backend.src.app.schemas.global_update import GlobalUpdateRunRead
 from backend.src.app.schemas.imports import ImportStatusResponse
 from backend.src.app.schemas.published_prediction import (
     OddsBand,
+    PredictionMarket,
     PublishedLiveStatsSummary,
     PublishedSettledTipRead,
 )
@@ -114,10 +115,14 @@ class LiveBetaDashboardResponse(BaseModel):
     surface: str | None = None
     odds_band: OddsBand | None = None
     latest_only: bool = True
+    market: PredictionMarket = "match_winner"
+    include_archived: bool = False
+    official_only: bool = False
 
     pipeline: LiveBetaPipelineStatus
     publication_health: LiveBetaPublicationHealth
     live_stats: PublishedLiveStatsSummary
+    official_live_stats: PublishedLiveStatsSummary
     published_today: list[PublishedSettledTipRead]
     open_predictions: list[PublishedSettledTipRead]
     closed_predictions: list[PublishedSettledTipRead]

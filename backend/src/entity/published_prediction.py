@@ -6,6 +6,7 @@ linked via ``previous_version_id`` / ``publication_id`` + ``content_version``.
 """
 
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -65,6 +66,13 @@ class PublishedPrediction(Base):
     odds = Column(Float, nullable=True)
     void_odds = Column(Float, nullable=True)
     edge = Column(Float, nullable=True)
+    market = Column(
+        String, nullable=False, default="match_winner", server_default="match_winner"
+    )
+    value_decision = Column(String, nullable=True)
+    official_play = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     unit_stake = Column(Float, nullable=False)
     published_at = Column(DateTime, nullable=False, index=True)
     publication_source = Column(String, nullable=False)
@@ -88,4 +96,6 @@ class PublishedPrediction(Base):
     )
 
     def to_dict(self):
-        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+        return {
+            column.name: getattr(self, column.name) for column in self.__table__.columns
+        }

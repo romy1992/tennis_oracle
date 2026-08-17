@@ -6,6 +6,7 @@ import unittest
 
 from backend.src.app.services.match_lifecycle import (
     classify_match_lifecycle,
+    is_eligible_for_slip_pool,
     is_void_for_betting,
     match_lifecycle_label,
     normalize_lifecycle_status,
@@ -50,6 +51,14 @@ class MatchLifecycleClassificationTest(unittest.TestCase):
             "started",
         )
 
+    def test_not_started_status_is_upcoming_and_slip_pool_eligible(self):
+        # "Not Started" is the standard API-Tennis status for every future
+        # fixture; it must not be misread as the live "started" lifecycle
+        # just because it contains that substring.
+        status = classify_match_lifecycle(event_status="Not Started")
+        self.assertEqual(status, "upcoming")
+        self.assertTrue(is_eligible_for_slip_pool(status))
+
     def test_completed_with_winner(self):
         status = classify_match_lifecycle(
             event_status="Finished",
@@ -78,6 +87,21 @@ class MatchLifecycleClassificationTest(unittest.TestCase):
         status = classify_match_lifecycle(event_status="Finished", event_winner=None)
         self.assertEqual(status, "unknown")
         self.assertTrue(is_void_for_betting(status, None))
+
+    def test_slip_pool_eligibility(self):
+        self.assertTrue(is_eligible_for_slip_pool("upcoming"))
+        self.assertFalse(is_eligible_for_slip_pool("cancelled"))
+        self.assertFalse(is_eligible_for_slip_pool("postponed"))
+        self.assertFalse(is_eligible_for_slip_pool("abandoned"))
+        self.assertFalse(is_eligible_for_slip_pool("unknown"))
+        self.assertFalse(is_eligible_for_slip_pool("started"))
+        self.assertFalse(is_eligible_for_slip_pool("completed"))
+        self.assertTrue(
+            is_eligible_for_slip_pool("completed", include_completed=True)
+        )
+        self.assertFalse(
+            is_eligible_for_slip_pool("cancelled", include_completed=True)
+        )
 
     def test_walkover_with_winner_settleable(self):
         status = classify_match_lifecycle(

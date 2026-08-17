@@ -75,15 +75,23 @@ def _publish(
     odds: float = 2.0,
     published_at: datetime | None = None,
     tournament_name: str = "Beta Open",
-    model_version: str = "v3",
+    model_version: str = "v4",
+    model_name: str = "voting_ensemble",
+    market: str = "match_winner",
+    value_decision: str | None = None,
+    official_play: bool = False,
+    selection: str = "Alice",
 ):
     return publish_prediction(
         db_session,
         PublishedPredictionCreate(
             event_key=event_key,
-            selection="Alice",
+            market=market,
+            value_decision=value_decision,
+            official_play=official_play,
+            selection=selection,
             model_version=model_version,
-            model_name="logistic_regression",
+            model_name=model_name,
             probability=0.58,
             odds=odds,
             edge=6.0,
@@ -109,9 +117,10 @@ def test_live_beta_dashboard_aggregates_sections(db_session):
         db_session,
         PublishedPredictionCreate(
             event_key=9302,
+            market="match_winner",
             selection="Alice",
-            model_version="v3",
-            model_name="logistic_regression",
+            model_version="v4",
+            model_name="voting_ensemble",
             probability=0.6,
             odds=2.2,
             edge=8.0,
@@ -134,6 +143,7 @@ def test_live_beta_dashboard_aggregates_sections(db_session):
     db_session.add(
         PrematchOddsSnapshot(
             event_key=9301,
+            market="match_winner",
             selection="Alice",
             bookmaker="test_book",
             odds=1.8,
@@ -194,6 +204,10 @@ def test_live_beta_dashboard_aggregates_sections(db_session):
     assert dashboard.bot_usage.total_events >= 1
     assert dashboard.publication_health is not None
     assert dashboard.data_completeness.closing_odds_note is not None
+    assert dashboard.market == "match_winner"
+    assert dashboard.include_archived is False
+    assert dashboard.official_live_stats.official_only is True
+    assert dashboard.official_live_stats.predictions_total == 0
 
 
 def test_live_beta_dashboard_filters_surface_and_odds_band(db_session):
@@ -227,6 +241,9 @@ def test_live_beta_dashboard_api(client, auth_headers, db_session):
     assert body["mode"] == "live"
     assert body["backtest"]["mode"] == "backtest"
     assert "live_stats" in body
+    assert "official_live_stats" in body
+    assert body["market"] == "match_winner"
+    assert body["include_archived"] is False
     assert "pipeline" in body
     assert "data_completeness" in body
     assert "publication_health" in body
@@ -250,3 +267,60 @@ def test_live_stats_tournament_filter(db_session):
     filtered = compute_published_live_stats(db_session, tournament_name="Beta")
     assert filtered.predictions_total == 1
     assert filtered.tournament_name == "Beta"
+
+
+def test_live_beta_dashboard_excludes_archived_match_winner_by_default(db_session):
+    _future_fixture(db_session, event_key=9701)
+    _publish(db_session, event_key=9701, model_version="v3", model_name="logistic_regression")
+    _future_fixture(db_session, event_key=9702)
+    _publish(db_session, event_key=9702)
+
+    default_view = compute_live_beta_dashboard(db_session)
+    assert default_view.live_stats.predictions_total == 1
+    assert default_view.published_today[0].model_version == "v4"
+
+    with_history = compute_live_beta_dashboard(db_session, include_archived=True)
+    assert with_history.live_stats.predictions_total == 2
+
+
+def test_live_beta_dashboard_keeps_markets_separate(db_session):
+    _future_fixture(db_session, event_key=9801)
+    _publish(
+        db_session,
+        event_key=9801,
+        official_play=True,
+        value_decision="PLAY",
+    )
+    _publish(
+        db_session,
+        event_key=9801,
+        market="first_set_winner",
+        model_version="first_set_winner_v1",
+        model_name="random_forest",
+        selection="Alice",
+        odds=None,
+    )
+    _publish(
+        db_session,
+        event_key=9801,
+        market="over_under_games",
+        model_version="over_under_games_v1",
+        model_name="random_forest",
+        selection="Over 21.5",
+        odds=1.9,
+        official_play=True,
+        value_decision="PLAY",
+    )
+
+    match_winner = compute_live_beta_dashboard(db_session, market="match_winner")
+    first_set = compute_live_beta_dashboard(db_session, market="first_set_winner")
+    over_under = compute_live_beta_dashboard(db_session, market="over_under_games")
+
+    assert match_winner.live_stats.predictions_total == 1
+    assert match_winner.official_live_stats.predictions_total == 1
+    assert first_set.live_stats.predictions_total == 1
+    assert first_set.official_live_stats.predictions_total == 0
+    assert over_under.live_stats.predictions_total == 1
+    assert over_under.official_live_stats.predictions_total == 1
+    assert first_set.published_today[0].market == "first_set_winner"
+    assert over_under.published_today[0].selection == "Over 21.5"

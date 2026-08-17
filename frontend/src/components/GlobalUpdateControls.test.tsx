@@ -80,7 +80,7 @@ describe("GlobalUpdateControls", () => {
     expect(screen.getByText("42%")).toBeInTheDocument();
   });
 
-  it("lets the user restrict the update to a subset of versions", async () => {
+  it("shows all active markets covered (no per-version checkboxes) and always triggers a full update", async () => {
     apiMocks.getGlobalUpdateStatus.mockResolvedValue(idleGlobalUpdate);
     apiMocks.startGlobalUpdate.mockResolvedValue({ run_id: 9, status: "pending" });
     const user = userEvent.setup();
@@ -88,17 +88,17 @@ describe("GlobalUpdateControls", () => {
     renderWithProviders(<GlobalUpdateControls />);
     await screen.findByRole("button", { name: "Aggiorna tutto" });
 
-    await user.click(screen.getByRole("checkbox", { name: "v1" }));
-    await user.click(screen.getByRole("checkbox", { name: "v2" }));
+    // Nessuna checkbox per versione: il pannello informativo elenca sempre
+    // tutti e 3 i mercati attivi (nessuna selezione parziale possibile).
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.getByText(/Copre sempre tutti i mercati/)).toBeInTheDocument();
+    expect(screen.getByText(/Vincitore partita/)).toBeInTheDocument();
+    expect(screen.getByText(/Vincitore 1° set/)).toBeInTheDocument();
+    expect(screen.getByText(/Over\/Under Games/)).toBeInTheDocument();
 
-    const partialButton = await screen.findByRole("button", { name: /Aggiorna selezionate/ });
-    await user.click(partialButton);
-
+    await user.click(screen.getByRole("button", { name: "Aggiorna tutto" }));
     await waitFor(() => {
-      expect(apiMocks.startGlobalUpdate).toHaveBeenCalledWith({
-        force: true,
-        versions: ["v3", "v4"]
-      });
+      expect(apiMocks.startGlobalUpdate).toHaveBeenCalledWith({ force: true });
     });
   });
 

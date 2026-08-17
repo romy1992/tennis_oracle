@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend.src.app.api.deps import require_admin
 from backend.src.app.db.session import get_db
 from backend.src.app.schemas.live_beta_dashboard import LiveBetaDashboardResponse
+from backend.src.app.schemas.published_prediction import PredictionMarket
 from backend.src.app.services.live_beta_dashboard import compute_live_beta_dashboard
 
 
@@ -29,6 +30,9 @@ def read_live_beta_dashboard(
     odds_band: str | None = Query(default=None),
     latest_only: bool = Query(default=True),
     tip_limit: int = Query(default=25, ge=1, le=100),
+    market: PredictionMarket = Query(default="match_winner"),
+    include_archived: bool = Query(default=False),
+    official_only: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> LiveBetaDashboardResponse:
     """Aggregate LIVE beta ops view (pipeline, tipbook, bot, completeness, errors)."""
@@ -44,6 +48,9 @@ def read_live_beta_dashboard(
             odds_band=odds_band,
             latest_only=latest_only,
             tip_limit=tip_limit,
+            market=market,
+            include_archived=include_archived,
+            official_only=official_only,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

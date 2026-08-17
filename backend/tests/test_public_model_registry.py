@@ -60,7 +60,7 @@ def test_register_candidate_requires_artifacts(mock_resolve, db_session):
     with pytest.raises(ValueError, match="Artefatto modello mancante"):
         register_candidate(
             db_session,
-            model_version="v3",
+            model_version="v4",
             model_name="logistic_regression",
             motivation="candidate test",
         )
@@ -74,21 +74,21 @@ def test_activate_and_rollback_lifecycle(mock_metrics, mock_artifacts, db_sessio
 
     first = register_candidate(
         db_session,
-        model_version="v3",
+        model_version="v4",
         model_name="logistic_regression",
         motivation="first candidate",
     )
     active_a, _ = activate_registry_entry(
         db_session,
         first.id,
-        motivation="go live v3/lr",
+        motivation="go live v4/lr",
     )
     assert active_a.status == "active"
     assert active_a.activated_at is not None
 
     second = register_candidate(
         db_session,
-        model_version="v3",
+        model_version="v4",
         model_name="random_forest",
         motivation="rf candidate",
     )
@@ -112,7 +112,7 @@ def test_activate_and_rollback_lifecycle(mock_metrics, mock_artifacts, db_sessio
 
 
 def test_resolve_public_model_config_prefers_registry(db_session):
-    _seed_active(db_session)
+    _seed_active(db_session, model_version="v4", model_name="voting_ensemble")
     cfg = resolve_public_model_config(
         make_test_settings(
             live_publication_enabled=True,
@@ -122,8 +122,8 @@ def test_resolve_public_model_config_prefers_registry(db_session):
         db=db_session,
     )
     assert cfg.status == "ready"
-    assert cfg.model_version == "v3"
-    assert cfg.model_name == "logistic_regression"
+    assert cfg.model_version == "v4"
+    assert cfg.model_name == "voting_ensemble"
     assert cfg.source == "registry"
 
 
@@ -131,14 +131,14 @@ def test_resolve_public_model_config_env_fallback(db_session):
     cfg = resolve_public_model_config(
         make_test_settings(
             live_publication_enabled=True,
-            public_model_version="v2",
+            public_model_version="v4",
             public_model_name="logistic_regression",
         ),
         db=db_session,
     )
     assert cfg.status == "ready"
     assert cfg.source == "env"
-    assert cfg.model_version == "v2"
+    assert cfg.model_version == "v4"
 
 
 def test_public_model_registry_api(client, auth_headers, db_session, tmp_path: Path):
@@ -160,7 +160,7 @@ def test_public_model_registry_api(client, auth_headers, db_session, tmp_path: P
         create_resp = client.post(
             "/api/public-model-registry/candidates",
             json={
-                "model_version": "v3",
+                "model_version": "v4",
                 "model_name": "logistic_regression",
                 "motivation": "api candidate",
             },
@@ -179,7 +179,7 @@ def test_public_model_registry_api(client, auth_headers, db_session, tmp_path: P
 
     active_resp = client.get("/api/public-model-registry/active")
     assert active_resp.status_code == 200
-    assert active_resp.json()["model_version"] == "v3"
+    assert active_resp.json()["model_version"] == "v4"
 
     list_resp = client.get("/api/public-model-registry", headers=auth_headers)
     assert list_resp.status_code == 200

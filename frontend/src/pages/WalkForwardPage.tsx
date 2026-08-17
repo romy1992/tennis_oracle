@@ -4,16 +4,25 @@ import { MetricCard } from "../components/MetricCard";
 import {
   LongRunningJobProgress
 } from "../components/LongRunningJobProgress";
+import { MarketTabs } from "../components/MarketTabs";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient, ApiError } from "../services/apiClient";
 import type {
-  MLModelVersion,
+  LiveDashboardMarket,
   WalkForwardFold,
   WalkForwardOfficialBenchmarkMetrics,
   WalkForwardMode,
   WalkForwardRun,
   WalkForwardRunListItem
 } from "../types/api";
+import {
+  DEFAULT_LIVE_MARKET,
+  formatVersionsRequestedAsMarkets,
+  isArchivedMatchWinnerVersion,
+  marketFromInternalVersion,
+  marketLabel,
+  uiVersionOrMarketLabel
+} from "../utils/markets";
 
 function formatPct(value: number | null | undefined) {
   if (value === null || value === undefined) return "-";
@@ -114,9 +123,11 @@ const CONTENDER_OPTIONS = [
   "atp_ranking",
   "elo",
   "logistic_regression",
-  "random_forest"
+  "random_forest",
+  "voting_ensemble",
+  "xgboost",
+  "hist_gradient_boosting"
 ] as const;
-const PAGE_VERSION_OPTIONS: MLModelVersion[] = ["v1", "v2", "v3"];
 
 type ContenderFilter = (typeof CONTENDER_OPTIONS)[number] | "all";
 
@@ -151,9 +162,9 @@ export function WalkForwardPage() {
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<WalkForwardMode>("expanding");
-  const [versionFilter, setVersionFilter] = useState<MLModelVersion | "all">("all");
+  const [selectedMarket, setSelectedMarket] = useState<LiveDashboardMarket>(DEFAULT_LIVE_MARKET);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [contenderFilter, setContenderFilter] = useState<ContenderFilter>("all");
-  const [versionPageIndex, setVersionPageIndex] = useState(0);
   const [dayPageIndex, setDayPageIndex] = useState(0);
 
   useEffect(() => {
@@ -252,33 +263,23 @@ export function WalkForwardPage() {
   const folds = useMemo(() => {
     const items = run?.folds ?? [];
     return items.filter((fold) => {
-      if (versionFilter !== "all" && fold.model_version !== versionFilter) return false;
+      const market = marketFromInternalVersion(fold.model_version);
+      if (market !== selectedMarket) return false;
+      if (
+        selectedMarket === "match_winner" &&
+        !includeArchived &&
+        isArchivedMatchWinnerVersion(fold.model_version)
+      ) {
+        return false;
+      }
       if (contenderFilter !== "all" && fold.model_name !== contenderFilter) return false;
       return true;
     });
-  }, [run, versionFilter, contenderFilter]);
-
-  const versionsInScope = useMemo(() => {
-    const present = new Set(folds.map((fold) => fold.model_version));
-    return PAGE_VERSION_OPTIONS.filter((version) => present.has(version));
-  }, [folds]);
-
-  useEffect(() => {
-    if (versionPageIndex >= versionsInScope.length) {
-      setVersionPageIndex(0);
-    }
-  }, [versionPageIndex, versionsInScope.length]);
-
-  const pagedVersion = versionsInScope[versionPageIndex] ?? null;
-
-  const foldsByVersion = useMemo(() => {
-    if (!pagedVersion) return [];
-    return folds.filter((fold) => fold.model_version === pagedVersion);
-  }, [folds, pagedVersion]);
+  }, [run, selectedMarket, includeArchived, contenderFilter]);
 
   const testDaysInScope = useMemo(() => {
-    return Array.from(new Set(foldsByVersion.map((fold) => fold.test_start))).sort();
-  }, [foldsByVersion]);
+    return Array.from(new Set(folds.map((fold) => fold.test_start))).sort();
+  }, [folds]);
 
   useEffect(() => {
     if (dayPageIndex >= testDaysInScope.length) {
@@ -286,12 +287,16 @@ export function WalkForwardPage() {
     }
   }, [dayPageIndex, testDaysInScope.length]);
 
+  useEffect(() => {
+    setDayPageIndex(0);
+  }, [selectedMarket, includeArchived, contenderFilter, selectedId]);
+
   const pagedTestDay = testDaysInScope[dayPageIndex] ?? null;
 
   const tableFolds = useMemo(() => {
-    if (!pagedVersion || !pagedTestDay) return [];
-    return foldsByVersion.filter((fold) => fold.test_start === pagedTestDay);
-  }, [foldsByVersion, pagedVersion, pagedTestDay]);
+    if (!pagedTestDay) return [];
+    return folds.filter((fold) => fold.test_start === pagedTestDay);
+  }, [folds, pagedTestDay]);
 
   const skipped = tableFolds.filter((fold) => String(fold.status).startsWith("skipped"));
   const leakage = tableFolds.filter((fold) => (fold.leakage_flags ?? []).length > 0);
@@ -353,8 +358,9 @@ export function WalkForwardPage() {
         <div>
           <h2>Validazione walk-forward</h2>
           <p>
-            Validazione temporale multi-fold (expanding/rolling). Non aggiorna il modello
-            pubblico e non mescola i risultati con le metriche live.
+            Validazione temporale multi-fold per <strong>mercato</strong> (default: Vincitore
+            partita, modello live). Le nuove run non includono più le versioni archiviate; 1° set
+            e Over/Under restano fuori da questa pipeline ML.
           </p>
         </div>
         <div className="page-actions">
@@ -407,7 +413,7 @@ export function WalkForwardPage() {
                   <th>ID</th>
                   <th>Stato</th>
                   <th>Modo</th>
-                  <th>Versioni</th>
+                  <th>Mercati</th>
                   <th>Completati</th>
                   <th>Saltati</th>
                   <th>Leakage</th>
@@ -425,7 +431,7 @@ export function WalkForwardPage() {
                     <td>{item.id}</td>
                     <td>{statusLabel(item.status)}</td>
                     <td>{item.mode}</td>
-                    <td>{item.versions_requested}</td>
+                    <td>{formatVersionsRequestedAsMarkets(item.versions_requested)}</td>
                     <td>{item.folds_completed}</td>
                     <td>{item.folds_skipped}</td>
                     <td>{item.leakage_flags_total}</td>
@@ -479,88 +485,51 @@ export function WalkForwardPage() {
                 />
               </div>
 
+              <MarketTabs
+                value={selectedMarket}
+                onChange={setSelectedMarket}
+                ariaLabel="Mercato walk-forward"
+              />
+
               <div className="page-actions" style={{ marginTop: "1rem" }}>
-                <label>
-                  Versione
-                  <select
-                    value={versionFilter}
-                    onChange={(event) =>
-                      setVersionFilter(event.target.value as MLModelVersion | "all")
-                    }
-                  >
-                    <option value="all">Tutte</option>
-                    <option value="v1">v1</option>
-                    <option value="v2">v2</option>
-                    <option value="v3">v3</option>
-                  </select>
-                </label>
-                <label>
-                  Contender
-                  <select
-                    value={contenderFilter}
-                    onChange={(event) => setContenderFilter(event.target.value as ContenderFilter)}
-                  >
-                    <option value="all">Tutti</option>
-                    {CONTENDER_OPTIONS.map((contender) => (
-                      <option key={contender} value={contender}>
-                        {contender}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {selectedMarket === "match_winner" ? (
+                  <>
+                    <label className="checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={includeArchived}
+                        onChange={(event) => setIncludeArchived(event.target.checked)}
+                      />
+                      Includi archivio match-winner (run storiche)
+                    </label>
+                    <label>
+                      Contender
+                      <select
+                        value={contenderFilter}
+                        onChange={(event) =>
+                          setContenderFilter(event.target.value as ContenderFilter)
+                        }
+                      >
+                        <option value="all">Tutti</option>
+                        {CONTENDER_OPTIONS.map((contender) => (
+                          <option key={contender} value={contender}>
+                            {contender}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                ) : null}
               </div>
 
+              {selectedMarket !== "match_winner" ? (
+                <EmptyState
+                  title={`Walk-forward non disponibile per ${marketLabel(selectedMarket)}`}
+                  message="Questa validazione OOS riguarda oggi solo il Vincitore partita. 1° set e Over/Under hanno pipeline e report dedicati."
+                />
+              ) : (
+                <>
               <div className="page-actions" style={{ marginTop: "0.75rem" }}>
-                <div>
-                  <strong>Pagina versione:</strong>{" "}
-                  {pagedVersion ? `${versionPageIndex + 1}/${versionsInScope.length} (${pagedVersion})` : "-"}
-                </div>
-                <label>
-                  Vai a versione
-                  <select
-                    value={pagedVersion ?? ""}
-                    onChange={(event) => {
-                      const target = event.target.value as MLModelVersion;
-                      const idx = versionsInScope.findIndex((version) => version === target);
-                      if (idx >= 0) {
-                        setVersionPageIndex(idx);
-                        setDayPageIndex(0);
-                      }
-                    }}
-                    disabled={versionsInScope.length === 0}
-                  >
-                    {versionsInScope.length === 0 ? <option value="">-</option> : null}
-                    {versionsInScope.map((version) => (
-                      <option key={version} value={version}>
-                        {version}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className="action-button secondary"
-                  disabled={versionPageIndex <= 0}
-                  onClick={() => {
-                    setVersionPageIndex((value) => Math.max(0, value - 1));
-                    setDayPageIndex(0);
-                  }}
-                >
-                  Versione precedente
-                </button>
-                <button
-                  type="button"
-                  className="action-button secondary"
-                  disabled={versionPageIndex >= versionsInScope.length - 1}
-                  onClick={() => {
-                    setVersionPageIndex((value) =>
-                      Math.min(Math.max(versionsInScope.length - 1, 0), value + 1)
-                    );
-                    setDayPageIndex(0);
-                  }}
-                >
-                  Versione successiva
-                </button>
                 <div>
                   <strong>Pagina giorno test:</strong>{" "}
                   {pagedTestDay ? `${dayPageIndex + 1}/${testDaysInScope.length} (${pagedTestDay})` : "-"}
@@ -623,7 +592,7 @@ export function WalkForwardPage() {
                   <thead>
                     <tr>
                       <th>Fold</th>
-                      <th>Versione</th>
+                      <th>Mercato</th>
                       <th>Modello</th>
                       <th>Stato</th>
                       <th>Train</th>
@@ -654,7 +623,7 @@ export function WalkForwardPage() {
                         }
                       >
                         <td>{fold.fold_index}</td>
-                        <td>{fold.model_version}</td>
+                        <td>{uiVersionOrMarketLabel(fold.model_version)}</td>
                         <td>{fold.model_name}</td>
                         <td>{statusLabel(fold.status)}</td>
                         <td>
@@ -712,7 +681,7 @@ export function WalkForwardPage() {
                     <table>
                       <thead>
                         <tr>
-                          <th>Versione</th>
+                          <th>Mercato</th>
                           <th>Contender</th>
                           <th>Accuracy</th>
                           <th>Log Loss</th>
@@ -727,12 +696,22 @@ export function WalkForwardPage() {
                         {run.summary.versions_detail.flatMap((detail, idx) => {
                           const detailRecord = detail as Record<string, unknown>;
                           const version = String(detailRecord.model_version ?? "-");
+                          const market = marketFromInternalVersion(version);
+                          if (market !== selectedMarket) return [];
+                          if (
+                            selectedMarket === "match_winner" &&
+                            !includeArchived &&
+                            isArchivedMatchWinnerVersion(version)
+                          ) {
+                            return [];
+                          }
+                          const marketUi = uiVersionOrMarketLabel(version);
                           const aggregate = detailRecord.aggregate_metrics as Record<string, unknown> | undefined;
                           const official = aggregate?.official_benchmarks as Record<string, Record<string, unknown>> | undefined;
                           if (!official) {
                             return [
                               <tr key={`${idx}-${version}-empty`}>
-                                <td>{version}</td>
+                                <td>{marketUi}</td>
                                 <td colSpan={8}>Nessun aggregato ufficiale disponibile</td>
                               </tr>
                             ];
@@ -747,7 +726,7 @@ export function WalkForwardPage() {
                             const clv = (payload.clv_pct as Record<string, unknown> | undefined)?.mean;
                             return (
                               <tr key={`${idx}-${version}-${name}`}>
-                                <td>{version}</td>
+                                <td>{marketUi}</td>
                                 <td>{name}</td>
                                 <td>{formatPct(typeof acc === "number" ? acc : null)}</td>
                                 <td>{formatNum(typeof logLoss === "number" ? logLoss : null)}</td>
@@ -778,6 +757,8 @@ export function WalkForwardPage() {
                   </pre>
                 </section>
               ) : null}
+                </>
+              )}
             </>
           ) : null}
         </>

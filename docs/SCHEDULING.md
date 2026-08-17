@@ -191,8 +191,10 @@ Cron esempio (lunedì 08:30 Rome):
 
 ## Walk-forward (validazione temporale)
 
-Job on-demand (o settimanale) che valuta tutte le versioni/modelli con fold
-temporali expanding/rolling. **Non** sovrascrive `baseline_*_metrics.json`,
+Job on-demand (o settimanale) che valuta il **mercato match-winner live**
+(`ACTIVE_MATCH_WINNER_VERSIONS`, oggi `v4`) con fold temporali expanding/rolling.
+Passa `--versions` esplicitamente per includere tag archiviati (v1–v3).
+**Non** sovrascrive `baseline_*_metrics.json`,
 **non** sostituisce il modello pubblico e **non** mescola i risultati con le
 metriche live. L’aggiornamento globale include sempre una fase osservabile
 (`summary.walk_forward`); l’esecuzione completa nel daily job resta opt-in via
@@ -202,10 +204,10 @@ metriche live. L’aggiornamento globale include sempre una fase osservabile
 # Dry-run (calcola + JSON report, senza persistenza DB)
 python3 -m backend.src.jobs.run_walk_forward --dry-run
 
-# Esegue e persiste run/fold
+# Esegue e persiste run/fold (default: solo live match-winner)
 python3 -m backend.src.jobs.run_walk_forward
 
-# Rolling su subset versioni
+# Rolling su subset (archivio opt-in)
 python3 -m backend.src.jobs.run_walk_forward --mode rolling --versions v2,v3
 ```
 

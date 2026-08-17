@@ -13,11 +13,21 @@ from backend.src.app.ml.datasets.odds_builder import (
     has_real_odds,
 )
 from backend.src.app.ml.model_selection import select_best_model
-from backend.src.app.ml.model_versioning import ODDS_REQUIRED_VERSIONS, ModelVersion
+from backend.src.app.ml.model_versioning import (
+    DEFAULT_ACTIVE_MATCH_WINNER_VERSION,
+    ODDS_REQUIRED_VERSIONS,
+    ModelVersion,
+)
+from backend.src.app.ml.prediction.extra_markets_predictor import (
+    FIRST_SET_WINNER_ARCHIVED_VERSION,
+    FIRST_SET_WINNER_MODEL_VERSION,
+    OVER_UNDER_GAMES_MODEL_VERSION,
+)
 from backend.src.app.models import Fixture, MatchPrediction, NextFixture
 from backend.src.app.schemas.prediction import (
     DailyPredictionStatsDay,
     DailyPredictionStatsResponse,
+    ExtraMarketPredictionRead,
     FixturesWithPredictionsPage,
     MatchPredictionRead,
     NextFixtureRead,
@@ -31,11 +41,65 @@ from backend.src.app.services.match_lifecycle import (
     match_lifecycle_label,
     settle_simulated_bet,
 )
+from backend.src.app.services.published_predictions import (
+    list_latest_published_predictions_by_event_keys,
+)
 
 FixturePredictionStatus = Literal["upcoming", "played", "all"]
 PredictionOutcome = Literal["all", "won", "lost"]
 UPCOMING_DAYS_FORWARD = 10
 PLAYED_DAYS_BACK = 30
+
+# Extra-market versions (see extra_markets_predictor.py): published only in
+# the generic PublishedPrediction ledger, never in MatchPrediction. Listed
+# here so Partite/Consiglio schedina can enrich each fixture row with them
+# without duplicating match-winner plumbing.
+EXTRA_MARKET_VERSIONS: tuple[str, ...] = (
+    FIRST_SET_WINNER_ARCHIVED_VERSION,
+    FIRST_SET_WINNER_MODEL_VERSION,
+    OVER_UNDER_GAMES_MODEL_VERSION,
+)
+
+
+def _extra_market_key(row) -> str:
+    if row.market:
+        return row.market
+    if str(row.model_version).startswith("first_set_winner"):
+        return "first_set_winner"
+    return "over_under_games"
+
+
+def _extra_markets_by_event_key(
+    db: Session, event_keys: list[int]
+) -> dict[int, list[ExtraMarketPredictionRead]]:
+    """Latest extra-market predictions (first set winner, O/U games) per fixture."""
+    grouped = list_latest_published_predictions_by_event_keys(
+        db, event_keys, model_versions=list(EXTRA_MARKET_VERSIONS)
+    )
+    result: dict[int, list[ExtraMarketPredictionRead]] = {}
+    for event_key, rows in grouped.items():
+        latest_by_market: dict[str, object] = {}
+        for row in rows:
+            market = _extra_market_key(row)
+            current = latest_by_market.get(market)
+            row_order = (row.published_at, int(row.id or 0))
+            if current is None or row_order > (current.published_at, int(current.id or 0)):
+                latest_by_market[market] = row
+        result[event_key] = [
+            ExtraMarketPredictionRead(
+                market=market,
+                model_version=row.model_version,
+                model_name=row.model_name,
+                selection=row.selection,
+                probability=row.probability,
+                odds=row.odds,
+                void_odds=row.void_odds,
+                edge=row.edge,
+                published_at=row.published_at,
+            )
+            for market, row in latest_by_market.items()
+        ]
+    return result
 
 
 def _player_name_filter(
@@ -559,6 +623,7 @@ def _attach_lifecycle_fields(
 def _wrap_upcoming_fixture(
     fixture: NextFixture,
     stored_prediction: MatchPrediction | None,
+    extra_markets: list[ExtraMarketPredictionRead] | None = None,
 ) -> NextFixtureWithPrediction:
     fixture_odds = _next_fixture_odds(fixture)
     prediction = (
@@ -569,12 +634,14 @@ def _wrap_upcoming_fixture(
         **base.model_dump(),
         prediction=prediction,
         prediction_warning=None if prediction is not None else "missing_persisted_prediction",
+        extra_markets=extra_markets or [],
     )
 
 
 def _wrap_played_fixture(
     fixture: Fixture,
     stored_prediction: MatchPrediction | None,
+    extra_markets: list[ExtraMarketPredictionRead] | None = None,
 ) -> NextFixtureWithPrediction:
     fixture_odds = _fixture_odds(fixture)
     base = _attach_lifecycle_fields(
@@ -588,6 +655,7 @@ def _wrap_played_fixture(
             **base.model_dump(),
             prediction=None,
             prediction_warning="missing_persisted_prediction",
+            extra_markets=extra_markets or [],
         )
     return NextFixtureWithPrediction(
         **base.model_dump(),
@@ -597,12 +665,13 @@ def _wrap_played_fixture(
             actual_winner=fixture.event_winner,
         ),
         prediction_warning=None,
+        extra_markets=extra_markets or [],
     )
 
 
 def get_next_fixtures_with_predictions(
     db: Session,
-    model_version: ModelVersion = "v2",
+    model_version: ModelVersion = DEFAULT_ACTIVE_MATCH_WINNER_VERSION,
     model_name: str | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
@@ -644,8 +713,15 @@ def get_next_fixtures_with_predictions(
             model_version,
             upcoming_model_name,
         )
+        extra_by_key = _extra_markets_by_event_key(
+            db, [fixture.event_key for fixture in fixtures]
+        )
         results = [
-            _wrap_upcoming_fixture(fixture, prediction_by_key.get(fixture.event_key))
+            _wrap_upcoming_fixture(
+                fixture,
+                prediction_by_key.get(fixture.event_key),
+                extra_by_key.get(fixture.event_key),
+            )
             for fixture in fixtures
         ]
     elif status == "played":
@@ -671,8 +747,15 @@ def get_next_fixtures_with_predictions(
             player_name=player_name,
             odds_required=odds_required,
         )
+        extra_by_key = _extra_markets_by_event_key(
+            db, [fixture.event_key for fixture, _ in played_rows]
+        )
         results = [
-            _wrap_played_fixture(fixture, stored_prediction)
+            _wrap_played_fixture(
+                fixture,
+                stored_prediction,
+                extra_by_key.get(fixture.event_key),
+            )
             for fixture, stored_prediction in played_rows
         ]
     else:
@@ -712,8 +795,15 @@ def get_next_fixtures_with_predictions(
                 model_version,
                 upcoming_model_name,
             )
+            extra_by_key = _extra_markets_by_event_key(
+                db, [fixture.event_key for fixture in fixtures]
+            )
             results.extend(
-                _wrap_upcoming_fixture(fixture, prediction_by_key.get(fixture.event_key))
+                _wrap_upcoming_fixture(
+                    fixture,
+                    prediction_by_key.get(fixture.event_key),
+                    extra_by_key.get(fixture.event_key),
+                )
                 for fixture in fixtures
             )
             remaining = limit - len(results)
@@ -730,8 +820,15 @@ def get_next_fixtures_with_predictions(
                     player_name=player_name,
                     odds_required=odds_required,
                 )
+                extra_by_key_played = _extra_markets_by_event_key(
+                    db, [fixture.event_key for fixture, _ in played_rows]
+                )
                 results.extend(
-                    _wrap_played_fixture(fixture, stored_prediction)
+                    _wrap_played_fixture(
+                        fixture,
+                        stored_prediction,
+                        extra_by_key_played.get(fixture.event_key),
+                    )
                     for fixture, stored_prediction in played_rows
                 )
         else:
@@ -747,8 +844,15 @@ def get_next_fixtures_with_predictions(
                 player_name=player_name,
                 odds_required=odds_required,
             )
+            extra_by_key = _extra_markets_by_event_key(
+                db, [fixture.event_key for fixture, _ in played_rows]
+            )
             results = [
-                _wrap_played_fixture(fixture, stored_prediction)
+                _wrap_played_fixture(
+                    fixture,
+                    stored_prediction,
+                    extra_by_key.get(fixture.event_key),
+                )
                 for fixture, stored_prediction in played_rows
             ]
 

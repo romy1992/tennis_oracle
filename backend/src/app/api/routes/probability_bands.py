@@ -39,6 +39,15 @@ def read_probability_band_analysis(
     surface: str | None = Query(default=None),
     odds_band: str | None = Query(default=None),
     latest_only: bool = Query(default=True),
+    market: str | None = Query(
+        default=None,
+        description="Solo source=live: match_winner | first_set_winner | over_under_games "
+        "(default match_winner). Ignorato su walk-forward/backtest.",
+    ),
+    include_archived: bool = Query(
+        default=False,
+        description="Solo source=live: include tip match-winner di versioni archiviate.",
+    ),
     n_bins: int | None = Query(default=None, ge=2, le=50),
     min_bin_samples: int | None = Query(default=None, ge=1),
     include_comparison: bool = Query(
@@ -66,6 +75,8 @@ def read_probability_band_analysis(
             surface=surface,
             odds_band=odds_band,
             latest_only=latest_only,
+            market=market,
+            include_archived=include_archived,
             n_bins=n_bins,
             min_bin_samples=min_bin_samples,
             include_comparison=include_comparison,

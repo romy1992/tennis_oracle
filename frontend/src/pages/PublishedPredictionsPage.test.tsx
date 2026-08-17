@@ -57,7 +57,15 @@ describe("PublishedPredictionsPage", () => {
     renderWithProviders(<PublishedPredictionsPage />);
     expect(await screen.findByText("Storico pubblicazioni")).toBeInTheDocument();
     expect(await screen.findByText("Player A vs Player B")).toBeInTheDocument();
-    expect(apiMocks.getPublishedPredictions).toHaveBeenCalled();
+    expect(apiMocks.getPublishedPredictions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        market: "match_winner",
+        include_archived: false,
+        latest_only: true
+      })
+    );
+    expect(screen.getByRole("tab", { name: "Vincitore partita" })).toBeInTheDocument();
+    expect(screen.getAllByText("Vincitore partita").length).toBeGreaterThan(0);
   });
 
   it("loads version chain on button click", async () => {

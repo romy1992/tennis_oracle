@@ -8,6 +8,7 @@ import type {
   WeeklyBetaReport,
   WeeklyBetaReportListItem
 } from "../types/api";
+import { marketLabel } from "../utils/markets";
 
 function formatPct(value: number | null | undefined) {
   if (value === null || value === undefined) return "-";
@@ -313,7 +314,8 @@ export function WeeklyBetaReportPage() {
 
           <article className="panel">
             <div className="panel-header">
-              <h3>Pronostici live</h3>
+              <h3>Pronostici live · {marketLabel(cur.live_tips.market ?? "match_winner")}</h3>
+              <span className="pill">headline = match winner (KPI non misti)</span>
             </div>
             <div className="metrics-grid">
               <MetricCard
@@ -335,6 +337,38 @@ export function WeeklyBetaReportPage() {
               <MetricCard label="Hit rate" value={formatPct(cur.live_tips.hit_rate_pct)} />
               <MetricCard label="Profitto" value={formatNum(cur.live_tips.profit)} />
             </div>
+            {(cur.live_tips.by_market?.length ?? 0) > 0 ? (
+              <div className="table-wrap" style={{ marginTop: "1rem" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Mercato</th>
+                      <th>Pubblicati</th>
+                      <th>Chiusi</th>
+                      <th>Hit rate</th>
+                      <th>ROI</th>
+                      <th>Profitto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cur.live_tips.by_market?.map((row) => (
+                      <tr key={row.market ?? "market"}>
+                        <td>
+                          <span className={`market-badge market-${row.market ?? "match_winner"}`}>
+                            {marketLabel(row.market)}
+                          </span>
+                        </td>
+                        <td>{row.predictions_published}</td>
+                        <td>{row.closed}</td>
+                        <td>{formatPct(row.hit_rate_pct)}</td>
+                        <td>{formatPct(row.roi_pct)}</td>
+                        <td>{formatNum(row.profit)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
           </article>
 
           <article className="panel">

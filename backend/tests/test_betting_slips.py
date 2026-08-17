@@ -2,10 +2,11 @@ import unittest
 from datetime import date, datetime, time, timedelta
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from backend.src.app.main import app
+from backend.src.app.schemas.published_prediction import PublishedPredictionCreate
+from backend.src.app.services.published_predictions import publish_prediction
 from backend.tests.db_helpers import create_session_factory, create_test_engine, make_api_client
 from backend.tests.auth_helpers import (
     auth_header_for_admin,
@@ -19,6 +20,7 @@ from backend.src.app.services.betting_slips import (
     _resolve_slip_status,
     build_candidate_pool,
     compute_betting_slip_model_stats,
+    generate_ladders,
     generate_slips,
     get_betting_slip_calendar,
     get_daily_betting_slips,
@@ -34,6 +36,23 @@ def _sample_odds() -> dict:
                 "Away": {"Book A": "2.60", "Book B": "2.50"},
             }
         }
+    }
+
+
+def _sample_mixed_market_odds() -> dict:
+    return {
+        "Home/Away": {
+            "Home": {"Book A": "1.50", "Book B": "1.55"},
+            "Away": {"Book A": "2.60", "Book B": "2.50"},
+        },
+        "Over/Under by Games in Match": {
+            "Over/Under by Games in Match Over": {
+                "20.5": {"Book A": "1.90", "Book B": "1.94"},
+            },
+            "Over/Under by Games in Match Under": {
+                "20.5": {"Book A": "1.90", "Book B": "1.86"},
+            },
+        },
     }
 
 
@@ -206,6 +225,50 @@ class BettingSlipsServiceTest(unittest.TestCase):
             )
             self.assertEqual([c.event_key for c in candidates], [100])
 
+    def test_build_candidate_pool_excludes_cancelled_postponed_and_unknown(self):
+        """Once status is known at update time, bad fixtures must not enter slips."""
+        with self.Session() as session:
+            self._seed_candidates(session, count=1)
+            for event_key, status in (
+                (901, "Cancelled"),
+                (902, "Postponed"),
+                (903, "Finished"),  # finished without winner → unknown
+                (904, "Set 1"),  # live → started
+            ):
+                session.add(
+                    NextFixture(
+                        event_key=event_key,
+                        event_date=self.today,
+                        event_time=time(15, 0),
+                        event_first_player=f"Bad A{event_key}",
+                        event_second_player=f"Bad B{event_key}",
+                        tournament_name="Bad Status Open",
+                        surface="Hard",
+                        odds=_sample_odds(),
+                        event_status=status,
+                        is_completed=False,
+                    )
+                )
+                session.add(
+                    MatchPrediction(
+                        event_key=event_key,
+                        model_version="v2",
+                        model_name="random_forest",
+                        predicted_at=datetime(2026, 6, 28, 8, 0, 0),
+                        prob_player_1_win=0.85,
+                        predicted_winner="First Player",
+                    )
+                )
+            session.commit()
+
+            candidates = build_candidate_pool(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+            )
+            self.assertEqual([c.event_key for c in candidates], [100])
+
     def test_v3_candidate_pool_excludes_missing_odds(self):
         with self.Session() as session:
             self._seed_candidates(session, count=1)
@@ -296,7 +359,7 @@ class BettingSlipsServiceTest(unittest.TestCase):
             self.assertIsNotNone(candidates[0].suggested_min_edge_percent)
             self.assertIsNotNone(candidates[0].min_edge_percent)
 
-    def test_generate_slips_avoids_duplicate_event_keys(self):
+    def test_generate_slips_avoids_duplicate_event_market_pairs(self):
         with self.Session() as session:
             self._seed_candidates(session, count=8)
             candidates = build_candidate_pool(
@@ -307,8 +370,74 @@ class BettingSlipsServiceTest(unittest.TestCase):
             )
             slips, _warnings = generate_slips(candidates)
             for slip in slips:
-                keys = [pick.event_key for pick in slip.picks]
-                self.assertEqual(len(keys), len(set(keys)))
+                identities = [(pick.event_key, pick.market) for pick in slip.picks]
+                self.assertEqual(len(identities), len(set(identities)))
+
+    def test_daily_slip_can_mix_markets_for_the_same_event(self):
+        target_date = date.today() + timedelta(days=1)
+        event_key = 980
+        with self.Session() as session:
+            session.add(
+                NextFixture(
+                    event_key=event_key,
+                    event_date=target_date,
+                    event_time=time(14, 0),
+                    event_first_player="Player A",
+                    event_second_player="Player B",
+                    tournament_name="Mixed Markets Open",
+                    surface="Hard",
+                    odds=_sample_mixed_market_odds(),
+                    is_completed=False,
+                )
+            )
+            session.add(
+                MatchPrediction(
+                    event_key=event_key,
+                    model_version="v2",
+                    model_name="random_forest",
+                    predicted_at=datetime.combine(target_date, time(8, 0)),
+                    prob_player_1_win=0.72,
+                    predicted_winner="First Player",
+                )
+            )
+            session.commit()
+            publish_prediction(
+                session,
+                PublishedPredictionCreate(
+                    event_key=event_key,
+                    selection="Over 20.5",
+                    model_version="over_under_games_v1",
+                    model_name="random_forest",
+                    probability=0.62,
+                    odds=1.92,
+                    void_odds=1.70,
+                    edge=0.08,
+                    publication_source="system",
+                    event_date=target_date,
+                ),
+            )
+
+            daily = get_daily_betting_slips(
+                session,
+                slip_date=target_date,
+                model_version="v2",
+                model_name="random_forest",
+                slip_count=1,
+                picks_per_slip=2,
+            )
+
+            self.assertEqual(len(daily.slips), 1)
+            picks = daily.slips[0].picks
+            self.assertEqual(len(picks), 2)
+            self.assertEqual({pick.event_key for pick in picks}, {event_key})
+            self.assertEqual(
+                {(pick.event_key, pick.market) for pick in picks},
+                {(event_key, "match_winner"), (event_key, "over_under_games")},
+            )
+            persisted = list(
+                session.scalars(select(BettingSlipPick)).all()
+            )
+            self.assertEqual(len(persisted), 2)
 
     def test_generate_slips_builds_three_difficulty_tiers(self):
         with self.Session() as session:
@@ -319,11 +448,83 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 model_version="v2",
                 model_name="random_forest",
             )
-            slips, _warnings = generate_slips(candidates, slip_count=9)
+            slips, _warnings = generate_slips(candidates, slip_count=10)
             self.assertGreaterEqual(len(slips), 1)
             keys = [slip.slip_key for slip in slips]
+            self.assertIn("play_double_score", keys)
+            double = next(slip for slip in slips if slip.slip_key == "play_double_score")
+            self.assertEqual(len(double.picks), 2)
             self.assertTrue(any(key.startswith("play_") for key in keys))
             self.assertTrue(any(key.startswith("soft_") for key in keys) or any(key.startswith("mixed_") for key in keys))
+
+    def test_generate_slips_builds_play_double_first(self):
+        with self.Session() as session:
+            self._seed_candidates(session, count=12)
+            candidates = build_candidate_pool(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+            )
+            slips, _warnings = generate_slips(candidates)
+            self.assertGreaterEqual(len(slips), 1)
+            self.assertEqual(slips[0].slip_key, "play_double_score")
+            self.assertEqual(len(slips[0].picks), 2)
+
+    def test_generate_ladders_orders_steps_by_kickoff_and_compounds(self):
+        with self.Session() as session:
+            self._seed_candidates(session, count=10)
+            candidates = build_candidate_pool(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+            )
+            ladders, _warnings = generate_ladders(candidates)
+            self.assertGreaterEqual(len(ladders), 1)
+            first = ladders[0]
+            self.assertTrue(first.slip_key.startswith("ladder_"))
+            self.assertGreaterEqual(len(first.picks), 2)
+            times = [pick.event_time for pick in first.picks]
+            self.assertEqual(times, sorted(times, key=lambda value: (value is None, value)))
+            event_keys = [pick.event_key for pick in first.picks]
+            self.assertEqual(len(event_keys), len(set(event_keys)))
+
+            daily = get_daily_betting_slips(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                stake=10.0,
+                regenerate=True,
+            )
+            ladder_reads = [slip for slip in daily.slips if slip.slip_kind == "ladder"]
+            self.assertGreaterEqual(len(ladder_reads), 1)
+            ladder = ladder_reads[0]
+            self.assertEqual(ladder.picks[0].ladder_step_index, 1)
+            self.assertEqual(ladder.picks[0].ladder_step_stake, 10.0)
+            if ladder.picks[0].odds is not None:
+                self.assertAlmostEqual(
+                    ladder.picks[0].ladder_step_return_if_won or 0.0,
+                    10.0 * ladder.picks[0].odds,
+                    places=2,
+                )
+            if len(ladder.picks) > 1 and ladder.picks[0].odds is not None:
+                self.assertAlmostEqual(
+                    ladder.picks[1].ladder_step_stake or 0.0,
+                    10.0 * ladder.picks[0].odds,
+                    places=2,
+                )
+
+            stats = compute_betting_slip_model_stats(
+                session,
+                from_date=self.today,
+                to_date=self.today,
+                stake=10.0,
+            )
+            kinds = {row.slip_kind for row in stats.by_kind}
+            self.assertIn("ladder", kinds)
+            self.assertTrue(any(row.slip_key.startswith("ladder_") for row in stats.by_profile))
 
     def test_persisted_slips_are_stable_on_second_load(self):
         with self.Session() as session:
@@ -668,7 +869,11 @@ class BettingSlipsRoutesTest(unittest.TestCase):
 
         response = self.client.get(
             "/api/betting-slips/daily",
-            params={"date": self.today.isoformat(), "model_name": "random_forest"},
+            params={
+                "date": self.today.isoformat(),
+                "model_version": "v2",
+                "model_name": "random_forest",
+            },
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -694,7 +899,11 @@ class BettingSlipsRoutesTest(unittest.TestCase):
 
         response = self.client.get(
             "/api/betting-slips/daily",
-            params={"date": self.today.isoformat(), "model_name": "random_forest"},
+            params={
+                "date": self.today.isoformat(),
+                "model_version": "v2",
+                "model_name": "random_forest",
+            },
         )
         self.assertEqual(response.status_code, 200)
         slip = response.json()["slips"][0]
@@ -712,11 +921,19 @@ class BettingSlipsRoutesTest(unittest.TestCase):
 
         first = self.client.get(
             "/api/betting-slips/daily",
-            params={"date": self.today.isoformat(), "model_name": "random_forest"},
+            params={
+                "date": self.today.isoformat(),
+                "model_version": "v2",
+                "model_name": "random_forest",
+            },
         )
         refresh = self.client.post(
             "/api/betting-slips/refresh",
-            params={"date": self.today.isoformat(), "model_name": "random_forest"},
+            params={
+                "date": self.today.isoformat(),
+                "model_version": "v2",
+                "model_name": "random_forest",
+            },
             headers=self.auth_headers,
         )
         self.assertEqual(refresh.status_code, 200)
@@ -739,7 +956,7 @@ class BettingSlipsRoutesTest(unittest.TestCase):
 
         response = self.client.get(
             "/api/betting-slips/calendar",
-            params={"model_name": "random_forest"},
+            params={"model_version": "v2", "model_name": "random_forest"},
             headers=self.auth_headers,
         )
         self.assertEqual(response.status_code, 200)
@@ -779,6 +996,61 @@ class BettingSlipsRoutesTest(unittest.TestCase):
         self.assertEqual(row["slips_total"], 1)
         self.assertEqual(row["slips_won"], 1)
         self.assertEqual(row["slip_win_rate_pct"], 100.0)
+
+    def test_daily_image_route_returns_png(self):
+        with self.Session() as session:
+            self._seed_slip_with_pick(session)
+
+        response = self.client.get(
+            "/api/betting-slips/daily/image.png",
+            params={
+                "date": self.today.isoformat(),
+                "model_version": "v2",
+                "model_name": "random_forest",
+                "slip_key": "safe",
+                "stake": 10,
+            },
+            headers=self.auth_headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/png")
+        self.assertIn("attachment;", response.headers.get("content-disposition", ""))
+        self.assertTrue(response.content.startswith(b"\x89PNG"))
+
+    def test_daily_images_zip_route_returns_zip(self):
+        with self.Session() as session:
+            self._seed_slip_with_pick(session)
+
+        response = self.client.get(
+            "/api/betting-slips/daily/images.zip",
+            params={
+                "date": self.today.isoformat(),
+                "model_version": "v2",
+                "model_name": "random_forest",
+                "stake": 10,
+            },
+            headers=self.auth_headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/zip")
+        self.assertIn(".zip", response.headers.get("content-disposition", ""))
+        self.assertTrue(response.content[:2] == b"PK")
+
+    def test_daily_image_route_404_for_unknown_slip_key(self):
+        with self.Session() as session:
+            self._seed_slip_with_pick(session)
+
+        response = self.client.get(
+            "/api/betting-slips/daily/image.png",
+            params={
+                "date": self.today.isoformat(),
+                "model_version": "v2",
+                "model_name": "random_forest",
+                "slip_key": "missing",
+            },
+            headers=self.auth_headers,
+        )
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__ == "__main__":

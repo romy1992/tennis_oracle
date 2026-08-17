@@ -17,7 +17,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.src.app.core.config import Settings, get_settings
 from backend.src.app.db.session import SessionLocal
-from backend.src.app.ml.model_versioning import MODEL_VERSIONS, REPORTS_DIR
+from backend.src.app.ml.model_versioning import REPORTS_DIR
+from backend.src.app.ml.training.walk_forward_markets import (
+    ACTIVE_WALK_FORWARD_MARKET_VERSIONS,
+    ALL_WALK_FORWARD_VERSIONS,
+)
 from backend.src.app.ml.training.walk_forward import (
     DEFAULT_EMBARGO_DAYS,
     DEFAULT_INITIAL_TRAIN_DAYS,
@@ -102,9 +106,19 @@ def config_from_settings(
 
 
 def resolve_versions(overrides: WalkForwardTriggerRequest | None = None) -> tuple[str, ...]:
+    """Versions/markets included in a new walk-forward run.
+
+    Default is every currently **active market** (``ACTIVE_WALK_FORWARD_MARKET_VERSIONS``:
+    live match-winner + first_set_winner + over_under_games), not every archived
+    key in ``MODEL_VERSIONS``. Pass ``versions=`` explicitly to backtest archived
+    match-winner tags (v1–v3) or to scope a run to a single market.
+    """
     if overrides and overrides.versions:
+        unknown = [item for item in overrides.versions if item not in ALL_WALK_FORWARD_VERSIONS]
+        if unknown:
+            raise ValueError(f"Versioni walk-forward sconosciute: {unknown}")
         return tuple(overrides.versions)
-    return tuple(MODEL_VERSIONS.keys())
+    return ACTIVE_WALK_FORWARD_MARKET_VERSIONS
 
 
 def fold_to_read(fold: WalkForwardFold) -> WalkForwardFoldRead:
@@ -544,6 +558,7 @@ def execute_walk_forward_run(run_id: int) -> WalkForwardRun:
             result = run_walk_forward_validation(
                 config,
                 versions=versions,
+                db=db,
                 progress_callback=on_progress,
                 prepare_progress_callback=on_prepare,
                 should_cancel=should_cancel,

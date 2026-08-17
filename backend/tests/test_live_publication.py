@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 
 from backend.src.app.core.config import Settings
 from backend.src.app.schemas.prematch_odds_snapshot import PrematchOddsSnapshotCreate
+from backend.src.app.schemas.published_prediction import PublishedPredictionCreate
 from backend.src.app.services.betting_slips import get_daily_betting_slips
 from backend.src.app.services.live_beta_dashboard import compute_live_beta_dashboard
 from backend.src.app.services.live_publication_service import (
@@ -22,6 +23,7 @@ from backend.src.app.services.prematch_odds_snapshots import (
     seal_closing_from_last_prematch,
 )
 from backend.src.app.services.published_live_stats import compute_published_live_stats
+from backend.src.app.services.published_predictions import publish_prediction
 from backend.tests.auth_helpers import make_test_settings
 from backend.src.entity.betting_slip import BettingSlip, BettingSlipPick
 from backend.src.entity.fixture import Fixture
@@ -54,10 +56,27 @@ def _underdog_odds() -> dict:
     }
 
 
+def _mixed_market_odds() -> dict:
+    return {
+        "Home/Away": {
+            "Home": {"Book A": "1.50", "Book B": "1.55"},
+            "Away": {"Book A": "2.60", "Book B": "2.50"},
+        },
+        "Over/Under by Games in Match": {
+            "Over/Under by Games in Match Over": {
+                "20.5": {"Book A": "2.50", "Book B": "2.50"},
+            },
+            "Over/Under by Games in Match Under": {
+                "20.5": {"Book A": "1.50", "Book B": "1.50"},
+            },
+        },
+    }
+
+
 def _settings(**overrides) -> Settings:
     base = {
         "live_publication_enabled": True,
-        "public_model_version": "v3",
+        "public_model_version": "v4",
         "public_model_name": "logistic_regression",
     }
     base.update(overrides)
@@ -69,7 +88,7 @@ def _seed_play_fixture(
     *,
     event_key: int = 8801,
     slip_date: date | None = None,
-    model_version: str = "v3",
+    model_version: str = "v4",
     model_name: str = "logistic_regression",
     prob: float = 0.75,
     odds: dict | None = None,
@@ -133,7 +152,7 @@ def test_valid_play_is_published(db_session):
     get_daily_betting_slips(
         db_session,
         slip_date=day,
-        model_version="v3",
+        model_version="v4",
         model_name="logistic_regression",
         regenerate=True,
     )
@@ -153,7 +172,7 @@ def test_valid_play_is_published(db_session):
     assert row.unit_stake == 1.0
     assert row.selection == "Alice"
     assert row.match_prediction_id is not None
-    assert row.model_version == "v3"
+    assert row.model_version == "v4"
     assert row.model_name == "logistic_regression"
     snap = db_session.scalar(
         select(PrematchOddsSnapshot).where(
@@ -163,6 +182,56 @@ def test_valid_play_is_published(db_session):
     assert snap is not None
     assert snap.bookmaker == PUBLICATION_BOOKMAKER
     assert snap.odds == pytest.approx(float(row.odds))
+
+
+def test_official_publication_ignores_extra_market_and_links_match_winner_pick(db_session):
+    day = date.today() + timedelta(days=1)
+    fixture = _seed_play_fixture(db_session, slip_date=day, odds=_mixed_market_odds())
+    publish_prediction(
+        db_session,
+        PublishedPredictionCreate(
+            event_key=fixture.event_key,
+            selection="Over 20.5",
+            model_version="over_under_games_v1",
+            model_name="random_forest",
+            probability=0.90,
+            odds=2.50,
+            void_odds=1.1111,
+            edge=125.0,
+            publication_source="system",
+            event_date=day,
+        ),
+    )
+    daily = get_daily_betting_slips(
+        db_session,
+        slip_date=day,
+        model_version="v4",
+        model_name="logistic_regression",
+        slip_count=1,
+        picks_per_slip=2,
+        regenerate=True,
+    )
+    assert {(pick.event_key, pick.market) for pick in daily.slips[0].picks} == {
+        (fixture.event_key, "match_winner"),
+        (fixture.event_key, "over_under_games"),
+    }
+
+    report = publish_official_plays_for_day(
+        db_session,
+        slip_date=day,
+        settings=_settings(),
+    )
+
+    assert report.publications_created == 1
+    official = db_session.scalar(
+        select(PublishedPrediction).where(PublishedPrediction.model_version == "v4")
+    )
+    assert official is not None
+    assert official.selection == "Alice"
+    assert official.betting_slip_pick_id is not None
+    linked_pick = db_session.get(BettingSlipPick, official.betting_slip_pick_id)
+    assert linked_pick is not None
+    assert linked_pick.market == "match_winner"
 
 
 def test_non_play_is_not_published(db_session):
@@ -242,7 +311,7 @@ def test_pipeline_rerun_is_idempotent(db_session):
     get_daily_betting_slips(
         db_session,
         slip_date=day,
-        model_version="v3",
+        model_version="v4",
         model_name="logistic_regression",
         regenerate=True,
     )
@@ -282,7 +351,7 @@ def test_links_match_prediction_and_play_pick(db_session):
     get_daily_betting_slips(
         db_session,
         slip_date=day,
-        model_version="v3",
+        model_version="v4",
         model_name="logistic_regression",
         regenerate=True,
     )
@@ -308,7 +377,7 @@ def test_publication_snapshot_duplicate_skipped(db_session):
     get_daily_betting_slips(
         db_session,
         slip_date=day,
-        model_version="v3",
+        model_version="v4",
         model_name="logistic_regression",
         regenerate=True,
     )
@@ -392,7 +461,7 @@ def test_kpi_update_and_settlement_after_publication(db_session):
     get_daily_betting_slips(
         db_session,
         slip_date=day,
-        model_version="v3",
+        model_version="v4",
         model_name="logistic_regression",
         regenerate=True,
     )
@@ -447,7 +516,7 @@ def test_dashboard_populated_after_publication(db_session):
     get_daily_betting_slips(
         db_session,
         slip_date=day,
-        model_version="v3",
+        model_version="v4",
         model_name="logistic_regression",
         regenerate=True,
     )
@@ -458,7 +527,7 @@ def test_dashboard_populated_after_publication(db_session):
         dashboard = compute_live_beta_dashboard(db_session)
         assert dashboard.live_stats.predictions_total == 1
         assert dashboard.publication_health.empty_reason == "ok"
-        assert dashboard.publication_health.public_model_version == "v3"
+        assert dashboard.publication_health.public_model_version == "v4"
         assert dashboard.publication_health.validation_started_at is not None
         assert dashboard.data_completeness.snapshots_publication >= 1
         assert dashboard.data_completeness.closing_odds_note is not None

@@ -33,32 +33,13 @@ export const modelsCatalog: ModelsVersionsResultsResponse = {
   last_run_origin: "manual",
   versions: [
     {
-      version: "v3",
+      version: "v4",
       models: [
         {
-          model: "logistic_regression",
+          model: "voting_ensemble",
           status: "ok",
           predictions_count: 10,
           slips_count: 9,
-          data: {}
-        },
-        {
-          model: "random_forest",
-          status: "ok",
-          predictions_count: 10,
-          slips_count: 9,
-          data: {}
-        }
-      ]
-    },
-    {
-      version: "v2",
-      models: [
-        {
-          model: "logistic_regression",
-          status: "ok",
-          predictions_count: 5,
-          slips_count: 3,
           data: {}
         }
       ]
@@ -77,8 +58,8 @@ export const importStatus: ImportStatusResponse = {
 };
 
 export const emptyValueAnalysis: SingleMatchValueResponse = {
-  model_version: "v3",
-  model_name: "logistic_regression",
+  model_version: "v4",
+  model_name: "voting_ensemble",
   min_edge_percent: 0,
   items: [],
   total: 0,
@@ -154,8 +135,8 @@ export function makeFixture(
     moved_to_fixture_at: null,
     prediction: {
       event_key: 1001,
-      model_version: "v3",
-      model_name: "logistic_regression",
+      model_version: "v4",
+      model_name: "voting_ensemble",
       predicted_at: `${TODAY}T09:00:00Z`,
       prob_player_1_win: 0.62,
       predicted_winner: "First Player",
@@ -168,6 +149,7 @@ export function makeFixture(
       warnings: []
     },
     prediction_warning: null,
+    extra_markets: [],
     ...overrides
   };
 }
@@ -190,13 +172,13 @@ export const idleGlobalUpdate: GlobalUpdateRunRead = {
   finished_at: `${TODAY}T07:10:00Z`,
   duration_seconds: 600,
   force: true,
-  versions_processed: 2,
-  models_processed: 3,
-  combinations_completed: 3,
+  versions_processed: 1,
+  models_processed: 1,
+  combinations_completed: 1,
   combinations_failed: 0,
   combinations_skipped: 0,
   fixtures_processed: 40,
-  slips_generated: 27,
+  slips_generated: 9,
   errors: [],
   warnings: [],
   items: []
@@ -217,8 +199,8 @@ export function makeCalendar(date = TODAY): BettingSlipCalendarResponse {
     window_from: date,
     window_to: date,
     history_from: null,
-    model_version: "v3",
-    model_name: "logistic_regression",
+    model_version: "v4",
+    model_name: "voting_ensemble",
     days: [
       {
         date,
@@ -243,6 +225,7 @@ export function makeSlip(overrides: Partial<BettingSlip> = {}): BettingSlip {
     picks: [
       {
         event_key: 1001,
+        market: "match_winner",
         event_date: TODAY,
         event_time: "15:30:00",
         tournament_name: "Test Open",
@@ -290,8 +273,8 @@ export function makeSlip(overrides: Partial<BettingSlip> = {}): BettingSlip {
 export function makeDailySlips(date = TODAY): BettingSlipsDailyResponse {
   return {
     date,
-    model_version: "v3",
-    model_name: "logistic_regression",
+    model_version: "v4",
+    model_name: "voting_ensemble",
     stake: 10,
     candidate_pool_size: 4,
     slips: [makeSlip()],
@@ -301,7 +284,7 @@ export function makeDailySlips(date = TODAY): BettingSlipsDailyResponse {
 
 export function makeSlipStats(date = TODAY): BettingSlipStatsResponse {
   return {
-    model_version: "v3",
+    model_version: "v4",
     from_date: date,
     to_date: date,
     days: [],
@@ -415,9 +398,10 @@ export const publishedPredictions: PublishedPredictionListResponse = {
       content_version: 1,
       previous_version_id: null,
       event_key: 9001,
+      market: "match_winner",
       selection: "Player A",
-      model_version: "v3",
-      model_name: "logistic_regression",
+      model_version: "v4",
+      model_name: "voting_ensemble",
       probability: 0.62,
       odds: 1.85,
       void_odds: 1.6129,
@@ -444,7 +428,9 @@ export const publishedPredictions: PublishedPredictionListResponse = {
       match_prediction_id: null,
       betting_slip_pick_id: null,
       is_latest: true,
-      match_started: false
+      match_started: false,
+      value_decision: "PLAY",
+      official_play: true
     }
   ]
 };
@@ -564,7 +550,35 @@ export const publishedLiveStats: PublishedLiveStatsSummary = {
       clv_positive_pct: 50,
       clv_avg_prob_delta_pct: 0.9
     }
-  ]
+  ],
+  market: "match_winner",
+  include_archived: false,
+  official_only: false
+};
+
+export const officialLiveStats: PublishedLiveStatsSummary = {
+  ...publishedLiveStats,
+  predictions_total: 2,
+  closed: 1,
+  open: 1,
+  void: 0,
+  won: 1,
+  lost: 0,
+  hit_rate_pct: 100,
+  stake_total: 2,
+  stake_settled: 1,
+  profit: 0.85,
+  roi_pct: 85,
+  yield_pct: 85,
+  avg_odds: 1.85,
+  max_drawdown: 0,
+  clv_count: 2,
+  clv_missing: 0,
+  clv_coverage_pct: 100,
+  clv_avg_pct: 7.5581,
+  market: "match_winner",
+  include_archived: false,
+  official_only: true
 };
 
 const settledTipBase = publishedPredictions.items[0];
@@ -588,6 +602,9 @@ export const liveBetaDashboard: LiveBetaDashboardResponse = {
   surface: null,
   odds_band: null,
   latest_only: true,
+  market: "match_winner",
+  include_archived: false,
+  official_only: false,
   pipeline: {
     mode: "live",
     active_run: null,
@@ -596,6 +613,7 @@ export const liveBetaDashboard: LiveBetaDashboardResponse = {
     import_status: importStatus
   },
   live_stats: publishedLiveStats,
+  official_live_stats: officialLiveStats,
   published_today: [liveBetaSettledTip],
   open_predictions: [liveBetaSettledTip],
   closed_predictions: [
@@ -635,8 +653,8 @@ export const liveBetaDashboard: LiveBetaDashboardResponse = {
     empty_reason: "ok",
     message: "Registro live operativo.",
     live_publication_enabled: true,
-    public_model_version: "v3",
-    public_model_name: "logistic_regression",
+    public_model_version: "v4",
+    public_model_name: "voting_ensemble",
     validation_started_at: `${TODAY}T08:00:00`,
     last_run_publications_created: 2,
     last_run_duplicates_skipped: 0,
@@ -695,7 +713,58 @@ function makePeriod(weekStart: string, weekEnd: string, weekLabel: string) {
       profit: 0.5,
       roi_pct: 12.5,
       yield_pct: 12.5,
-      max_drawdown: 1.2
+      max_drawdown: 1.2,
+      market: "match_winner",
+      by_market: [
+        {
+          market: "match_winner",
+          predictions_published: 6,
+          closed: 4,
+          open: 2,
+          won: 2,
+          lost: 2,
+          void: 0,
+          hit_rate_pct: 50,
+          stake_settled: 4,
+          profit: 0.5,
+          roi_pct: 12.5,
+          yield_pct: 12.5,
+          max_drawdown: 1.2,
+          by_market: []
+        },
+        {
+          market: "first_set_winner",
+          predictions_published: 2,
+          closed: 1,
+          open: 1,
+          won: 1,
+          lost: 0,
+          void: 0,
+          hit_rate_pct: 100,
+          stake_settled: 1,
+          profit: 0.8,
+          roi_pct: 80,
+          yield_pct: 80,
+          max_drawdown: 0,
+          by_market: []
+        },
+        {
+          market: "over_under_games",
+          predictions_published: 1,
+          closed: 0,
+          open: 1,
+          won: 0,
+          lost: 0,
+          void: 0,
+          hit_rate_pct: null,
+          stake_settled: 0,
+          profit: 0,
+          roi_pct: null,
+          yield_pct: null,
+          max_drawdown: 0,
+          by_market: []
+        }
+      ]
     },
     pipeline: {
       runs_total: 7,
@@ -1230,6 +1299,7 @@ export const probabilityBandAnalysis = {
   min_bin_samples: 30,
   model_version: null,
   model_name: null,
+  market: "match_winner",
   from_date: "2026-01-01",
   to_date: "2026-07-28",
   event_date_from: null,
@@ -1244,7 +1314,7 @@ export const probabilityBandAnalysis = {
   comparison: {},
   by_fold: [],
   by_period: [],
-  notes: ["Live: ledger PublishedPrediction con settlement a lettura (non backtest ML)."]
+  notes: ["Live · mercato match_winner: ledger PublishedPrediction (settlement a lettura; un mercato alla volta)."]
 };
 
 export const segmentRoiBucket = {
@@ -1278,6 +1348,7 @@ export const segmentRoiAnalysis = {
   min_segment_samples: 30,
   model_version: null,
   model_name: null,
+  market: "match_winner",
   from_date: "2026-01-01",
   to_date: "2026-07-28",
   event_date_from: null,
@@ -1291,7 +1362,7 @@ export const segmentRoiAnalysis = {
   segments: [segmentRoiBucket],
   by_fold: [],
   by_period: [],
-  notes: ["Live: ledger PublishedPrediction con settlement a lettura (non backtest ML)."]
+  notes: ["Live · mercato match_winner: ledger PublishedPrediction (settlement a lettura; un mercato alla volta)."]
 };
 
 export const subscriptionDashboardSummary: SubscriptionDashboardSummaryResponse = {

@@ -54,7 +54,15 @@ describe("PublishedLiveStatsPage", () => {
   it("shows live tipbook KPIs from the published ledger", async () => {
     renderWithProviders(<PublishedLiveStatsPage />);
     expect(await screen.findByRole("heading", { name: /statistiche live/i })).toBeInTheDocument();
-    expect(apiMocks.getPublishedLiveStats).toHaveBeenCalled();
+    expect(apiMocks.getPublishedLiveStats).toHaveBeenCalledWith(
+      expect.objectContaining({
+        market: "match_winner",
+        include_archived: false
+      })
+    );
+    expect(screen.getByRole("tab", { name: "Vincitore partita" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Vincitore 1° set" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Over/Under games" })).toBeInTheDocument();
     expect(screen.getByText(String(publishedLiveStats.predictions_total))).toBeInTheDocument();
     expect(screen.getAllByText("Hit rate").length).toBeGreaterThan(0);
     expect(screen.getByText("Max drawdown")).toBeInTheDocument();

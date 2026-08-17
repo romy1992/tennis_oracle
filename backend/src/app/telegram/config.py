@@ -15,7 +15,7 @@ class TelegramSettings(BaseSettings):
     telegram_model_version: str = "v3"
     telegram_model_name: str | None = "logistic_regression"
     telegram_default_stake: float = 10.0
-    telegram_slip_count: int = 9
+    telegram_slip_count: int = 10
     telegram_min_edge_percent: float = 2.0
     # Comma-separated fallback when /models-versions/results is unavailable.
     telegram_model_names: str = "logistic_regression,random_forest"

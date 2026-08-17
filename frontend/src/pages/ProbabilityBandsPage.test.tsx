@@ -85,6 +85,14 @@ describe("ProbabilityBandsPage", () => {
 
     pending.resolve(probabilityBandAnalysis);
     expect(await screen.findByText(/Analisi fasce probabilità/i)).toBeInTheDocument();
+    expect(apiMocks.getProbabilityBandAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "live",
+        market: "match_winner",
+        include_archived: false
+      })
+    );
+    expect(screen.getByRole("tab", { name: "Vincitore partita" })).toBeInTheDocument();
     expect(await screen.findByText("50% – 60%")).toBeInTheDocument();
     expect(await screen.findByText("Fasce probabilità (raw)")).toBeInTheDocument();
   });

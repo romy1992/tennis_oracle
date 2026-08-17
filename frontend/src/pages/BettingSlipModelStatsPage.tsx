@@ -4,6 +4,7 @@ import { MetricCard } from "../components/MetricCard";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { apiClient } from "../services/apiClient";
 import type { BettingSlipModelStatsResponse, BettingSlipModelStatsRow } from "../types/api";
+import { marketLabel } from "../utils/markets";
 import { formatDate, todayLocalISODate } from "../utils/tennis";
 
 const STAKE_PRESETS = [1, 5, 10, 25, 50];
@@ -144,7 +145,8 @@ export function BettingSlipModelStatsPage() {
         <div>
           <h2>Statistiche schedine</h2>
           <p>
-            Confronto aggregato per versione e modello dal{" "}
+            Hit rate delle pick per mercato (Match / 1° set / O/U), confronto{" "}
+            <strong>Schedine vs Scalate</strong> e risultato delle giocate dal{" "}
             {stats ? formatDate(stats.from_date) : "-"} al {stats ? formatDate(stats.to_date) : "-"}.
           </p>
         </div>
@@ -228,8 +230,139 @@ export function BettingSlipModelStatsPage() {
 
       <article className="panel">
         <div className="panel-header">
-          <h3>Confronto modelli</h3>
-          <span className="pill">{sortedRows.length} combinazioni</span>
+          <h3>Pick per mercato</h3>
+          <span className="pill">{(stats?.by_market ?? []).length} mercati</span>
+        </div>
+        {(stats?.by_market ?? []).length === 0 ? (
+          <EmptyState
+            title="Nessuna pick nel periodo"
+            message="Genera schedine multi-mercato per vedere il breakdown Match / 1° set / O/U."
+          />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mercato</th>
+                  <th>Pick totali</th>
+                  <th>Vinte</th>
+                  <th>Perse</th>
+                  <th>Pending</th>
+                  <th>Void</th>
+                  <th>Hit rate pick</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(stats?.by_market ?? []).map((row) => (
+                  <tr key={row.market}>
+                    <td>
+                      <span className={`market-badge market-${row.market}`}>
+                        {marketLabel(row.market)}
+                      </span>
+                    </td>
+                    <td>{row.picks_total}</td>
+                    <td>{row.picks_won}</td>
+                    <td>{row.picks_lost}</td>
+                    <td>
+                      <span className="slip-status-badge pending">{row.picks_pending}</span>
+                    </td>
+                    <td>{row.picks_void}</td>
+                    <td>{formatPct(row.pick_hit_rate_pct)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </article>
+
+      <article className="panel">
+        <div className="panel-header">
+          <h3>Schedine vs Scalate</h3>
+          <span className="pill">{(stats?.by_kind ?? []).length} tipi</span>
+        </div>
+        {(stats?.by_kind ?? []).length === 0 ? (
+          <EmptyState
+            title="Nessun dato per tipo"
+            message="Genera schedine e scalate per vedere il breakdown separato."
+          />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th>Totale</th>
+                  <th>Vinte</th>
+                  <th>Perse</th>
+                  <th>Pending</th>
+                  <th>Win rate</th>
+                  <th>Hit pick</th>
+                  <th>Profitto</th>
+                  <th>ROI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(stats?.by_kind ?? []).map((row) => (
+                  <tr key={row.slip_kind}>
+                    <td>{row.label}</td>
+                    <td>{row.slips_total}</td>
+                    <td>{row.slips_won}</td>
+                    <td>{row.slips_lost}</td>
+                    <td>{row.slips_pending ?? 0}</td>
+                    <td>{formatPct(row.slip_win_rate_pct)}</td>
+                    <td>{formatPct(row.pick_hit_rate_pct)}</td>
+                    <td>{formatMoney(row.theoretical_profit_units)}</td>
+                    <td>{formatPct(row.theoretical_roi_pct)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </article>
+
+      <article className="panel">
+        <div className="panel-header">
+          <h3>Profili (schedine e scalate)</h3>
+          <span className="pill">{(stats?.by_profile ?? []).length} profili</span>
+        </div>
+        {(stats?.by_profile ?? []).length === 0 ? (
+          <EmptyState title="Nessun profilo" message="Nessuna schedina o scalata nel periodo." />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Profilo</th>
+                  <th>Tipo</th>
+                  <th>Totale</th>
+                  <th>Vinte</th>
+                  <th>Perse</th>
+                  <th>Win rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(stats?.by_profile ?? []).map((row) => (
+                  <tr key={row.slip_key}>
+                    <td>{row.label}</td>
+                    <td>{(row.slip_kind ?? "parlay") === "ladder" ? "Scalata" : "Schedina"}</td>
+                    <td>{row.slips_total}</td>
+                    <td>{row.slips_won}</td>
+                    <td>{row.slips_lost}</td>
+                    <td>{formatPct(row.slip_win_rate_pct)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </article>
+
+      <article className="panel">
+        <div className="panel-header">
+          <h3>Esito schedine</h3>
+          <span className="pill">{sortedRows.length} serie</span>
         </div>
 
         {sortedRows.length === 0 ? (
@@ -242,8 +375,6 @@ export function BettingSlipModelStatsPage() {
             <table className="model-stats-table">
               <thead>
                 <tr>
-                  <th>Versione</th>
-                  <th>Modello</th>
                   <th>
                     <SortButton
                       label="Schedine totali"
@@ -266,9 +397,6 @@ export function BettingSlipModelStatsPage() {
                     />
                   </th>
                   <th>Pick totali</th>
-                  <th>Pick vinte</th>
-                  <th>Pick perse</th>
-                  <th>Pick pending</th>
                   <th>% pick</th>
                   <th>Profitto</th>
                   <th>
@@ -287,8 +415,6 @@ export function BettingSlipModelStatsPage() {
               <tbody>
                 {sortedRows.map((row) => (
                   <tr key={`${row.model_version}-${row.model_name}`}>
-                    <td>{row.model_version}</td>
-                    <td>{row.model_name}</td>
                     <td>{row.slips_total}</td>
                     <td>{row.slips_won}</td>
                     <td>{row.slips_lost}</td>
@@ -297,11 +423,6 @@ export function BettingSlipModelStatsPage() {
                     </td>
                     <td>{formatPct(row.slip_win_rate_pct)}</td>
                     <td>{row.picks_total}</td>
-                    <td>{row.picks_won}</td>
-                    <td>{row.picks_lost}</td>
-                    <td>
-                      <span className="slip-status-badge pending">{row.picks_pending}</span>
-                    </td>
                     <td>{formatPct(row.pick_hit_rate_pct)}</td>
                     <td className={row.theoretical_profit_units >= 0 ? "positive-value" : "negative-value"}>
                       {formatMoney(row.theoretical_profit_units)}

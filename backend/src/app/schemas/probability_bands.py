@@ -60,6 +60,7 @@ class ProbabilityBandAnalysisRead(BaseModel):
     min_bin_samples: int
     model_version: str | None = None
     model_name: str | None = None
+    market: str | None = None
     from_date: date | None = None
     to_date: date | None = None
     event_date_from: date | None = None
