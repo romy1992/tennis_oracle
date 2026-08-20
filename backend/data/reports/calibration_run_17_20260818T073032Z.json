@@ -20,8 +20,8 @@
       "random_state": 42
     }
   },
-  "started_at": "2026-08-19T07:34:02.975803+00:00",
-  "finished_at": "2026-08-19T07:44:34.025485+00:00",
+  "started_at": "2026-08-18T07:20:08.363576+00:00",
+  "finished_at": "2026-08-18T07:30:32.593127+00:00",
   "walk_forward_run_id": null,
   "models": [
     {
@@ -36885,8 +36885,8 @@
         "note": "Delta negativo su Brier/log_loss/ECE/MCE indica miglioramento rispetto alle probabilit\u00e0 grezze."
       },
       "artifacts": {
-        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_18_v4_logistic_regression_platt.pkl",
-        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_18_v4_logistic_regression_isotonic.pkl"
+        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_17_v4_logistic_regression_platt.pkl",
+        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_17_v4_logistic_regression_isotonic.pkl"
       },
       "leakage_flags": []
     },
@@ -73751,8 +73751,8 @@
         "note": "Delta negativo su Brier/log_loss/ECE/MCE indica miglioramento rispetto alle probabilit\u00e0 grezze."
       },
       "artifacts": {
-        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_18_v4_random_forest_platt.pkl",
-        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_18_v4_random_forest_isotonic.pkl"
+        "platt": "/app/backend/data/reports/calibration/artifacts/calibration_run_17_v4_random_forest_platt.pkl",
+        "isotonic": "/app/backend/data/reports/calibration/artifacts/calibration_run_17_v4_random_forest_isotonic.pkl"
       },
       "leakage_flags": []
     }
@@ -73769,5 +73769,5 @@
     ],
     "note": "Calibrazione su OOS walk-forward. Non attiva automaticamente il modello pubblico."
   },
-  "report_path": "/app/backend/data/reports/calibration_run_18_20260819T074434Z.json"
+  "report_path": "/app/backend/data/reports/calibration_run_17_20260818T073032Z.json"
 }
