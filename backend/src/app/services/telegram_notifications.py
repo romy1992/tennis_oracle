@@ -19,6 +19,10 @@ from sqlalchemy.orm import Session
 
 from backend.src.app.core.config import Settings, get_settings
 from backend.src.app.services.live_publication_service import resolve_public_model_config
+from backend.src.app.services.betting_slips import (
+    compute_betting_slip_stats,
+    get_daily_betting_slips,
+)
 from backend.src.app.services.predictions import (
     compute_daily_prediction_stats,
     get_next_fixtures_with_predictions,
@@ -26,6 +30,7 @@ from backend.src.app.services.predictions import (
 from backend.src.app.services.telegram_users import _terms_satisfied
 from backend.src.app.telegram.dates import today_rome
 from backend.src.app.telegram.messages import (
+    format_betting_slip_recap,
     format_fixtures_empty,
     format_notification_predictions,
     format_notification_results,
@@ -37,11 +42,18 @@ from backend.src.utility.sensitive_data import sanitize_text
 
 logger = logging.getLogger(__name__)
 
-NotificationKind = Literal["predictions", "results", "empty_day"]
+NotificationKind = Literal["predictions", "results", "empty_day", "slip_recap"]
 KIND_PREDICTIONS: NotificationKind = "predictions"
 KIND_RESULTS: NotificationKind = "results"
 KIND_EMPTY_DAY: NotificationKind = "empty_day"
+KIND_SLIP_RECAP: NotificationKind = "slip_recap"
 ALL_KINDS: tuple[NotificationKind, ...] = (
+    KIND_PREDICTIONS,
+    KIND_RESULTS,
+    KIND_EMPTY_DAY,
+    KIND_SLIP_RECAP,
+)
+DEFAULT_KINDS: tuple[NotificationKind, ...] = (
     KIND_PREDICTIONS,
     KIND_RESULTS,
     KIND_EMPTY_DAY,
@@ -116,7 +128,7 @@ def list_notification_recipients(
     )
     if kind == KIND_PREDICTIONS:
         stmt = stmt.where(TelegramUser.notify_predictions.is_(True))
-    elif kind == KIND_RESULTS:
+    elif kind in {KIND_RESULTS, KIND_SLIP_RECAP}:
         stmt = stmt.where(TelegramUser.notify_results.is_(True))
     elif kind == KIND_EMPTY_DAY:
         stmt = stmt.where(TelegramUser.notify_empty_day.is_(True))
@@ -206,6 +218,46 @@ def build_empty_day_message(*, target_date: date) -> str:
     return format_fixtures_empty(target_date)
 
 
+def build_slip_recap_message(
+    db: Session,
+    *,
+    target_date: date,
+    settings: Settings | None = None,
+    model_version: str | None = None,
+    model_name: str | None = None,
+) -> tuple[str, bool, int]:
+    """Return recap text, readiness, and slip count for the public model."""
+    settings = settings or get_settings()
+    version, name = _resolve_notification_model(
+        db, settings, model_version=model_version, model_name=model_name
+    )
+    daily = get_daily_betting_slips(
+        db,
+        slip_date=target_date,
+        model_version=version,  # type: ignore[arg-type]
+        model_name=name,
+        stake=settings.betting_slip_recap_stake,
+        settings=settings,
+    )
+    payload = daily.model_dump(mode="json")
+    pending = sum(slip.picks_pending for slip in daily.slips)
+    ready = bool(daily.slips) and pending == 0
+    stats = compute_betting_slip_stats(
+        db,
+        model_version=version,  # type: ignore[arg-type]
+        model_name=name,
+        from_date=target_date,
+        to_date=target_date,
+        stake=settings.betting_slip_recap_stake,
+    )
+    day = stats.days[0].model_dump(mode="json") if stats.days else None
+    return (
+        format_betting_slip_recap(target_date, payload, day),
+        ready,
+        len(daily.slips),
+    )
+
+
 def _get_or_create_delivery(
     db: Session,
     *,
@@ -288,22 +340,28 @@ def send_telegram_message(
     http_post: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Send one text message via Bot API. Raises httpx.HTTPStatusError on HTTP errors."""
-    chunks = split_message(text)
-    body = chunks[0] if chunks else text
+    chunks = split_message(text) or [text]
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     poster = http_post or httpx.post
-    response = poster(
-        url,
-        json={
-            "chat_id": chat_id,
-            "text": body,
-            "disable_web_page_preview": True,
-        },
-        timeout=timeout,
-    )
-    response.raise_for_status()
-    payload = response.json() if hasattr(response, "json") else {}
-    return payload if isinstance(payload, dict) else {}
+    payloads: list[dict[str, Any]] = []
+    for body in chunks:
+        response = poster(
+            url,
+            json={
+                "chat_id": chat_id,
+                "text": body,
+                "disable_web_page_preview": True,
+            },
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        payload = response.json() if hasattr(response, "json") else {}
+        payloads.append(payload if isinstance(payload, dict) else {})
+    if len(payloads) == 1:
+        return payloads[0]
+    last = dict(payloads[-1])
+    last["chunk_results"] = payloads
+    return last
 
 
 def _retry_after_seconds(response: httpx.Response | None, fallback: float) -> float:
@@ -486,6 +544,7 @@ def run_notification_kind(
         KIND_PREDICTIONS: settings.telegram_notify_predictions_enabled,
         KIND_RESULTS: settings.telegram_notify_results_enabled,
         KIND_EMPTY_DAY: settings.telegram_notify_empty_day_enabled,
+        KIND_SLIP_RECAP: settings.betting_slip_recap_enabled,
     }
     if not kind_enabled.get(kind, False):
         summary.message_preview = f"kind_disabled:{kind}"
@@ -521,7 +580,7 @@ def run_notification_kind(
             summary.message_preview = "fixtures_present"
             return summary
         message = build_empty_day_message(target_date=resolved_date)
-    else:
+    elif kind == KIND_RESULTS:
         message = build_results_message(
             db,
             target_date=resolved_date,
@@ -529,6 +588,20 @@ def run_notification_kind(
             model_version=model_version,
             model_name=model_name,
         )
+    else:
+        message, ready, slip_count = build_slip_recap_message(
+            db,
+            target_date=resolved_date,
+            settings=settings,
+            model_version=model_version,
+            model_name=model_name,
+        )
+        if slip_count == 0:
+            summary.message_preview = "no_slips"
+            return summary
+        if not ready:
+            summary.message_preview = "recap_not_ready"
+            return summary
 
     summary.message_preview = sanitize_text(message, max_length=240)
     recipients = list_notification_recipients(db, kind=kind, settings=settings)
@@ -586,7 +659,7 @@ def run_daily_telegram_notifications(
 ) -> list[NotificationRunSummary]:
     """Run configured notification kinds (default: predictions + empty_day + results)."""
     settings = settings or get_settings()
-    selected = kinds or list(ALL_KINDS)
+    selected = kinds or list(DEFAULT_KINDS)
     summaries: list[NotificationRunSummary] = []
     today = content_date or today_rome()
     yesterday = results_date or (today - timedelta(days=1))

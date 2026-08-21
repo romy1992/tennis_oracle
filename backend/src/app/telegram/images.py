@@ -42,6 +42,7 @@ _TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Predizione", 190),
     ("Percentuale\ndi riuscita", 120),
     ("Quota", 90),
+    ("Live / esito", 180),
 ]
 
 _LADDER_TABLE_COLUMNS: list[tuple[str, int]] = [
@@ -54,6 +55,7 @@ _LADDER_TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Predizione", 170),
     ("Puntata", 110),
     ("Quota", 90),
+    ("Live / esito", 180),
 ]
 
 
@@ -64,6 +66,7 @@ def render_betting_slip_png(
     stake: float | None = None,
     min_edge_percent: float = 2.0,
     series_label: str | None = None,
+    snapshot_label: str | None = None,
 ) -> BytesIO:
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -71,9 +74,9 @@ def render_betting_slip_png(
         raise BettingSlipImageError("Pillow non installato.") from exc
 
     del min_edge_percent  # kept for call-site compatibility; not shown on image
-    width = 1280
+    width = 1460
     margin = 36
-    row_height = 46
+    row_height = 50
     header_height = 48
     background = "#f6f8fb"
     card = "#ffffff"
@@ -161,6 +164,8 @@ def render_betting_slip_png(
         meta_parts.append(f"Data: {slip_date}")
     if series_label:
         meta_parts.append(series_label)
+    if snapshot_label:
+        meta_parts.append(snapshot_label)
     if is_ladder:
         meta_parts.append("Scalata · reinvestimento progressivo")
     meta_parts.append(MARKETS_LEGEND)
@@ -254,6 +259,7 @@ def render_fixtures_png(
     start_index: int = 1,
     series_label: str | None = None,
     min_edge_percent: float = 2.0,
+    snapshot_label: str | None = None,
 ) -> BytesIO:
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -271,9 +277,9 @@ def render_fixtures_png(
         ("Predizione", 170),
         ("Percentuale\ndi riuscita", 120),
         ("Quota", 80),
-        ("Stato", 110),
+        ("Live / esito", 180),
     ]
-    width = 1280
+    width = 1440
     margin = 36
     row_height = 44
     header_height = 48
@@ -318,6 +324,8 @@ def render_fixtures_png(
     meta = f"{start_index}-{end_index}"
     if series_label:
         meta = f"{meta} · {series_label}"
+    if snapshot_label:
+        meta = f"{meta} · {snapshot_label}"
     meta = f"{meta} · {MARKETS_LEGEND}"
     draw.text((margin, y), meta, font=fonts["tiny"], fill=muted)
     y += 28
@@ -577,6 +585,59 @@ def _fixture_status_label(item: dict[str, Any]) -> str:
     return str(lifecycle_label or "Da giocare")
 
 
+def _score_snapshot_label(item: dict[str, Any]) -> tuple[str, str]:
+    """Compact live/final snapshot suitable for a single image table cell."""
+    muted = "#5d6b78"
+    live_color = "#b91c1c"
+    won_color = _STATUS_COLORS["won"]
+    lost_color = _STATUS_COLORS["lost"]
+    score = item.get("live_score") if isinstance(item.get("live_score"), dict) else {}
+    sets = " ".join(
+        f"{entry.get('score_first', '-')}-{entry.get('score_second', '-')}"
+        for entry in (score.get("sets") or [])
+        if isinstance(entry, dict)
+    )
+    game = str(score.get("current_game") or "").strip()
+    final_result = str(score.get("final_result") or "").strip()
+    if final_result in {"-", "0 - 0", "0-0"}:
+        final_result = ""
+
+    lifecycle = str(item.get("match_lifecycle_status") or "").lower()
+    event_live = str(item.get("event_live") or "").lower()
+    is_live = lifecycle in {"started", "live"} or event_live in {
+        "1",
+        "true",
+        "yes",
+        "live",
+        "inprogress",
+    }
+    if is_live:
+        details = " · ".join(part for part in (sets, f"G {game}" if game else "") if part)
+        return (_truncate(f"LIVE · {details}" if details else "LIVE", 28), live_color)
+
+    pick_status = str(item.get("pick_status") or "pending")
+    prediction = item.get("prediction") if isinstance(item.get("prediction"), dict) else {}
+    prediction_correct = prediction.get("is_correct")
+    is_completed = bool(item.get("is_completed")) or lifecycle in {"completed", "finished"}
+    if pick_status in {"won", "lost", "void"} or is_completed:
+        if pick_status == "won":
+            base, color = "PRESA", won_color
+        elif pick_status == "lost":
+            base, color = "PERSA", lost_color
+        elif pick_status == "void":
+            base, color = "ANNULLATA", _STATUS_COLORS["void"]
+        elif prediction_correct is True:
+            base, color = "PRESA", won_color
+        elif prediction_correct is False:
+            base, color = "PERSA", lost_color
+        else:
+            base, color = "FINALE", won_color
+        details = " · ".join(part for part in (final_result, sets) if part)
+        return (_truncate(f"{base} · {details}" if details else base, 28), color)
+
+    return (_truncate(_fixture_status_label(item), 28), muted)
+
+
 def _draw_column_header(
     draw: Any,
     x: int,
@@ -607,6 +668,7 @@ def _fixture_cells(item: dict[str, Any]) -> list[tuple[str, str]]:
     market_key = item.get("market") or prediction.get("market")
     market = market_label(market_key)
     pred_color = market_text_color(market_key) if prediction else muted
+    snapshot_text, snapshot_color = _score_snapshot_label(item)
     return [
         ("__DOT__", text),
         (_format_event_time(item.get("event_time")), muted),
@@ -617,7 +679,7 @@ def _fixture_cells(item: dict[str, Any]) -> list[tuple[str, str]]:
         (_truncate(str(winner or "-"), 18), pred_color),
         (_format_percent(prediction.get("confidence")) if prediction else "-", muted),
         (_format_decimal(odds), text),
-        (_fixture_status_label(item), muted),
+        (snapshot_text, snapshot_color),
     ]
 
 
@@ -627,6 +689,7 @@ def _pick_cells(pick: dict[str, Any]) -> list[tuple[str, str]]:
     winner = slip_pick_winner_name(pick) or "-"
     market_key = pick.get("market")
     pred_color = market_text_color(market_key)
+    snapshot_text, snapshot_color = _score_snapshot_label(pick)
     return [
         ("__DOT__", text),
         (_format_event_time(pick.get("event_time")), muted),
@@ -636,6 +699,7 @@ def _pick_cells(pick: dict[str, Any]) -> list[tuple[str, str]]:
         (_truncate(winner, 18), pred_color),
         (_format_percent(pick.get("confidence")), muted),
         (_format_decimal(pick.get("odds")), text),
+        (snapshot_text, snapshot_color),
     ]
 
 
@@ -646,6 +710,7 @@ def _ladder_pick_cells(pick: dict[str, Any]) -> list[tuple[str, str]]:
     market_key = pick.get("market")
     pred_color = market_text_color(market_key)
     step = pick.get("ladder_step_index")
+    snapshot_text, snapshot_color = _score_snapshot_label(pick)
     return [
         ("__DOT__", text),
         (str(step) if step is not None else "-", muted),
@@ -656,6 +721,7 @@ def _ladder_pick_cells(pick: dict[str, Any]) -> list[tuple[str, str]]:
         (_truncate(winner, 16), pred_color),
         (_format_decimal(pick.get("ladder_step_stake")), muted),
         (_format_decimal(pick.get("odds")), text),
+        (snapshot_text, snapshot_color),
     ]
 
 

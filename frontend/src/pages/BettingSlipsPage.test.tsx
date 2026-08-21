@@ -111,6 +111,75 @@ describe("BettingSlipsPage", () => {
     expect(within(table).getByText("Over 20.5 games")).toBeInTheDocument();
   });
 
+  it("shows a prominent live section and score for picks in progress", async () => {
+    const slip = makeSlip();
+    const livePick = {
+      ...slip.picks[0],
+      event_status: "Set 2",
+      match_lifecycle_status: "started",
+      match_lifecycle_label: "In corso",
+      live_score: {
+        sets: [{ score_first: "6", score_second: "4", score_set: "1" }],
+        current_game: "30 - 15",
+        status: "Set 2"
+      }
+    };
+    apiMocks.getDailyBettingSlips.mockResolvedValue({
+      ...makeDailySlips(),
+      slips: [makeSlip({ picks: [livePick] })]
+    });
+
+    renderWithProviders(<BettingSlipsPage />);
+
+    const livePanel = await screen.findByLabelText("Partite in diretta");
+    expect(within(livePanel).getByText("LIVE")).toBeInTheDocument();
+    expect(within(livePanel).getByText("6-4 · Game 30 - 15")).toBeInTheDocument();
+    expect(screen.getAllByText("6-4 · Game 30 - 15")).toHaveLength(2);
+  });
+
+  it("keeps the final score and explicit pick outcome after completion", async () => {
+    const slip = makeSlip();
+    const completedPick = {
+      ...slip.picks[0],
+      pick_status: "won" as const,
+      actual_winner_label: "Player A",
+      is_correct: true,
+      event_status: "Finished",
+      match_lifecycle_status: "completed",
+      match_lifecycle_label: "Conclusa",
+      live_score: {
+        final_result: "2 - 0",
+        sets: [
+          { score_first: "6", score_second: "4", score_set: "1" },
+          { score_first: "6", score_second: "3", score_set: "2" }
+        ],
+        status: "Finished"
+      }
+    };
+    const completedDaily = {
+      ...makeDailySlips(),
+      slips: [
+        makeSlip({
+          picks: [completedPick],
+          slip_status: "won",
+          picks_pending: 0,
+          picks_won: 1
+        })
+      ]
+    };
+    apiMocks.getDailyBettingSlips.mockResolvedValue(completedDaily);
+    apiMocks.regenerateDailyBettingSlips.mockResolvedValue(completedDaily);
+
+    renderWithProviders(<BettingSlipsPage />);
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("FINALE")).toBeInTheDocument();
+    expect(within(table).getByText(/2 - 0 · 6-4\s+6-3/)).toBeInTheDocument();
+    expect(within(table).getByText(/Esito reale: Player A/)).toBeInTheDocument();
+    expect(within(table).getByText(/Pick vinta/)).toBeInTheDocument();
+    expect(within(table).getByText("Presa")).toBeInTheDocument();
+  });
+
   it("shows empty state when the day has no slips", async () => {
     apiMocks.getDailyBettingSlips.mockResolvedValue({
       ...makeDailySlips(),

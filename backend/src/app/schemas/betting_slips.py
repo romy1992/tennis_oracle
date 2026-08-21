@@ -41,11 +41,14 @@ class BettingSlipPickRead(BaseModel):
     confidence: float | None = None
     pick_score: float | None = None
     pick_status: PickStatus = "pending"
+    outcome: PickStatus = "pending"
+    settled_at: datetime | None = None
     actual_winner_label: str | None = None
     is_correct: bool | None = None
     match_lifecycle_status: str | None = None
     match_lifecycle_label: str | None = None
     event_status: str | None = None
+    live_score: dict | None = None
     void_reason: str | None = None
     # Populated for ladder slips: progressive stake at this step (base → reinvest).
     ladder_step_index: int | None = None

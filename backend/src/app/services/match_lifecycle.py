@@ -186,6 +186,7 @@ def settlement_policy(
     actual_winner: str | None = None,
     predicted_winner: str | None = None,
     has_result: bool | None = None,
+    postponed_as_void: bool = False,
 ) -> LifecycleSettlementPolicy:
     """Explicit impact matrix for a lifecycle (+ optional winner context).
 
@@ -217,6 +218,18 @@ def settlement_policy(
                 "Winner known: settle won/lost for completed/walkover/retired/etc. "
                 "Quota void (break-even) unchanged."
             ),
+        )
+
+    if status == "postponed" and postponed_as_void:
+        return LifecycleSettlementPolicy(
+            lifecycle=status,
+            singles_outcome="void",
+            slip_pick_outcome="void",
+            stake_at_risk=False,
+            include_in_profit_roi=False,
+            counts_as_loss=False,
+            void_odds_affected=False,
+            notes="Postponed pre-start slip leg: void and stake refunded.",
         )
 
     if status in {"upcoming", "started", "postponed"}:
@@ -270,6 +283,7 @@ def settle_simulated_bet(
     market_odds: float | None = None,
     stake_units: float = 1.0,
     has_result: bool | None = None,
+    postponed_as_void: bool = False,
 ) -> SimulatedBetSettlement:
     """Idempotent settlement for one simulated single or slip pick.
 
@@ -284,6 +298,7 @@ def settle_simulated_bet(
         actual_winner=actual_winner,
         predicted_winner=predicted_winner,
         has_result=has_result,
+        postponed_as_void=postponed_as_void,
     )
     outcome = policy.slip_pick_outcome
     is_correct: bool | None
@@ -419,10 +434,6 @@ def classify_match_lifecycle(
     if _contains_any(status, _POSTPONED_TOKENS):
         return "postponed"
 
-    if _contains_any(status, _FINISHED_TOKENS) or is_completed is True or has_result:
-        # Finished-like signal but no bettable winner → problem / void candidate.
-        return "unknown"
-
     not_started = bool(_NOT_STARTED_RE.search(status))
     if (
         _is_live_flag(event_live)
@@ -430,6 +441,13 @@ def classify_match_lifecycle(
         or _LIVE_SET_RE.search(status)
     ):
         return "started"
+
+    if _contains_any(status, _FINISHED_TOKENS) or is_completed is True or has_result:
+        # Finished-like signal but no bettable winner → problem / void candidate.
+        # This check intentionally follows live detection because API-Tennis
+        # exposes a partial ``event_final_result`` (for example ``1 - 0``)
+        # while a later set is still being played.
+        return "unknown"
     if not_started:
         return "upcoming"
 

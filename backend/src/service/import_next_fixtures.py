@@ -6,10 +6,13 @@ consistent with import_fixtures.calculate_date().
 """
 import argparse
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from backend.src.entity import Fixture, NextFixture
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from backend.src.entity import Fixture, MatchPrediction, NextFixture
 from backend.src.repository.fixture_repository import FixtureRepository
 from backend.src.repository.match_prediction_repository import MatchPredictionRepository
 from backend.src.repository.next_fixture_repository import NextFixtureRepository
@@ -147,15 +150,65 @@ def _parse_event_date(value: Any) -> date | None:
     return datetime.strptime(str(value), "%Y-%m-%d").date()
 
 
+def _parse_event_time(value: Any) -> time | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, time):
+        return value
+    return time.fromisoformat(str(value))
+
+
+def _fixture_data_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    fixture_data = {
+        key: payload[key]
+        for key in FIXTURE_FIELDS
+        if key in payload and key != "id_fixture"
+    }
+    if "event_date" in fixture_data:
+        fixture_data["event_date"] = _parse_event_date(fixture_data["event_date"])
+    if "event_time" in fixture_data:
+        fixture_data["event_time"] = _parse_event_time(fixture_data["event_time"])
+    return fixture_data
+
+
+def normalized_live_score(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Build the single rolling score snapshot stored on ``NextFixture``.
+
+    API-Tennis exposes these fields both from ``get_fixtures`` and
+    ``get_livescore``. Empty pre-match placeholders are stored as ``None`` so
+    consumers do not mistake them for a live score.
+    """
+    scores = payload.get("scores")
+    current_game = payload.get("event_game_result")
+    server = payload.get("event_serve")
+    final_result = payload.get("event_final_result")
+    status = payload.get("event_status")
+
+    has_sets = isinstance(scores, list) and bool(scores)
+    has_game = current_game not in (None, "", "-", "0 - 0")
+    has_final = final_result not in (None, "", "-", "0 - 0")
+    has_server = server not in (None, "", "-")
+    if not any((has_sets, has_game, has_final, has_server)):
+        return None
+    return {
+        "sets": scores if isinstance(scores, list) else [],
+        "current_game": current_game,
+        "server": server,
+        "final_result": final_result,
+        "status": status,
+    }
+
+
 def _build_next_fixture(payload: dict[str, Any], odds: dict | None = None) -> NextFixture:
     event_date = _parse_event_date(payload.get("event_date"))
     week_start, week_end = iso_week_bounds(event_date) if event_date else (None, None)
     surface = payload.get("surface") or _surface_for_tournament(payload.get("tournament_key"))
 
+    live_score = normalized_live_score(payload)
     return NextFixture(
         event_key=payload["event_key"],
         event_date=event_date,
-        event_time=payload.get("event_time"),
+        event_time=_parse_event_time(payload.get("event_time")),
         event_first_player=payload.get("event_first_player"),
         first_player_key=payload.get("first_player_key"),
         event_second_player=payload.get("event_second_player"),
@@ -165,7 +218,11 @@ def _build_next_fixture(payload: dict[str, Any], odds: dict | None = None) -> Ne
         tournament_round=payload.get("tournament_round"),
         surface=surface,
         event_status=payload.get("event_status"),
+        event_winner=payload.get("event_winner"),
+        event_live=payload.get("event_live"),
         event_type_type=payload.get("event_type_type"),
+        live_score=live_score,
+        live_score_updated_at=datetime.now() if live_score is not None else None,
         odds=odds,
         imported_at=datetime.now(),
         week_start=week_start,
@@ -182,6 +239,9 @@ def upsert_next_fixture(payload: dict[str, Any], odds: dict | None = None) -> st
         row = existing[0]
         stored_odds = odds or row.odds
         updated = _build_next_fixture(payload, odds=stored_odds)
+        if updated.live_score is None:
+            updated.live_score = row.live_score
+            updated.live_score_updated_at = row.live_score_updated_at
         for column in NextFixture.__table__.columns:
             if column.name in {"id", "is_completed", "moved_to_fixture_at"}:
                 continue
@@ -212,11 +272,7 @@ def _capture_prematch_odds_history(payload: dict[str, Any], odds: dict) -> None:
 
 
 def upsert_fixture_from_api(payload: dict[str, Any]) -> str:
-    fixture_data = {
-        key: payload[key]
-        for key in FIXTURE_FIELDS
-        if key in payload and key != "id_fixture"
-    }
+    fixture_data = _fixture_data_from_payload(payload)
     existing = fixtures_repo.search_filter({"event_key": payload["event_key"]})
     if existing:
         row = existing[0]
@@ -241,9 +297,62 @@ def resolve_predictions_for_match(event_key: int, actual_winner: str | None) -> 
     return resolved
 
 
-def promote_completed_match(payload: dict[str, Any]) -> dict[str, int]:
+def promote_completed_match(
+    payload: dict[str, Any],
+    *,
+    db: Session | None = None,
+) -> dict[str, int]:
     summary = {"fixtures_inserted": 0, "fixtures_updated": 0, "predictions_resolved": 0}
     if not is_match_completed(payload):
+        return summary
+
+    if db is not None:
+        fixture_data = _fixture_data_from_payload(payload)
+        fixture = db.scalar(
+            select(Fixture).where(Fixture.event_key == int(payload["event_key"]))
+        )
+        if fixture is None:
+            db.add(Fixture(**fixture_data))
+            summary["fixtures_inserted"] = 1
+        else:
+            for key, value in fixture_data.items():
+                setattr(fixture, key, value)
+            summary["fixtures_updated"] = 1
+
+        actual_winner = payload.get("event_winner")
+        if actual_winner in COMPLETED_WINNERS:
+            predictions = db.scalars(
+                select(MatchPrediction).where(
+                    MatchPrediction.event_key == int(payload["event_key"])
+                )
+            ).all()
+            for prediction in predictions:
+                prediction.actual_winner = actual_winner
+                prediction.is_correct = prediction.predicted_winner == actual_winner
+            summary["predictions_resolved"] = len(predictions)
+
+        next_fixture = db.scalar(
+            select(NextFixture).where(
+                NextFixture.event_key == int(payload["event_key"])
+            )
+        )
+        if next_fixture is not None:
+            next_fixture.is_completed = True
+            next_fixture.moved_to_fixture_at = datetime.now()
+            next_fixture.event_status = payload.get(
+                "event_status", next_fixture.event_status
+            )
+            next_fixture.event_winner = payload.get(
+                "event_winner", next_fixture.event_winner
+            )
+            next_fixture.event_live = payload.get(
+                "event_live", next_fixture.event_live
+            )
+            score = normalized_live_score(payload)
+            if score is not None:
+                next_fixture.live_score = score
+                next_fixture.live_score_updated_at = datetime.now()
+        db.flush()
         return summary
 
     action = upsert_fixture_from_api(payload)
@@ -263,6 +372,14 @@ def promote_completed_match(payload: dict[str, Any]) -> dict[str, int]:
         row.is_completed = True
         row.moved_to_fixture_at = datetime.now()
         row.event_status = payload.get("event_status", row.event_status)
+        row.event_winner = payload.get(
+            "event_winner", getattr(row, "event_winner", None)
+        )
+        row.event_live = payload.get("event_live", getattr(row, "event_live", None))
+        score = normalized_live_score(payload)
+        if score is not None:
+            row.live_score = score
+            row.live_score_updated_at = datetime.now()
         next_fixtures_repo.save(row)
     return summary
 

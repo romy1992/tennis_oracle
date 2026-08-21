@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Callable, Literal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -35,7 +36,10 @@ from backend.src.app.ml.prediction.predictor import (
     predict_upcoming_fixtures,
 )
 from backend.src.app.models import Fixture
-from backend.src.app.services.betting_slips import get_daily_betting_slips
+from backend.src.app.services.betting_slips import (
+    get_daily_betting_slips,
+    sync_betting_slip_pick_outcomes,
+)
 from backend.src.app.services.extra_market_predictions import (
     run_extra_market_predictions_generation,
 )
@@ -868,7 +872,10 @@ def _execute_global_update(
                 run.errors_json = _json_dumps(run_errors)
                 db.commit()
 
-            today = date.today()
+            today = datetime.now(ZoneInfo(settings.betting_slip_timezone)).date()
+            # Outcome refresh is independent from model generation and must
+            # also run when today's pool is already locked.
+            sync_betting_slip_pick_outcomes(db, slip_date=today)
             upcoming_fixtures_by_version: dict[ModelVersion, list] = {}
             for version in unique_versions:
                 upcoming_fixtures_by_version[version] = list_next_fixtures(
@@ -1064,7 +1071,7 @@ def _execute_global_update(
                                     slip_date=today,
                                     model_version=combo.model_version,
                                     model_name=combo.model_name,
-                                    regenerate=True,
+                                    regenerate=False,
                                 )
                                 local_slips = len(daily.slips)
                                 local_warnings.extend(daily.warnings)

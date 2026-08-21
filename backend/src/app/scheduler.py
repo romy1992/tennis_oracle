@@ -4,16 +4,25 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from backend.src.app.core.config import get_settings
 from backend.src.app.db.session import SessionLocal
 from backend.src.app.services.global_update import start_global_update
+from backend.src.app.services.betting_slip_live_scores import (
+    run_betting_slip_live_poll_once,
+)
+from backend.src.app.services.telegram_notifications import (
+    KIND_SLIP_RECAP,
+    run_notification_kind,
+)
 
 logger = logging.getLogger(__name__)
 
 _scheduler_thread: threading.Thread | None = None
+_live_poll_thread: threading.Thread | None = None
+_recap_thread: threading.Thread | None = None
 _stop_event = threading.Event()
 
 
@@ -66,20 +75,96 @@ def _scheduler_loop() -> None:
         _stop_event.wait(30)
 
 
-def start_global_update_scheduler() -> None:
-    global _scheduler_thread
+def _live_poll_loop() -> None:
     settings = get_settings()
-    if not settings.global_update_cron_enabled:
+    if not settings.betting_slip_live_poll_enabled:
         return
-    if _scheduler_thread is not None and _scheduler_thread.is_alive():
+    interval = max(30, int(settings.betting_slip_live_poll_interval_seconds))
+    logger.info("Betting-slip live poll scheduler started (interval=%ss).", interval)
+    while not _stop_event.is_set():
+        try:
+            with SessionLocal() as db:
+                summary = run_betting_slip_live_poll_once(db, settings=settings)
+                logger.info("Betting-slip live poll completed: %s", summary)
+        except Exception:
+            logger.exception("Betting-slip live poll failed.")
+        _stop_event.wait(interval)
+
+
+def _recap_loop() -> None:
+    settings = get_settings()
+    if not settings.betting_slip_recap_enabled:
         return
-    _stop_event.clear()
-    _scheduler_thread = threading.Thread(
-        target=_scheduler_loop,
-        name="global-update-cron",
-        daemon=True,
+    try:
+        target_hour, target_minute = _parse_cron_time(settings.betting_slip_recap_time)
+        tz = ZoneInfo(settings.betting_slip_timezone)
+    except Exception as exc:
+        logger.error("Invalid betting-slip recap configuration: %s", exc)
+        return
+    logger.info(
+        "Betting-slip recap scheduler started (%02d:%02d %s).",
+        target_hour,
+        target_minute,
+        settings.betting_slip_timezone,
     )
-    _scheduler_thread.start()
+    while not _stop_event.is_set():
+        now = datetime.now(tz)
+        target_dates = [now.date() - timedelta(days=1)]
+        if (now.hour, now.minute) >= (target_hour, target_minute):
+            target_dates.append(now.date())
+        for target_date in target_dates:
+            try:
+                with SessionLocal() as db:
+                    run_betting_slip_live_poll_once(
+                        db,
+                        target_date=target_date,
+                        settings=settings,
+                    )
+                    summary = run_notification_kind(
+                        db,
+                        kind=KIND_SLIP_RECAP,
+                        content_date=target_date,
+                        settings=settings,
+                    )
+                    logger.info("Betting-slip recap attempt: %s", summary.to_dict())
+            except Exception:
+                logger.exception(
+                    "Betting-slip recap attempt failed for %s.", target_date
+                )
+        _stop_event.wait(60)
+
+
+def start_global_update_scheduler() -> None:
+    global _scheduler_thread, _live_poll_thread, _recap_thread
+    settings = get_settings()
+    _stop_event.clear()
+    if settings.global_update_cron_enabled and not (
+        _scheduler_thread is not None and _scheduler_thread.is_alive()
+    ):
+        _scheduler_thread = threading.Thread(
+            target=_scheduler_loop,
+            name="global-update-cron",
+            daemon=True,
+        )
+        _scheduler_thread.start()
+    if settings.betting_slip_live_poll_enabled and not (
+        _live_poll_thread is not None and _live_poll_thread.is_alive()
+    ):
+        _live_poll_thread = threading.Thread(
+            target=_live_poll_loop,
+            name="betting-slip-live-poll",
+            daemon=True,
+        )
+        _live_poll_thread.start()
+    if settings.betting_slip_recap_enabled and not (
+        _recap_thread is not None and _recap_thread.is_alive()
+    ):
+        _recap_thread = threading.Thread(
+            target=_recap_loop,
+            name="betting-slip-recap",
+            daemon=True,
+        )
+        _recap_thread.start()
 
 
 def stop_global_update_scheduler() -> None:

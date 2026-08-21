@@ -1,8 +1,6 @@
 import unittest
 from datetime import date, datetime
 
-from fastapi.testclient import TestClient
-
 from backend.src.app.main import app
 from backend.src.entity import Fixture, MatchPrediction, NextFixture
 from backend.tests.db_helpers import create_session_factory, create_test_engine, make_api_client
@@ -34,6 +32,20 @@ class PredictionRoutesTest(unittest.TestCase):
                         event_second_player="B",
                         tournament_name="Demo Open",
                         surface="Hard",
+                        event_status="Set 2",
+                        event_live="1",
+                        live_score={
+                            "sets": [
+                                {
+                                    "score_first": "6",
+                                    "score_second": "4",
+                                    "score_set": "1",
+                                }
+                            ],
+                            "current_game": "30 - 15",
+                            "status": "Set 2",
+                        },
+                        live_score_updated_at=datetime(2026, 6, 20, 14, 30, 0),
                         odds={
                             "100": {
                                 "Home/Away": {
@@ -79,6 +91,10 @@ class PredictionRoutesTest(unittest.TestCase):
         self.assertAlmostEqual(items[0]["prediction"]["confidence"], 0.7)
         self.assertAlmostEqual(items[0]["prediction"]["predicted_winner_odds"], 2.1)
         self.assertEqual(items[0]["prediction"]["odds_bookmaker_count"], 2)
+        self.assertEqual(items[0]["event_live"], "1")
+        self.assertEqual(items[0]["match_lifecycle_status"], "started")
+        self.assertEqual(items[0]["live_score"]["current_game"], "30 - 15")
+        self.assertEqual(items[0]["live_score"]["sets"][0]["score_first"], "6")
         self.assertIsNone(items[1]["prediction"])
         self.assertEqual(items[1]["prediction_warning"], "missing_persisted_prediction")
 
@@ -143,6 +159,14 @@ class PredictionRoutesTest(unittest.TestCase):
                         event_first_player="A",
                         event_second_player="B",
                         event_winner="Second Player",
+                        event_status="Finished",
+                        event_final_result="0 - 2",
+                        event_game_result="",
+                        event_live="0",
+                        scores=[
+                            {"score_first": "4", "score_second": "6", "score_set": "1"},
+                            {"score_first": "3", "score_second": "6", "score_set": "2"},
+                        ],
                         odds={
                             "200": {
                                 "Home/Away": {
@@ -178,6 +202,9 @@ class PredictionRoutesTest(unittest.TestCase):
         items = payload["items"]
         self.assertEqual([item["event_key"] for item in items], [200])
         self.assertTrue(items[0]["is_completed"])
+        self.assertEqual(items[0]["event_winner"], "Second Player")
+        self.assertEqual(items[0]["live_score"]["final_result"], "0 - 2")
+        self.assertEqual(len(items[0]["live_score"]["sets"]), 2)
         self.assertAlmostEqual(items[0]["prediction"]["predicted_winner_odds"], 1.6)
         self.assertTrue(items[0]["prediction"]["is_correct"])
 

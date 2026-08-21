@@ -74,6 +74,68 @@ describe("PredictionsPage", () => {
     expect(screen.getByRole("button", { name: "Vincitore partita" })).toHaveClass("active");
   });
 
+  it("highlights a live match with its current score", async () => {
+    apiMocks.getUpcomingPredictions.mockResolvedValue(
+      makeFixturesPage([
+        makeFixture({
+          event_status: "Set 2",
+          event_live: "1",
+          match_lifecycle_status: "started",
+          match_lifecycle_label: "In corso",
+          live_score: {
+            sets: [{ score_first: "6", score_second: "4", score_set: "1" }],
+            current_game: "30 - 15",
+            status: "Set 2"
+          }
+        })
+      ])
+    );
+
+    renderWithProviders(<PredictionsPage />);
+
+    const livePanel = await screen.findByLabelText("Partite in diretta");
+    expect(within(livePanel).getByText("LIVE")).toBeInTheDocument();
+    expect(within(livePanel).getByText("6-4 · Game 30 - 15")).toBeInTheDocument();
+    expect(screen.getAllByText("6-4 · Game 30 - 15")).toHaveLength(2);
+  });
+
+  it("shows final score, winner and prediction outcome for a completed match", async () => {
+    const base = makeFixture();
+    apiMocks.getUpcomingPredictions.mockResolvedValue(
+      makeFixturesPage([
+        makeFixture({
+          event_status: "Finished",
+          event_live: "0",
+          event_winner: "First Player",
+          is_completed: true,
+          match_lifecycle_status: "completed",
+          match_lifecycle_label: "Conclusa",
+          live_score: {
+            final_result: "2 - 0",
+            sets: [
+              { score_first: "6", score_second: "4", score_set: "1" },
+              { score_first: "6", score_second: "3", score_set: "2" }
+            ],
+            status: "Finished"
+          },
+          prediction: {
+            ...base.prediction!,
+            actual_winner: "First Player",
+            is_correct: true
+          }
+        })
+      ])
+    );
+
+    renderWithProviders(<PredictionsPage />);
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("FINALE")).toBeInTheDocument();
+    expect(within(table).getByText(/2 - 0 · 6-4\s+6-3/)).toBeInTheDocument();
+    expect(within(table).getByText(/Vincitore: Player A/)).toBeInTheDocument();
+    expect(within(table).getByText("Previsione presa")).toBeInTheDocument();
+  });
+
   it("shows empty state when there are no fixtures", async () => {
     apiMocks.getUpcomingPredictions.mockResolvedValue(makeFixturesPage([]));
 

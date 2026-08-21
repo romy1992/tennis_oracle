@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from backend.src.app.telegram.bot import MENU_HELP, MENU_PARTITE, MENU_SCALATE, main_menu_keyboard
 from backend.src.app.telegram.dates import parse_date_or_offset
 from backend.src.app.telegram.fixture_value import enrich_fixture_value, expand_fixtures_by_market
+from backend.src.app.telegram.images import _score_snapshot_label
 from backend.src.app.telegram.messages import (
     DISCLAIMER,
     account_status_label,
@@ -65,6 +66,38 @@ class TelegramDateParsingTest(unittest.TestCase):
 
 
 class TelegramFormattingTest(unittest.TestCase):
+    def test_image_score_snapshot_shows_live_score_at_render_time(self):
+        label, _ = _score_snapshot_label(
+            {
+                "match_lifecycle_status": "started",
+                "event_live": "1",
+                "live_score": {
+                    "sets": [{"score_first": "6", "score_second": "4"}],
+                    "current_game": "30 - 15",
+                },
+            }
+        )
+
+        self.assertIn("LIVE", label)
+        self.assertIn("6-4", label)
+        self.assertIn("G 30 - 15", label)
+
+    def test_image_score_snapshot_shows_final_prediction_outcome(self):
+        label, _ = _score_snapshot_label(
+            {
+                "is_completed": True,
+                "prediction": {"is_correct": True},
+                "live_score": {
+                    "final_result": "2 - 0",
+                    "sets": [{"score_first": "6", "score_second": "4"}],
+                },
+            }
+        )
+
+        self.assertIn("PRESA", label)
+        self.assertIn("2 - 0", label)
+        self.assertIn("6-4", label)
+
     def test_predicted_winner_uses_player_name_for_first_player(self):
         item = {
             "event_first_player": "Sinner J.",

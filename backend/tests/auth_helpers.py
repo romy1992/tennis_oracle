@@ -38,6 +38,9 @@ def make_test_settings(**overrides) -> Settings:
         "live_publication_enabled": False,
         "public_model_version": None,
         "public_model_name": None,
+        # Existing service tests use date.today(); keep their implicit clock
+        # inside the open window unless a test injects an explicit timestamp.
+        "betting_slip_pool_close_time": "23:59",
     }
     base.update(overrides)
     return Settings(**base)

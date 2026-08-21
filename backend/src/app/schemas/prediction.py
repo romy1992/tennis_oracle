@@ -19,7 +19,11 @@ class NextFixtureRead(BaseModel):
     tournament_round: str | None
     surface: str | None
     event_status: str | None
+    event_winner: str | None = None
+    event_live: str | None = None
     event_type_type: str | None
+    live_score: dict | None = None
+    live_score_updated_at: datetime | None = None
     odds: dict | list | None
     imported_at: datetime | None
     week_start: date | None

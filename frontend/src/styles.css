@@ -889,6 +889,158 @@ label.checkbox-field input {
   color: #0369a1;
 }
 
+.live-now-panel {
+  background: linear-gradient(135deg, #fff7f7 0%, #ffffff 72%);
+  border-color: #fecaca;
+  box-shadow: 0 12px 30px rgb(190 24 93 / 8%);
+}
+
+.live-now-header,
+.live-now-header > div {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.live-now-header {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.live-now-header h3 {
+  margin: 0;
+}
+
+.live-now-header small {
+  color: #64748b;
+}
+
+.live-now-badge,
+.live-inline-badge {
+  align-items: center;
+  background: #dc2626;
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 6px;
+  letter-spacing: 0.08em;
+  padding: 4px 8px;
+}
+
+.live-now-badge > span {
+  animation: live-pulse 1.4s ease-in-out infinite;
+  background: #fff;
+  border-radius: 999px;
+  height: 7px;
+  width: 7px;
+}
+
+.live-now-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.live-now-card {
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  display: grid;
+  gap: 5px;
+  padding: 13px 14px;
+}
+
+.live-now-card > small,
+.live-now-detail {
+  color: #64748b;
+}
+
+.live-now-card > strong span {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.live-score-line {
+  color: #b91c1c;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.live-inline-score {
+  align-items: center;
+  color: #b91c1c;
+  display: flex;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.live-inline-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+}
+
+.final-inline-score {
+  align-items: center;
+  color: #166534;
+  display: flex;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.final-inline-badge {
+  background: #166534;
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+}
+
+.prediction-outcome {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 3px;
+}
+
+.prediction-outcome.won {
+  color: #166534;
+}
+
+.prediction-outcome.lost {
+  color: #b91c1c;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.75);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-now-badge > span {
+    animation: none;
+  }
+}
+
 .slip-odds-note {
   color: #64748b;
   display: block;
@@ -1018,7 +1170,17 @@ label.checkbox-field input {
 
 .slip-col-status {
   text-align: center;
-  width: 36px;
+  min-width: 92px;
+  width: 92px;
+}
+
+.pick-outcome-state {
+  align-items: center;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 5px;
+  white-space: nowrap;
 }
 
 .slip-col-time {

@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from backend.src.service import import_next_fixtures as module
@@ -50,6 +50,35 @@ class ImportNextFixturesTest(unittest.TestCase):
                 "upcoming_window",
             )
         self.assertIn("Maximum date range", str(ctx.exception))
+
+    def test_build_next_fixture_keeps_provider_live_score_fields(self):
+        row = module._build_next_fixture(
+            {
+                "event_key": 88,
+                "event_date": "2026-08-21",
+                "event_type_type": "Atp Singles",
+                "event_status": "Set 2",
+                "event_live": "1",
+                "event_winner": None,
+                "event_final_result": "1 - 0",
+                "event_game_result": "30 - 30",
+                "event_serve": "Second Player",
+                "scores": [
+                    {
+                        "score_first": "6",
+                        "score_second": "4",
+                        "score_set": "1",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(row.event_live, "1")
+        self.assertIsNone(row.event_winner)
+        self.assertEqual(row.live_score["current_game"], "30 - 30")
+        self.assertEqual(row.live_score["server"], "Second Player")
+        self.assertEqual(row.live_score["sets"][0]["score_set"], "1")
+        self.assertIsNotNone(row.live_score_updated_at)
 
     @patch.object(module, "next_fixtures_repo")
     @patch.object(module, "fixtures_repo")
