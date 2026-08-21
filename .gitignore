@@ -24,6 +24,7 @@ node_modules/
 
 # Dataset generati
 backend/data/processed/
+backend/data/reports/tennis_first_set_winner_dataset_v3.csv
 
 # Modelli addestrati
 backend/data/models/
