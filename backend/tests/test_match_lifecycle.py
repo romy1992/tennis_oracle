@@ -244,10 +244,10 @@ class VoidSettlementTest(unittest.TestCase):
             ("void", None),
         )
 
-    def test_pick_pending_when_postponed(self):
+    def test_pick_void_when_postponed_for_slip_context(self):
         self.assertEqual(
             _resolve_pick_status(self._pick(), None, match_lifecycle_status="postponed"),
-            ("pending", None),
+            ("void", None),
         )
 
     def test_pick_pending_when_upcoming_and_started(self):

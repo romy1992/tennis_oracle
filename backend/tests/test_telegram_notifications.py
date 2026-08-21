@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from unittest.mock import MagicMock
 
 import httpx
@@ -14,6 +14,7 @@ from backend.src.app.services.telegram_notifications import (
     KIND_EMPTY_DAY,
     KIND_PREDICTIONS,
     KIND_RESULTS,
+    KIND_SLIP_RECAP,
     STATUS_FAILED,
     STATUS_SENT,
     STATUS_SKIPPED,
@@ -35,6 +36,7 @@ from backend.src.app.telegram.messages import (
 )
 from backend.src.entity.telegram_notification_delivery import TelegramNotificationDelivery
 from backend.src.entity.telegram_user import TelegramUser
+from backend.src.entity import BettingSlip, BettingSlipPick, Fixture
 from backend.tests.auth_helpers import (
     clear_settings_override,
     make_test_settings,
@@ -76,6 +78,7 @@ class TelegramNotificationsServiceTest(unittest.TestCase):
             telegram_notify_predictions_enabled=True,
             telegram_notify_results_enabled=True,
             telegram_notify_empty_day_enabled=True,
+            betting_slip_recap_enabled=True,
             telegram_notify_min_interval_seconds=0.0,
             telegram_notify_max_retries=1,
             telegram_notify_retry_backoff_seconds=0.0,
@@ -206,7 +209,7 @@ class TelegramNotificationsServiceTest(unittest.TestCase):
             )
 
     def test_deliver_permanent_failure_no_retry_loop(self):
-        user = self._seed_active_user(telegram_user_id=99, chat_id=99)
+        self._seed_active_user(telegram_user_id=99, chat_id=99)
         calls = {"n": 0}
 
         def http_post(*_args, **_kwargs):
@@ -290,6 +293,99 @@ class TelegramNotificationsServiceTest(unittest.TestCase):
         prefs = format_notification_preferences(user)
         self.assertIn("Preferenze notifiche", prefs)
         self.assertIn("Master:", prefs)
+
+    def test_completed_picks_are_settled_and_sent_in_daily_slip_recap(self):
+        target_date = date.today() - timedelta(days=1)
+        self._seed_active_user(telegram_user_id=77, chat_id=77)
+        with self.Session() as session:
+            for index, predicted_winner in enumerate(
+                ("First Player", "Second Player"), start=1
+            ):
+                event_key = 800 + index
+                slip = BettingSlip(
+                    slip_date=target_date,
+                    slip_key=f"recap_{index}",
+                    label=f"Recap {index}",
+                    description="Telegram recap test",
+                    model_version="v3",
+                    model_name="logistic_regression",
+                    pick_count=1,
+                    combined_odds=2.0,
+                    generated_at=datetime.combine(target_date, time(9, 0)),
+                )
+                session.add(slip)
+                session.flush()
+                session.add(
+                    BettingSlipPick(
+                        betting_slip_id=slip.id,
+                        event_key=event_key,
+                        market="match_winner",
+                        event_date=target_date,
+                        player_1_name=f"Player A{index}",
+                        player_2_name=f"Player B{index}",
+                        predicted_winner=predicted_winner,
+                        predicted_winner_label=(
+                            f"Player A{index}"
+                            if predicted_winner == "First Player"
+                            else f"Player B{index}"
+                        ),
+                        odds=2.0,
+                        sort_order=0,
+                        outcome="pending",
+                    )
+                )
+                session.add(
+                    Fixture(
+                        id_fixture=event_key,
+                        event_key=event_key,
+                        event_date=target_date,
+                        event_first_player=f"Player A{index}",
+                        event_second_player=f"Player B{index}",
+                        event_status="Finished",
+                        event_winner="First Player",
+                    )
+                )
+            session.commit()
+
+            sent_texts: list[str] = []
+
+            def http_post(*_args, **kwargs):
+                sent_texts.append(kwargs["json"]["text"])
+                return _ok_response(700)
+
+            first = run_notification_kind(
+                session,
+                kind=KIND_SLIP_RECAP,
+                content_date=target_date,
+                settings=self.settings,
+                model_version="v3",
+                model_name="logistic_regression",
+                http_post=http_post,
+            )
+            outcomes = list(
+                session.scalars(
+                    select(BettingSlipPick.outcome).order_by(BettingSlipPick.id)
+                ).all()
+            )
+            self.assertEqual(outcomes, ["won", "lost"])
+            self.assertEqual(first.sent, 1)
+            self.assertTrue(sent_texts)
+            message = "\n".join(sent_texts)
+            self.assertIn("Riepilogo schedine", message)
+            self.assertIn("ROI", message)
+            self.assertIn("Quota 2.00", message)
+
+            second = run_notification_kind(
+                session,
+                kind=KIND_SLIP_RECAP,
+                content_date=target_date,
+                settings=self.settings,
+                model_version="v3",
+                model_name="logistic_regression",
+                http_post=http_post,
+            )
+            self.assertEqual(second.sent, 0)
+            self.assertEqual(second.skipped, 1)
 
 
 class TelegramNotificationsMessagesExtrasTest(unittest.TestCase):

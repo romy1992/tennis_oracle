@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable
+from zoneinfo import ZoneInfo
 
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import (
@@ -938,7 +939,6 @@ async def giorno(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reply(update, format_user_error(str(exc)))
         return
 
-    settings = _settings(context)
     try:
         model_version, model_name = await _resolve_active_public_model(context)
         items = await _api(context).predictions(
@@ -957,7 +957,6 @@ async def giorno(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def ten_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    settings = _settings(context)
     start_date, end_date = prediction_window(today=today_rome(), days=10)
     try:
         model_version, model_name = await _resolve_active_public_model(context)
@@ -1091,7 +1090,7 @@ async def _partite_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             model_name=model_name,
             from_date=target_date,
             to_date=target_date,
-            status="upcoming",
+            status="all",
             limit=200,
         )
         smva_items: list[dict] = []
@@ -1102,7 +1101,7 @@ async def _partite_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 model_version=model_version,
                 model_name=model_name,
                 min_edge_percent=settings.telegram_min_edge_percent,
-                status="upcoming",
+                status="all",
                 limit=200,
             )
             smva_items = list(smva.get("items") or [])
@@ -1206,7 +1205,6 @@ async def cerca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reply(update, "Uso: /cerca <nome giocatore>")
         return
 
-    settings = _settings(context)
     start_date = today_rome()
     end_date = start_date + timedelta(days=10)
     try:
@@ -1306,6 +1304,9 @@ async def _reply_betting_slips(
     resolved_date = slip_date or str(non_empty[0].get("date") or "oggi")
     show_series_labels = len(non_empty) > 1
     labels = public_labels or {}
+    snapshot_label = datetime.now(ZoneInfo("Europe/Rome")).strftime(
+        "Snapshot %d/%m/%Y %H:%M"
+    )
     await _reply(
         update,
         format_betting_slips_intro(
@@ -1329,6 +1330,7 @@ async def _reply_betting_slips(
                     stake=stake,
                     min_edge_percent=min_edge_percent,
                     series_label=series_label,
+                    snapshot_label=snapshot_label,
                 )
                 await message.reply_photo(
                     photo=image,
@@ -1388,6 +1390,9 @@ async def _reply_fixtures(
 
     show_series_labels = len(non_empty) > 1
     labels = public_labels or {}
+    snapshot_label = datetime.now(ZoneInfo("Europe/Rome")).strftime(
+        "Snapshot %d/%m/%Y %H:%M"
+    )
     await _reply(
         update,
         format_fixtures_intro(
@@ -1409,6 +1414,7 @@ async def _reply_fixtures(
                     start_index=start,
                     series_label=series_label,
                     min_edge_percent=min_edge_percent,
+                    snapshot_label=snapshot_label,
                 )
                 await message.reply_photo(
                     photo=image,

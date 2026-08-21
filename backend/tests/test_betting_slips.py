@@ -2,7 +2,7 @@ import unittest
 from datetime import date, datetime, time, timedelta
 from unittest.mock import patch
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from backend.src.app.main import app
 from backend.src.app.schemas.published_prediction import PublishedPredictionCreate
@@ -60,7 +60,7 @@ class BettingSlipsServiceTest(unittest.TestCase):
     def setUp(self):
         self.engine = create_test_engine()
         self.Session = create_session_factory(self.engine)
-        self.today = date(2026, 6, 28)
+        self.today = date.today()
 
     def tearDown(self):
         self.engine.dispose()
@@ -589,7 +589,7 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 any("storiche mantenute" in warning.lower() for warning in daily.warnings)
             )
 
-    def test_regenerate_replaces_existing_slips_with_picks(self):
+    def test_regenerate_preserves_existing_slips_with_picks(self):
         with self.Session() as session:
             self._seed_candidates(session, count=6)
             first = get_daily_betting_slips(
@@ -599,8 +599,8 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 model_name="random_forest",
             )
             self.assertGreater(len(first.slips), 0)
-            pick_count = session.scalar(select(func.count()).select_from(BettingSlipPick))
-            self.assertGreater(int(pick_count or 0), 0)
+            first_pick_ids = set(session.scalars(select(BettingSlipPick.id)).all())
+            self.assertTrue(first_pick_ids)
 
             second = get_daily_betting_slips(
                 session,
@@ -610,10 +610,110 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 regenerate=True,
             )
             self.assertGreater(len(second.slips), 0)
-            self.assertEqual(
-                int(session.scalar(select(func.count()).select_from(BettingSlipPick)) or 0),
-                sum(len(slip.picks) for slip in second.slips),
+            second_pick_ids = set(session.scalars(select(BettingSlipPick.id)).all())
+            self.assertEqual(second_pick_ids, first_pick_ids)
+
+    def test_pool_adds_before_cutoff_and_freezes_after_cutoff(self):
+        settings = make_test_settings(
+            betting_slip_timezone="Europe/Rome",
+            betting_slip_pool_close_time="10:00",
+        )
+        with self.Session() as session:
+            self._seed_candidates(session, count=2)
+            get_daily_betting_slips(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                settings=settings,
+                now=datetime.combine(self.today, time(9, 0)),
             )
+            initial_ids = set(session.scalars(select(BettingSlipPick.id)).all())
+            self.assertTrue(initial_ids)
+
+            self._seed_candidates(session, count=4, start_key=200)
+            get_daily_betting_slips(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                settings=settings,
+                now=datetime.combine(self.today, time(9, 30)),
+            )
+            enriched_ids = set(session.scalars(select(BettingSlipPick.id)).all())
+            self.assertTrue(initial_ids.issubset(enriched_ids))
+            self.assertGreater(len(enriched_ids), len(initial_ids))
+
+            self._seed_candidates(session, count=2, start_key=300)
+            closed = get_daily_betting_slips(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                settings=settings,
+                now=datetime.combine(self.today, time(11, 0)),
+            )
+            frozen_ids = set(session.scalars(select(BettingSlipPick.id)).all())
+            self.assertEqual(frozen_ids, enriched_ids)
+            self.assertTrue(any("pool giornaliero chiuso" in warning.lower() for warning in closed.warnings))
+            registry = session.scalar(
+                select(BettingSlipDay).where(
+                    BettingSlipDay.slip_date == self.today,
+                    BettingSlipDay.model_version == "v2",
+                    BettingSlipDay.model_name == "random_forest",
+                )
+            )
+            self.assertIsNotNone(registry.pool_locked_at)
+
+    def test_cancelled_pick_is_persisted_as_void_before_cutoff(self):
+        settings = make_test_settings(
+            betting_slip_timezone="Europe/Rome",
+            betting_slip_pool_close_time="10:00",
+        )
+        with self.Session() as session:
+            self._seed_candidates(session, count=2)
+            get_daily_betting_slips(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                settings=settings,
+                now=datetime.combine(self.today, time(9, 0)),
+            )
+            initial = list(
+                session.scalars(select(BettingSlipPick).order_by(BettingSlipPick.id)).all()
+            )
+            self.assertTrue(initial)
+            cancelled_event_key = initial[0].event_key
+            initial_ids = {pick.id for pick in initial}
+
+            fixture = session.scalar(
+                select(NextFixture).where(
+                    NextFixture.event_key == cancelled_event_key
+                )
+            )
+            fixture.event_status = "Cancelled"
+            fixture.event_live = "0"
+            session.commit()
+
+            get_daily_betting_slips(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                settings=settings,
+                now=datetime.combine(self.today, time(9, 15)),
+            )
+            persisted = list(
+                session.scalars(select(BettingSlipPick).order_by(BettingSlipPick.id)).all()
+            )
+            self.assertEqual({pick.id for pick in persisted}, initial_ids)
+            cancelled_picks = [
+                pick for pick in persisted if pick.event_key == cancelled_event_key
+            ]
+            self.assertTrue(cancelled_picks)
+            self.assertTrue(all(pick.outcome == "void" for pick in cancelled_picks))
+            self.assertTrue(all(pick.settled_at is not None for pick in cancelled_picks))
 
     def test_pick_and_slip_status_resolution(self):
         pick = BettingSlipPick(
@@ -893,6 +993,13 @@ class BettingSlipsRoutesTest(unittest.TestCase):
                     event_first_player="Sinner J.",
                     event_second_player="Alcaraz C.",
                     event_winner="First Player",
+                    event_status="Finished",
+                    event_final_result="2 - 0",
+                    event_live="0",
+                    scores=[
+                        {"score_first": "6", "score_second": "4", "score_set": "1"},
+                        {"score_first": "6", "score_second": "3", "score_set": "2"},
+                    ],
                 )
             )
             session.commit()
@@ -910,6 +1017,8 @@ class BettingSlipsRoutesTest(unittest.TestCase):
         self.assertEqual(slip["slip_status"], "won")
         self.assertEqual(slip["picks"][0]["pick_status"], "won")
         self.assertTrue(slip["picks"][0]["is_correct"])
+        self.assertEqual(slip["picks"][0]["live_score"]["final_result"], "2 - 0")
+        self.assertEqual(len(slip["picks"][0]["live_score"]["sets"]), 2)
 
     @patch("backend.src.app.services.imports.refresh_matches")
     @patch("backend.src.app.services.imports.import_played_fixtures")

@@ -26,7 +26,14 @@ class NextFixture(Base):
     surface = Column(String)
 
     event_status = Column(String)
+    event_winner = Column(String)
+    event_live = Column(String)
     event_type_type = Column(String)
+
+    # Normalized rolling score snapshot built from API-Tennis ``scores``,
+    # ``event_game_result``, ``event_serve`` and ``event_final_result``.
+    live_score = Column(JSON(none_as_null=True))
+    live_score_updated_at = Column(DateTime)
 
     odds = Column(JSON(none_as_null=True))
 

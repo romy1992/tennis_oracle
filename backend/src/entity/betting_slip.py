@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time, UniqueConstraint
+from sqlalchemy import CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from backend.src.entity.base import Base
@@ -62,6 +62,10 @@ class BettingSlipDay(Base):
     fixture_count = Column(Integer, nullable=False, default=0)
     generated_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
+    # UTC-naive instants. ``pool_closes_at`` is fixed on first access so a
+    # later environment change cannot reopen an already established day.
+    pool_closes_at = Column(DateTime, nullable=True)
+    pool_locked_at = Column(DateTime, nullable=True)
 
     def to_dict(self):
         return {column.name: getattr(self, column.name) for column in self.__table__.columns}
@@ -82,6 +86,10 @@ class BettingSlipPick(Base):
             "event_key",
             "market",
             name="uq_betting_slip_pick_event_market",
+        ),
+        CheckConstraint(
+            "outcome IN ('pending', 'won', 'lost', 'void')",
+            name="ck_betting_slip_pick_outcome",
         ),
     )
 
@@ -112,6 +120,8 @@ class BettingSlipPick(Base):
     confidence = Column(Float, nullable=True)
     pick_score = Column(Float, nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
+    outcome = Column(String, nullable=False, default="pending")
+    settled_at = Column(DateTime, nullable=True)
 
     betting_slip = relationship("BettingSlip", back_populates="picks")
 

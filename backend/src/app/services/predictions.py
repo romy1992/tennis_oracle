@@ -257,6 +257,13 @@ def _fixture_odds(fixture: Fixture) -> MatchWinnerOddsAverage | None:
 
 
 def _fixture_read_from_completed_fixture(fixture: Fixture) -> NextFixtureRead:
+    score_snapshot = {
+        "sets": fixture.scores or [],
+        "current_game": fixture.event_game_result,
+        "server": fixture.event_serve,
+        "final_result": fixture.event_final_result,
+        "status": fixture.event_status,
+    }
     return NextFixtureRead(
         id=fixture.id_fixture,
         event_key=fixture.event_key,
@@ -271,7 +278,10 @@ def _fixture_read_from_completed_fixture(fixture: Fixture) -> NextFixtureRead:
         tournament_round=fixture.tournament_round,
         surface=None,
         event_status=fixture.event_status,
+        event_winner=fixture.event_winner,
+        event_live=fixture.event_live,
         event_type_type=fixture.event_type_type,
+        live_score=score_snapshot,
         odds=fixture.odds,
         imported_at=None,
         week_start=None,
@@ -629,7 +639,17 @@ def _wrap_upcoming_fixture(
     prediction = (
         _prediction_read(stored_prediction, fixture_odds) if stored_prediction else None
     )
-    base = _attach_lifecycle_fields(NextFixtureRead.model_validate(fixture))
+    final_result = (
+        fixture.live_score.get("final_result")
+        if isinstance(fixture.live_score, dict)
+        else None
+    )
+    base = _attach_lifecycle_fields(
+        NextFixtureRead.model_validate(fixture),
+        event_winner=fixture.event_winner,
+        event_final_result=final_result,
+        event_live=fixture.event_live,
+    )
     return NextFixtureWithPrediction(
         **base.model_dump(),
         prediction=prediction,

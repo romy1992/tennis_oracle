@@ -137,6 +137,15 @@ class Settings(BaseSettings):
     # How many minutes before scheduled kickoff a fixture enters the capture window.
     closing_odds_capture_window_minutes: int = 60
 
+    # Stable daily betting-slip pool and live/result jobs.
+    betting_slip_timezone: str = "Europe/Rome"
+    betting_slip_pool_close_time: str = "10:00"
+    betting_slip_live_poll_enabled: bool = False
+    betting_slip_live_poll_interval_seconds: int = 180
+    betting_slip_recap_enabled: bool = False
+    betting_slip_recap_time: str = "23:30"
+    betting_slip_recap_stake: float = 10.0
+
     # --- Observability (provider-agnostic; see docs/MONITORING.md) ---
     # text | json
     log_format: str = "text"

@@ -159,6 +159,39 @@ Cron esempio (dopo il job delle 09:00):
 15 9 * * * cd /percorso/tennis_oracle && .venv/bin/python -m backend.src.jobs.run_telegram_notifications
 ```
 
+## Schedine stabili, live score e recap finale
+
+Il pool delle schedine e' append-only fino a `BETTING_SLIP_POOL_CLOSE_TIME`
+(default `10:00`, timezone `BETTING_SLIP_TIMEZONE=Europe/Rome`). Dopo la soglia
+`betting_slip_day.pool_locked_at` impedisce definitivamente nuove pick; polling
+live e settlement continuano senza rigenerare le schedine.
+
+```env
+BETTING_SLIP_TIMEZONE=Europe/Rome
+BETTING_SLIP_POOL_CLOSE_TIME=10:00
+BETTING_SLIP_LIVE_POLL_ENABLED=true
+BETTING_SLIP_LIVE_POLL_INTERVAL_SECONDS=180
+BETTING_SLIP_RECAP_ENABLED=true
+BETTING_SLIP_RECAP_TIME=23:30
+BETTING_SLIP_RECAP_STAKE=10.0
+```
+
+I job sono single-pass e idempotenti, adatti a cron/Task Scheduler:
+
+```bash
+python3 -m backend.src.jobs.run_betting_slip_live_poll --force --json
+python3 -m backend.src.jobs.run_betting_slip_recap --force --json
+```
+
+Esempio cron: polling ogni 3 minuti e recap ogni 5 minuti nella finestra serale.
+Il recap non invia finche' esiste una pick pending; la deduplica persistente
+impedisce invii doppi quando la giornata diventa terminale.
+
+```cron
+*/3 * * * * cd /percorso/tennis_oracle && .venv/bin/python -m backend.src.jobs.run_betting_slip_live_poll
+*/5 23,0-3 * * * cd /percorso/tennis_oracle && .venv/bin/python -m backend.src.jobs.run_betting_slip_recap
+```
+
 Gli alert admin per pipeline fallita restano su `OPS_ALERTS_ENABLED` +
 `TELEGRAM_ADMIN_CHAT_ID` (vedi [MONITORING.md](MONITORING.md)); non usano il ledger utente.
 

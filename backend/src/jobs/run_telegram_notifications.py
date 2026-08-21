@@ -22,6 +22,7 @@ from backend.src.app.observability.context import ensure_correlation_id
 from backend.src.app.observability.setup import setup_observability
 from backend.src.app.services.telegram_notifications import (
     ALL_KINDS,
+    DEFAULT_KINDS,
     NotificationKind,
     run_daily_telegram_notifications,
 )
@@ -31,7 +32,7 @@ load_backend_env_files(override=False)
 
 def _parse_kinds(raw: str | None) -> list[NotificationKind]:
     if not raw or not raw.strip():
-        return list(ALL_KINDS)
+        return list(DEFAULT_KINDS)
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     unknown = [p for p in parts if p not in ALL_KINDS]
     if unknown:
@@ -49,7 +50,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--kinds",
         default=None,
-        help="Comma-separated: predictions,results,empty_day (default: all)",
+        help=(
+            "Comma-separated: predictions,results,empty_day,slip_recap "
+            "(default: predictions,results,empty_day; slip_recap has a dedicated job)"
+        ),
     )
     parser.add_argument(
         "--date",

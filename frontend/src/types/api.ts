@@ -70,7 +70,11 @@ export type NextFixture = {
   tournament_round: string | null;
   surface: string | null;
   event_status: string | null;
+  event_winner?: string | null;
+  event_live?: string | null;
   event_type_type: string | null;
+  live_score?: LiveScore | null;
+  live_score_updated_at?: string | null;
   odds: unknown | null;
   imported_at: string | null;
   week_start: string | null;
@@ -525,15 +529,26 @@ export type BettingSlipPick = {
   confidence: number | null;
   pick_score: number | null;
   pick_status: PickStatus;
+  outcome?: PickStatus;
+  settled_at?: string | null;
   actual_winner_label: string | null;
   is_correct: boolean | null;
   match_lifecycle_status?: string | null;
   match_lifecycle_label?: string | null;
   event_status?: string | null;
+  live_score?: LiveScore | null;
   void_reason?: string | null;
   ladder_step_index?: number | null;
   ladder_step_stake?: number | null;
   ladder_step_return_if_won?: number | null;
+};
+
+export type LiveScore = {
+  sets?: Array<{ score_first?: string; score_second?: string; score_set?: string }>;
+  current_game?: string | null;
+  server?: string | null;
+  final_result?: string | null;
+  status?: string | null;
 };
 
 export type SlipKind = "parlay" | "ladder";

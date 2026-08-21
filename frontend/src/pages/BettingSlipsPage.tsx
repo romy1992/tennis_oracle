@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
+import { LiveMatchesPanel, MatchScoreSnapshot } from "../components/LiveMatchesPanel";
 import { useGlobalUpdate } from "../hooks/useGlobalUpdate";
 import { apiClient } from "../services/apiClient";
 import type {
@@ -22,8 +23,10 @@ import {
   writeStoredModelVersion
 } from "../utils/modelVersion";
 import { formatDate, todayLocalISODate } from "../utils/tennis";
+import { formatLiveScore, isLiveMatch } from "../utils/liveScore";
 
 const STAKE_PRESETS = [1, 5, 10, 25, 50];
+const LIVE_UI_REFRESH_MS = 60_000;
 
 async function downloadBrowserFile(
   file: { blob: Blob; filename: string | null },
@@ -339,6 +342,13 @@ function truncateText(value: string | null | undefined, maxLength = 28) {
   return `${value.slice(0, maxLength - 1)}…`;
 }
 
+function pickOutcomeLabel(status: BettingSlipPick["pick_status"]) {
+  if (status === "won") return "Pick vinta";
+  if (status === "lost") return "Pick persa";
+  if (status === "void") return "Pick annullata";
+  return null;
+}
+
 function resolvePickDisplay(pick: BettingSlipPick, globalMinEdge: number) {
   let decision = pick.value_decision;
   if (pick.odds != null && pick.void_odds != null) {
@@ -398,7 +408,7 @@ function SlipCard({
         <table className="slip-picks-table">
           <thead>
             <tr>
-              <th className="slip-col-status" aria-label="Esito" />
+              <th className="slip-col-status">Esito</th>
               {isLadder ? <th>Step</th> : null}
               <th>Ora</th>
               <th>Torneo</th>
@@ -418,6 +428,11 @@ function SlipCard({
           <tbody>
             {slip.picks.map((pick) => {
               const display = resolvePickDisplay(pick, globalMinEdge);
+              const live = isLiveMatch(pick);
+              const completed =
+                pick.pick_status === "won" ||
+                pick.pick_status === "lost" ||
+                pick.match_lifecycle_status === "completed";
               const pickTitle =
                 pick.pick_status === "won"
                   ? "Presa"
@@ -429,17 +444,23 @@ function SlipCard({
                         ? pick.match_lifecycle_label
                         : historicalOutcomesMissing
                           ? "Esito non disponibile"
-                          : "In corso";
+                          : live
+                            ? "LIVE"
+                            : ["upcoming", "scheduled"].includes(
+                                  pick.match_lifecycle_status ?? "",
+                                )
+                              ? "Da giocare"
+                              : "In corso";
               return (
               <tr
                 key={`${pick.event_key}-${pick.market}`}
                 className={pick.pick_status === "void" ? "pick-void" : undefined}
               >
                 <td className="slip-col-status">
-                  <span
-                    className={`result-dot ${pickDotClass(pick.pick_status)}`}
-                    title={pickTitle}
-                  />
+                  <span className="pick-outcome-state" title={pickTitle}>
+                    <span className={`result-dot ${pickDotClass(pick.pick_status)}`} />
+                    <span>{pickTitle}</span>
+                  </span>
                 </td>
                 {isLadder ? (
                   <td className="slip-col-time">{pick.ladder_step_index ?? "—"}</td>
@@ -450,8 +471,19 @@ function SlipCard({
                 </td>
                 <td className="slip-col-match">
                   {pick.player_1 ?? "?"} vs {pick.player_2 ?? "?"}
+                  <MatchScoreSnapshot
+                    live={live}
+                    completed={completed}
+                    score={pick.live_score}
+                    winnerLabel={
+                      pick.actual_winner_label ? `Esito reale: ${pick.actual_winner_label}` : null
+                    }
+                    outcomeLabel={pickOutcomeLabel(pick.pick_status)}
+                  />
                   {pick.match_lifecycle_label &&
                   pick.match_lifecycle_status &&
+                  !live &&
+                  !completed &&
                   !["upcoming", "completed", "scheduled", "finished"].includes(
                     pick.match_lifecycle_status,
                   ) ? (
@@ -602,7 +634,10 @@ export function BettingSlipsPage() {
     [calendar, selectedDate]
   );
 
-  const loadDayData = useCallback(async (date: string, options?: { regenerate?: boolean; minEdge?: number }) => {
+  const loadDayData = useCallback(async (
+    date: string,
+    options?: { regenerate?: boolean; minEdge?: number; dailyOnly?: boolean }
+  ) => {
     const models = activeModels.length ? activeModels : ["logistic_regression"];
     // Do not put minEdgePercent in deps: margin changes reclassify client-side without refetch.
     // Regenerate/global-update callers pass minEdge explicitly.
@@ -626,27 +661,31 @@ export function BettingSlipsPage() {
             })
       )
     );
-    const dayStatsResponses = await Promise.all(
-      models.map((modelName) =>
-        apiClient.getBettingSlipStats({
-          model_version: activeVersion,
-          model_name: modelName,
-          from: date,
-          to: date,
-          stake
-        })
-      )
-    );
-    const overallStatsResponses = await Promise.all(
-      models.map((modelName) =>
-        apiClient.getBettingSlipStats({
-          model_version: activeVersion,
-          model_name: modelName,
-          all_time: true,
-          stake
-        })
-      )
-    );
+    const dayStatsResponses = options?.dailyOnly
+      ? []
+      : await Promise.all(
+          models.map((modelName) =>
+            apiClient.getBettingSlipStats({
+              model_version: activeVersion,
+              model_name: modelName,
+              from: date,
+              to: date,
+              stake
+            })
+          )
+        );
+    const overallStatsResponses = options?.dailyOnly
+      ? []
+      : await Promise.all(
+          models.map((modelName) =>
+            apiClient.getBettingSlipStats({
+              model_version: activeVersion,
+              model_name: modelName,
+              all_time: true,
+              stake
+            })
+          )
+        );
 
     const dailyMap: Record<string, BettingSlipsDailyResponse> = {};
     const statsMap: Record<string, BettingSlipStatsResponse> = {};
@@ -657,8 +696,10 @@ export function BettingSlipsPage() {
       overallMap[modelName] = overallStatsResponses[index];
     });
     setDailyByModel(dailyMap);
-    setDayStatsByModel(statsMap);
-    setOverallStatsByModel(overallMap);
+    if (!options?.dailyOnly) {
+      setDayStatsByModel(statsMap);
+      setOverallStatsByModel(overallMap);
+    }
   }, [stake, activeVersion, activeModels]);
 
   useEffect(() => {
@@ -704,6 +745,16 @@ export function BettingSlipsPage() {
   }, [calendar, selectedDate, loadDayData]);
 
   useEffect(() => {
+    if (!selectedCalendarDay?.is_today) return;
+    const timer = window.setInterval(() => {
+      void loadDayData(selectedDate, { dailyOnly: true }).catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Aggiornamento live non riuscito.");
+      });
+    }, LIVE_UI_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [loadDayData, selectedCalendarDay?.is_today, selectedDate]);
+
+  useEffect(() => {
     if (!lastCompletedAt || lastCompletedAt === lastReloadToken) {
       return;
     }
@@ -715,7 +766,7 @@ export function BettingSlipsPage() {
     }).then(() => {
       setActionMessage(
         shouldRegenerate
-          ? "Schedine rigenerate con filtro valore dall'ultima run globale."
+          ? "Schedine aggiornate in modalità append-only dall'ultima run globale."
           : "Schedine aggiornate dall'ultima run globale."
       );
     });
@@ -723,14 +774,14 @@ export function BettingSlipsPage() {
 
   async function handleRegenerate() {
     if (selectedCalendarDay?.is_past) {
-      setActionMessage("Le schedine storiche non vengono rigenerate: seleziona oggi o un giorno futuro.");
+      setActionMessage("Le schedine storiche sono definitive: seleziona oggi o un giorno futuro.");
       return;
     }
     try {
       setRegenerating(true);
       setActionMessage(null);
       await loadDayData(selectedDate, { regenerate: true, minEdge: minEdgePercent });
-      setActionMessage("Schedine e scalate rigenerate dal pool del giorno.");
+      setActionMessage("Schedine e scalate arricchite con le nuove pick disponibili.");
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore inatteso.");
@@ -811,6 +862,23 @@ export function BettingSlipsPage() {
   const historicalOutcomesMissing =
     Boolean(selectedCalendarDay?.is_past) &&
     Boolean(selectedDaily?.slips.some((slip) => slip.picks_pending > 0));
+  const livePickByEvent = new Map<number, BettingSlipPick>();
+  for (const slip of selectedDaily?.slips ?? []) {
+    for (const pick of slip.picks) {
+      if (isLiveMatch(pick) && !livePickByEvent.has(pick.event_key)) {
+        livePickByEvent.set(pick.event_key, pick);
+      }
+    }
+  }
+  const livePanelItems = Array.from(livePickByEvent.values()).map((pick) => ({
+    eventKey: pick.event_key,
+    player1: pick.player_1,
+    player2: pick.player_2,
+    tournament: pick.tournament_name,
+    score: formatLiveScore(pick.live_score),
+    status: pick.event_status ?? pick.match_lifecycle_label ?? null,
+    detail: `Pick: ${pick.predicted_winner_label ?? pick.predicted_winner}`
+  }));
 
   return (
     <section className="page">
@@ -841,7 +909,7 @@ export function BettingSlipsPage() {
             onClick={() => void handleRegenerate()}
             disabled={regenerating || loadingDay || Boolean(selectedCalendarDay?.is_past)}
           >
-            {regenerating ? "Rigenerazione..." : "Rigenera schedine"}
+            {regenerating ? "Aggiornamento..." : "Arricchisci schedine"}
           </button>
           <button
             type="button"
@@ -877,6 +945,8 @@ export function BettingSlipsPage() {
           ))}
         </div>
       ) : null}
+
+      <LiveMatchesPanel items={livePanelItems} />
 
       {calendar ? (
         <article className="panel">
@@ -1002,7 +1072,7 @@ export function BettingSlipsPage() {
           }
           message={
             viewKind === "ladder"
-              ? 'Serve un pool di almeno 2 PLAY (o PLAY+Border). Usa "Rigenera schedine" o Aggiorna tutto.'
+              ? 'Serve un pool di almeno 2 PLAY (o PLAY+Border). Usa "Arricchisci schedine" o Aggiorna tutto.'
               : 'Seleziona un altro giorno o usa "Aggiorna tutto" nella sidebar.'
           }
         />

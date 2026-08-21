@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
+import { LiveMatchesPanel, MatchScoreSnapshot } from "../components/LiveMatchesPanel";
 import { useGlobalUpdate } from "../hooks/useGlobalUpdate";
 import { apiClient } from "../services/apiClient";
 import type {
@@ -21,6 +22,7 @@ import {
   writeStoredModelVersion
 } from "../utils/modelVersion";
 import { formatDate } from "../utils/tennis";
+import { formatLiveScore, isLiveMatch } from "../utils/liveScore";
 
 
 type FixtureStatusFilter = "upcoming" | "played" | "all";
@@ -28,6 +30,7 @@ type OutcomeFilter = "all" | "won" | "lost";
 type MarketTab = "match_winner" | "first_set_winner" | "over_under_games";
 
 const PAGE_SIZE = 50;
+const LIVE_UI_REFRESH_MS = 60_000;
 
 const statusTabs: Array<{ value: FixtureStatusFilter; label: string }> = [
   { value: "upcoming", label: "Da giocare" },
@@ -101,6 +104,12 @@ function resultDot(fixture: MergedFixtureRow, show: boolean) {
     return null;
   }
   return anyPrediction.is_correct ? "win" : "loss";
+}
+
+function predictionOutcomeLabel(prediction: MatchPrediction | null | undefined) {
+  if (prediction?.is_correct === true) return "Previsione presa";
+  if (prediction?.is_correct === false) return "Previsione persa";
+  return null;
 }
 
 function decisionClass(decision: SingleMatchValueDecision) {
@@ -412,6 +421,16 @@ export function PredictionsPage() {
     setActionMessage("Dati aggiornati dall'ultima run globale.");
   }, [lastCompletedAt, lastReloadToken, loadPageData]);
 
+  useEffect(() => {
+    if (!catalogLoaded) return;
+    const timer = window.setInterval(() => {
+      void loadPageData().catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Aggiornamento live non riuscito.");
+      });
+    }, LIVE_UI_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [catalogLoaded, loadPageData, statusFilter]);
+
   async function handleImportFixtures() {
     try {
       setImportingFixtures(true);
@@ -448,6 +467,15 @@ export function PredictionsPage() {
       : importStatus?.next_fixtures_window_until
         ? `Finestra da giocare: oggi → ${formatDate(importStatus.next_fixtures_window_until)} (${importStatus.next_fixtures_window_days} giorni).`
         : null;
+  const livePanelItems = fixtures.filter(isLiveMatch).map((fixture) => ({
+    eventKey: fixture.event_key,
+    player1: fixture.event_first_player,
+    player2: fixture.event_second_player,
+    tournament: fixture.tournament_name,
+    score: formatLiveScore(fixture.live_score),
+    status: fixture.event_status,
+    detail: fixture.match_lifecycle_label
+  }));
 
   return (
     <section className="page">
@@ -509,6 +537,8 @@ export function PredictionsPage() {
           ))}
         </div>
       ) : null}
+
+      <LiveMatchesPanel items={livePanelItems} />
 
       <article className="panel">
         <div className="panel-header">
@@ -663,7 +693,7 @@ export function PredictionsPage() {
         {statusFilter === "played" ? (
           <p className="note">
             Mostra tutte le partite concluse negli ultimi 30 giorni, anche senza previsione.
-            Le partite appena terminate compaiono qui dopo Aggiorna o Importa disputate.
+            Le partite appena terminate compaiono automaticamente dopo il polling live.
           </p>
         ) : null}
 
@@ -782,6 +812,9 @@ export function PredictionsPage() {
                     {fixtures.map((fixture) => {
                       const dot = resultDot(fixture, showResultDots);
                       const hasAnyPrediction = Object.values(fixture.predictionsByModel).some(Boolean);
+                      const live = isLiveMatch(fixture);
+                      const completed =
+                        Boolean(fixture.is_completed) || fixture.match_lifecycle_status === "completed";
                       return (
                         <tr key={fixture.event_key}>
                           {showResultDots ? (
@@ -801,6 +834,16 @@ export function PredictionsPage() {
                           <td>
                             {fixture.event_first_player ?? "?"} vs{" "}
                             {fixture.event_second_player ?? "?"}
+                            <MatchScoreSnapshot
+                              live={live}
+                              completed={completed}
+                              score={fixture.live_score}
+                              winnerLabel={
+                                fixture.event_winner
+                                  ? `Vincitore: ${winnerLabel(fixture, fixture.event_winner)}`
+                                  : null
+                              }
+                            />
                           </td>
                           {modelNames.map((name) => {
                             const prediction = fixture.predictionsByModel[name];
@@ -812,7 +855,16 @@ export function PredictionsPage() {
                             );
                             return (
                               <Fragment key={`${fixture.event_key}-${name}`}>
-                                <td>{winnerLabel(fixture, prediction?.predicted_winner)}</td>
+                                <td>
+                                  {winnerLabel(fixture, prediction?.predicted_winner)}
+                                  {predictionOutcomeLabel(prediction) ? (
+                                    <small
+                                      className={`prediction-outcome ${prediction?.is_correct ? "won" : "lost"}`}
+                                    >
+                                      {predictionOutcomeLabel(prediction)}
+                                    </small>
+                                  ) : null}
+                                </td>
                                 <td>{formatProb(prediction?.confidence)}</td>
                                 <td>{formatOdds(valueItem?.void_odds)}</td>
                                 <td>
@@ -869,6 +921,9 @@ export function PredictionsPage() {
                       const item = fixture.extra_markets?.find((entry) => entry.market === marketTab);
                       const value = resolveExtraMarketValue(item, minEdgePercent);
                       const hasSelectedPrediction = Boolean(item);
+                      const live = isLiveMatch(fixture);
+                      const completed =
+                        Boolean(fixture.is_completed) || fixture.match_lifecycle_status === "completed";
                       return (
                         <tr key={fixture.event_key}>
                           <td>{formatDate(fixture.event_date)}</td>
@@ -878,6 +933,16 @@ export function PredictionsPage() {
                           <td>
                             {fixture.event_first_player ?? "?"} vs{" "}
                             {fixture.event_second_player ?? "?"}
+                            <MatchScoreSnapshot
+                              live={live}
+                              completed={completed}
+                              score={fixture.live_score}
+                              winnerLabel={
+                                fixture.event_winner
+                                  ? `Vincitore: ${winnerLabel(fixture, fixture.event_winner)}`
+                                  : null
+                              }
+                            />
                           </td>
                           <td>{item ? extraMarketSelectionLabel(fixture, item) : "-"}</td>
                           <td>{formatProb(item?.probability)}</td>

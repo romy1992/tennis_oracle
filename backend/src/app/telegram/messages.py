@@ -844,6 +844,18 @@ def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None =
     for index, pick in enumerate(picks, start=1):
         winner = slip_pick_winner_name(pick) or "n.d."
         tournament = pick.get("tournament_name") or "-"
+        live_score = pick.get("live_score") if isinstance(pick.get("live_score"), dict) else None
+        live_score_note = ""
+        if live_score:
+            sets = " ".join(
+                f"{item.get('score_first', '-')}-{item.get('score_second', '-')}"
+                for item in (live_score.get("sets") or [])
+                if isinstance(item, dict)
+            )
+            game = live_score.get("current_game")
+            score_parts = [part for part in (sets, f"game {game}" if game else "") if part]
+            if score_parts:
+                live_score_note = f" · {' · '.join(score_parts)}"
         lifecycle_note = ""
         if pick.get("pick_status") == "void":
             lifecycle_note = f" · {pick.get('void_reason') or pick.get('match_lifecycle_label') or 'Annullata'}"
@@ -861,7 +873,7 @@ def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None =
             lines.append(
                 f"{step_n}. [{pick_status_label(pick.get('pick_status'))}] "
                 f"{_format_event_time(pick.get('event_time'))} | {tournament} | "
-                f"{_match_title(pick)}{lifecycle_note}\n"
+                f"{_match_title(pick)}{lifecycle_note}{live_score_note}\n"
                 f"   {market_label(pick.get('market'))}: {winner} | "
                 f"Puntata {_format_decimal(pick.get('ladder_step_stake'))} | "
                 f"Quota {_format_decimal(pick.get('odds'))}"
@@ -870,7 +882,7 @@ def format_betting_slip_text(slip: dict[str, Any], *, series_label: str | None =
             lines.append(
                 f"{index}. [{pick_status_label(pick.get('pick_status'))}] "
                 f"{_format_event_time(pick.get('event_time'))} | {tournament} | "
-                f"{_match_title(pick)}{lifecycle_note}\n"
+                f"{_match_title(pick)}{lifecycle_note}{live_score_note}\n"
                 f"   {market_label(pick.get('market'))}: {winner} | "
                 f"Percentuale di riuscita {_format_percent(pick.get('confidence'))} | "
                 f"Quota {_format_decimal(pick.get('odds'))}"
@@ -1096,6 +1108,50 @@ def format_notification_results(
         "",
         "Andamento completo: /statistiche",
     ]
+    return append_message_footer("\n".join(lines))
+
+
+def format_betting_slip_recap(
+    target_date: date | str,
+    daily_payload: dict[str, Any],
+    day_stats: dict[str, Any] | None,
+) -> str:
+    """Compact final recap containing every slip and every persisted leg."""
+    slips = daily_payload.get("slips") or []
+    if not slips:
+        return append_message_footer(
+            f"Riepilogo schedine {target_date}\n\nNessuna schedina generata per questa giornata."
+        )
+
+    lines = [f"Riepilogo schedine {target_date}", ""]
+    for slip in slips:
+        status = slip_status_label(slip.get("slip_status"))
+        effective_odds = slip.get("effective_combined_odds")
+        odds = effective_odds if effective_odds is not None else slip.get("combined_odds")
+        lines.append(
+            f"{slip.get('label') or slip.get('slip_key')}: {status} | Quota {_format_decimal(odds)}"
+        )
+        for index, pick in enumerate(slip.get("picks") or [], start=1):
+            pick_status = pick_status_label(pick.get("outcome") or pick.get("pick_status"))
+            selection = slip_pick_winner_name(pick) or "n.d."
+            lines.append(
+                f"  {index}. {_match_title(pick)} | {market_label(pick.get('market'))}: "
+                f"{selection} @ {_format_decimal(pick.get('odds'))} | {pick_status}"
+            )
+        lines.append("")
+
+    stats = day_stats or {}
+    lines.extend(
+        [
+            f"Schedine vinte {int(stats.get('slips_won') or 0)} | "
+            f"perse {int(stats.get('slips_lost') or 0)} | "
+            f"void {int(stats.get('slips_void') or 0)}",
+            f"Profitto {_format_stats_decimal(stats.get('theoretical_profit_units'))} | "
+            f"ROI {_format_stats_pct(stats.get('theoretical_roi_pct'))}",
+            "",
+            "Andamento completo: /statistiche",
+        ]
+    )
     return append_message_footer("\n".join(lines))
 
 
