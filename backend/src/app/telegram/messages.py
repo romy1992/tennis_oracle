@@ -776,12 +776,18 @@ def slip_kind_of(slip: dict[str, Any]) -> str:
     return "ladder" if key.startswith("ladder_") else "parlay"
 
 
-def filter_slips_by_kind(payload: dict[str, Any], *, slip_kind: str) -> dict[str, Any]:
-    """Return a shallow copy of the daily slips payload with only one kind."""
+def filter_slips_by_kind(
+    payload: dict[str, Any],
+    *,
+    slip_kind: str,
+    include_experimental: bool = False,
+) -> dict[str, Any]:
+    """Return one kind from the daily payload, excluding experiments by default."""
     slips = [
         slip
         for slip in (payload.get("slips") or [])
         if slip_kind_of(slip) == slip_kind
+        and (include_experimental or not bool(slip.get("is_experimental", False)))
     ]
     filtered = dict(payload)
     filtered["slips"] = slips

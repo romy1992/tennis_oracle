@@ -20,9 +20,9 @@ from sqlalchemy.orm import Session
 from backend.src.app.core.config import Settings, get_settings
 from backend.src.app.services.live_publication_service import resolve_public_model_config
 from backend.src.app.services.betting_slips import (
-    compute_betting_slip_stats,
     get_daily_betting_slips,
 )
+from backend.src.app.services.match_lifecycle import slip_profit_units
 from backend.src.app.services.predictions import (
     compute_daily_prediction_stats,
     get_next_fixtures_with_predictions,
@@ -239,22 +239,39 @@ def build_slip_recap_message(
         stake=settings.betting_slip_recap_stake,
         settings=settings,
     )
-    payload = daily.model_dump(mode="json")
-    pending = sum(slip.picks_pending for slip in daily.slips)
-    ready = bool(daily.slips) and pending == 0
-    stats = compute_betting_slip_stats(
-        db,
-        model_version=version,  # type: ignore[arg-type]
-        model_name=name,
-        from_date=target_date,
-        to_date=target_date,
-        stake=settings.betting_slip_recap_stake,
+    official_slips = [slip for slip in daily.slips if not slip.is_experimental]
+    payload = daily.model_copy(update={"slips": official_slips}).model_dump(mode="json")
+    pending = sum(slip.picks_pending for slip in official_slips)
+    ready = bool(official_slips) and pending == 0
+    settled = [slip for slip in official_slips if slip.slip_status in {"won", "lost"}]
+    profit = round(
+        sum(
+            slip_profit_units(
+                slip_status=slip.slip_status,
+                stake=daily.stake,
+                effective_combined_odds=(
+                    slip.effective_combined_odds
+                    if slip.effective_combined_odds is not None
+                    else slip.combined_odds
+                ),
+            )
+            for slip in settled
+        ),
+        2,
     )
-    day = stats.days[0].model_dump(mode="json") if stats.days else None
+    day = {
+        "slips_won": sum(slip.slip_status == "won" for slip in official_slips),
+        "slips_lost": sum(slip.slip_status == "lost" for slip in official_slips),
+        "slips_void": sum(slip.slip_status == "void" for slip in official_slips),
+        "theoretical_profit_units": profit,
+        "theoretical_roi_pct": (
+            round(profit / (daily.stake * len(settled)) * 100, 1) if settled else None
+        ),
+    }
     return (
         format_betting_slip_recap(target_date, payload, day),
         ready,
-        len(daily.slips),
+        len(official_slips),
     )
 
 

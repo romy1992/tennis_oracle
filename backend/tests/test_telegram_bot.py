@@ -591,12 +591,33 @@ class TelegramBotUxTest(unittest.TestCase):
                     "label": "Scalata · Play 3",
                     "picks": [],
                 },
+                {
+                    "slip_key": "experiment_play_only_3",
+                    "slip_kind": "parlay",
+                    "is_experimental": True,
+                    "label": "Solo PLAY",
+                    "picks": [],
+                },
+                {
+                    "slip_key": "ladder_experiment_play_only_3",
+                    "slip_kind": "ladder",
+                    "is_experimental": True,
+                    "label": "Scalata · Solo PLAY",
+                    "picks": [],
+                },
             ],
         }
         parlays = filter_slips_by_kind(payload, slip_kind="parlay")
         ladders = filter_slips_by_kind(payload, slip_kind="ladder")
         self.assertEqual([s["slip_key"] for s in parlays["slips"]], ["play_safe"])
         self.assertEqual([s["slip_key"] for s in ladders["slips"]], ["ladder_play_3"])
+        all_parlays = filter_slips_by_kind(
+            payload, slip_kind="parlay", include_experimental=True
+        )
+        self.assertEqual(
+            [s["slip_key"] for s in all_parlays["slips"]],
+            ["play_safe", "experiment_play_only_3"],
+        )
         self.assertEqual(slip_kind_of(ladders["slips"][0]), "ladder")
         intro = format_betting_slips_intro(slip_date="2026-06-28", slip_kind="ladder")
         self.assertIn("Scalate di oggi", intro)

@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 PickStatus = Literal["pending", "won", "lost", "void"]
 SlipStatus = Literal["pending", "won", "lost", "void"]
 SlipKind = Literal["parlay", "ladder"]
+StrategyFamily = Literal["generic", "play_only", "strong_markets", "selective"]
 
 
 class BettingSlipsGenerateRequest(BaseModel):
@@ -62,6 +63,9 @@ class BettingSlipRead(BaseModel):
     label: str
     description: str | None = None
     slip_kind: SlipKind = "parlay"
+    strategy_family: StrategyFamily = "generic"
+    strategy_version: str = "legacy_v1"
+    is_experimental: bool = False
     picks: list[BettingSlipPickRead] = Field(default_factory=list)
     pick_count: int
     combined_odds: float
@@ -80,10 +84,24 @@ class BettingSlipRead(BaseModel):
     generated_at: datetime | None = None
 
 
-class BettingSlipsDailyResponse(BaseModel):
-    date: date
+class BettingSlipMarketModelRead(BaseModel):
+    """Production model responsible for one market in the mixed slip pool."""
+
+    market: str
+    label: str
     model_version: str
     model_name: str
+
+
+class BettingSlipsDailyResponse(BaseModel):
+    date: date
+    # Backward-compatible namespace fields. They select the Match Winner model;
+    # the dedicated extra-market models are exposed explicitly in market_models.
+    model_version: str
+    model_name: str
+    match_winner_model_version: str
+    match_winner_model_name: str
+    market_models: list[BettingSlipMarketModelRead] = Field(default_factory=list)
     stake: float
     candidate_pool_size: int
     slips: list[BettingSlipRead] = Field(default_factory=list)
@@ -145,12 +163,42 @@ class BettingSlipStatsProfile(BaseModel):
     slip_key: str
     label: str
     slip_kind: SlipKind = "parlay"
+    strategy_family: StrategyFamily = "generic"
+    strategy_version: str = "legacy_v1"
+    is_experimental: bool = False
     slips_won: int
     slips_lost: int
     slips_pending: int = 0
     slips_void: int = 0
     slips_total: int = 0
     slip_win_rate_pct: float | None = None
+    theoretical_profit_units: float = 0.0
+    theoretical_roi_pct: float | None = None
+
+
+class BettingSlipStatsStrategy(BaseModel):
+    strategy_family: StrategyFamily
+    label: str
+    slip_kind: SlipKind
+    strategy_versions: list[str] = Field(default_factory=list)
+    is_experimental: bool = False
+    slips_total: int
+    slips_won: int
+    slips_lost: int
+    slips_pending: int = 0
+    slips_void: int = 0
+    slip_win_rate_pct: float | None = None
+    picks_total: int = 0
+    picks_won: int = 0
+    picks_lost: int = 0
+    picks_pending: int = 0
+    picks_void: int = 0
+    pick_hit_rate_pct: float | None = None
+    theoretical_profit_units: float = 0.0
+    theoretical_roi_pct: float | None = None
+    daily_portfolio_profit_units: float = 0.0
+    daily_portfolio_roi_pct: float | None = None
+    comparable_days: int = 0
 
 
 class BettingSlipStatsKind(BaseModel):
@@ -191,6 +239,7 @@ class BettingSlipStatsSummary(BaseModel):
     theoretical_roi_pct: float | None = None
     by_profile: list[BettingSlipStatsProfile] = Field(default_factory=list)
     by_kind: list[BettingSlipStatsKind] = Field(default_factory=list)
+    by_strategy: list[BettingSlipStatsStrategy] = Field(default_factory=list)
 
 
 class BettingSlipStatsResponse(BaseModel):
@@ -244,3 +293,4 @@ class BettingSlipModelStatsResponse(BaseModel):
     by_market: list[BettingSlipMarketStatsRow] = Field(default_factory=list)
     by_kind: list[BettingSlipStatsKind] = Field(default_factory=list)
     by_profile: list[BettingSlipStatsProfile] = Field(default_factory=list)
+    by_strategy: list[BettingSlipStatsStrategy] = Field(default_factory=list)
