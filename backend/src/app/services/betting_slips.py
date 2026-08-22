@@ -33,7 +33,9 @@ from backend.src.app.ml.model_versioning import (
     ModelVersion,
 )
 from backend.src.app.ml.prediction.extra_markets_predictor import (
+    FIRST_SET_WINNER_MODEL_NAME,
     FIRST_SET_WINNER_MODEL_VERSION,
+    OVER_UNDER_GAMES_MODEL_NAME,
     OVER_UNDER_GAMES_MODEL_VERSION,
 )
 from backend.src.app.ml.prediction.predictor import DEFAULT_MODEL_NAME
@@ -49,6 +51,7 @@ from backend.src.app.schemas.betting_slips import (
     BettingSlipCalendarDay,
     BettingSlipCalendarResponse,
     BettingSlipMarketStatsRow,
+    BettingSlipMarketModelRead,
     BettingSlipModelStatsResponse,
     BettingSlipModelStatsRow,
     BettingSlipPickRead,
@@ -60,8 +63,10 @@ from backend.src.app.schemas.betting_slips import (
     BettingSlipStatsKind,
     BettingSlipStatsProfile,
     BettingSlipStatsResponse,
+    BettingSlipStatsStrategy,
     BettingSlipStatsSummary,
     SlipKind,
+    StrategyFamily,
 )
 from backend.src.app.services.match_lifecycle import (
     MatchLifecycleStatus,
@@ -133,6 +138,45 @@ DEFAULT_SLIP_MARKETS: tuple[str, ...] = (
     "first_set_winner",
     "over_under_games",
 )
+
+STRONG_MARKETS_V1: tuple[str, ...] = ("first_set_winner",)
+STRATEGY_EXPERIMENT_MODEL_VERSION = "v4"
+STRATEGY_EXPERIMENT_MODEL_NAME = "voting_ensemble"
+
+STRATEGY_FAMILY_LABELS: dict[str, str] = {
+    "generic": "Generiche",
+    "play_only": "Solo PLAY",
+    "strong_markets": "Mercati forti",
+    "selective": "Selettive",
+}
+
+
+def _slip_market_models(
+    match_winner_model_version: ModelVersion,
+    match_winner_model_name: str,
+) -> list[BettingSlipMarketModelRead]:
+    """Describe the three independent production models feeding the pool."""
+
+    return [
+        BettingSlipMarketModelRead(
+            market="match_winner",
+            label="Match Winner",
+            model_version=match_winner_model_version,
+            model_name=match_winner_model_name,
+        ),
+        BettingSlipMarketModelRead(
+            market="first_set_winner",
+            label="Primo set",
+            model_version=FIRST_SET_WINNER_MODEL_VERSION,
+            model_name=FIRST_SET_WINNER_MODEL_NAME,
+        ),
+        BettingSlipMarketModelRead(
+            market="over_under_games",
+            label="Over/Under",
+            model_version=OVER_UNDER_GAMES_MODEL_VERSION,
+            model_name=OVER_UNDER_GAMES_MODEL_NAME,
+        ),
+    ]
 
 
 SLIP_PROFILES: tuple[dict[str, object], ...] = (
@@ -261,6 +305,97 @@ LADDER_PROFILES: tuple[dict[str, object], ...] = (
     },
 )
 
+# Strategie sperimentali persistite nello stesso ledger delle schedine legacy.
+# Le chiavi delle schedine non iniziano deliberatamente con ``play_``: quel
+# prefisso e' ancora usato dal flusso di pubblicazione ufficiale.
+EXPERIMENTAL_SLIP_PROFILES: tuple[dict[str, object], ...] = (
+    {
+        "slip_key": "experiment_play_only_3",
+        "label": "Solo PLAY · Tripla",
+        "description": "3 PLAY su eventi distinti, senza diversificazione forzata per mercato",
+        "target_picks": 3,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "score",
+        "include_markets": DEFAULT_SLIP_MARKETS,
+        "distinct_events": True,
+        "force_market_diversity": False,
+        "strategy_family": "play_only",
+        "strategy_version": "play_only_v1",
+        "is_experimental": True,
+    },
+    {
+        "slip_key": "experiment_strong_markets_3",
+        "label": "Mercati forti · Tripla",
+        "description": "3 PLAY primo set su eventi distinti (regola strong_markets v1)",
+        "target_picks": 3,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "score",
+        "include_markets": STRONG_MARKETS_V1,
+        "distinct_events": True,
+        "force_market_diversity": False,
+        "strategy_family": "strong_markets",
+        "strategy_version": "strong_markets_v1",
+        "is_experimental": True,
+    },
+    {
+        "slip_key": "experiment_selective_2",
+        "label": "Selettiva · Doppia",
+        "description": (
+            "Massimo 2 PLAY primo set su eventi distinti, score prudente e quota totale <= 3.20"
+        ),
+        "target_picks": 2,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "conservative",
+        "include_markets": STRONG_MARKETS_V1,
+        "distinct_events": True,
+        "force_market_diversity": False,
+        "max_combined_odds": 3.2,
+        "strategy_family": "selective",
+        "strategy_version": "selective_v1",
+        "is_experimental": True,
+    },
+)
+
+EXPERIMENTAL_LADDER_PROFILES: tuple[dict[str, object], ...] = (
+    {
+        "slip_key": "ladder_experiment_play_only_3",
+        "label": "Solo PLAY · Scalata 3",
+        "description": "3 step PLAY su eventi distinti e tutti i mercati",
+        "target_steps": 3,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "score",
+        "include_markets": DEFAULT_SLIP_MARKETS,
+        "strategy_family": "play_only",
+        "strategy_version": "play_only_v1",
+        "is_experimental": True,
+    },
+    {
+        "slip_key": "ladder_experiment_strong_markets_3",
+        "label": "Mercati forti · Scalata 3",
+        "description": "3 step PLAY primo set su eventi distinti",
+        "target_steps": 3,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "score",
+        "include_markets": STRONG_MARKETS_V1,
+        "strategy_family": "strong_markets",
+        "strategy_version": "strong_markets_v1",
+        "is_experimental": True,
+    },
+    {
+        "slip_key": "ladder_experiment_selective_3",
+        "label": "Selettiva · Scalata 3",
+        "description": "Fino a 3 step PLAY primo set, score prudente e quota totale <= 4.00",
+        "target_steps": 3,
+        "allowed_decisions": ("PLAY",),
+        "sort_mode": "conservative",
+        "include_markets": STRONG_MARKETS_V1,
+        "max_combined_odds": 4.0,
+        "strategy_family": "selective",
+        "strategy_version": "selective_v1",
+        "is_experimental": True,
+    },
+)
+
 DEFAULT_LADDER_COUNT = len(LADDER_PROFILES)
 LADDER_SLIP_KEY_PREFIX = "ladder_"
 
@@ -271,6 +406,39 @@ def slip_kind_from_key(slip_key: str) -> SlipKind:
 
 def slip_kind_label(kind: SlipKind) -> str:
     return "Scalate" if kind == "ladder" else "Schedine"
+
+
+def strategy_family_label(family: str) -> str:
+    return STRATEGY_FAMILY_LABELS.get(family, family.replace("_", " ").title())
+
+
+def _profile_strategy_family(profile: dict[str, object]) -> StrategyFamily:
+    value = str(profile.get("strategy_family") or "generic")
+    if value not in STRATEGY_FAMILY_LABELS:
+        return "generic"
+    return value  # type: ignore[return-value]
+
+
+def _profile_strategy_version(profile: dict[str, object]) -> str:
+    return str(profile.get("strategy_version") or "legacy_v1")
+
+
+def _strategy_experiments_enabled(model_version: str, model_name: str) -> bool:
+    return (
+        model_version == STRATEGY_EXPERIMENT_MODEL_VERSION
+        and model_name == STRATEGY_EXPERIMENT_MODEL_NAME
+    )
+
+
+def _slip_strategy_family(slip: BettingSlip) -> StrategyFamily:
+    value = str(getattr(slip, "strategy_family", None) or "generic")
+    if value not in STRATEGY_FAMILY_LABELS:
+        return "generic"
+    return value  # type: ignore[return-value]
+
+
+def _slip_strategy_version(slip: BettingSlip) -> str:
+    return str(getattr(slip, "strategy_version", None) or "legacy_v1")
 
 
 @dataclass(frozen=True)
@@ -972,11 +1140,18 @@ def _select_picks_simple(
     sort_key,
     extra_filter=None,
     selected_context: list[CandidatePick] | None = None,
+    exclude_events: set[int] | None = None,
+    distinct_events: bool = False,
+    force_market_diversity: bool = True,
+    max_combined_odds: float | None = None,
+    initial_combined_odds: float = 1.0,
 ) -> list[CandidatePick]:
+    blocked_events = set(exclude_events or set())
     filtered = [
         candidate
         for candidate in pool
         if _candidate_identity(candidate) not in exclude_keys
+        and (not distinct_events or candidate.event_key not in blocked_events)
         and (extra_filter(candidate) if extra_filter is not None else True)
     ]
     filtered.sort(key=lambda candidate: sort_key(candidate) + _diversity_bonus(candidate, []), reverse=True)
@@ -986,15 +1161,36 @@ def _select_picks_simple(
     remaining = filtered.copy()
     while len(selected_picks) < count and remaining:
         current_selection = [*context, *selected_picks]
+        used_events = blocked_events | {pick.event_key for pick in current_selection}
         used_markets = {pick.market for pick in current_selection}
         unseen_market_candidates = [
-            candidate for candidate in remaining if candidate.market not in used_markets
+            candidate
+            for candidate in remaining
+            if candidate.market not in used_markets
+            and (not distinct_events or candidate.event_key not in used_events)
         ]
         # Finche' esiste un mercato non ancora rappresentato, riservagli il
         # prossimo slot. In questo modo una schedina e' realmente multi-mercato
         # quando il tier dispone di candidati idonei, senza inventare pick che
         # non superano il filtro PLAY/BORDERLINE/NO BET del profilo.
-        eligible = unseen_market_candidates or remaining
+        eligible = (
+            unseen_market_candidates
+            if force_market_diversity and unseen_market_candidates
+            else remaining
+        )
+        if distinct_events:
+            eligible = [candidate for candidate in eligible if candidate.event_key not in used_events]
+        if max_combined_odds is not None:
+            current_odds = initial_combined_odds
+            for pick in current_selection:
+                current_odds *= float(pick.odds or 1.0)
+            eligible = [
+                candidate
+                for candidate in eligible
+                if current_odds * float(candidate.odds or 1.0) <= max_combined_odds
+            ]
+        if not eligible:
+            break
         eligible.sort(
             key=lambda candidate: sort_key(candidate) + _diversity_bonus(candidate, current_selection),
             reverse=True,
@@ -1022,6 +1218,12 @@ def _sort_key_for_mode(sort_mode: str):
         return lambda candidate: candidate.confidence
     if sort_mode == "edge":
         return lambda candidate: candidate.edge or 0.0
+    if sort_mode == "conservative":
+        return lambda candidate: (
+            float(candidate.expected_roi or 0.0)
+            + float(candidate.confidence or 0.0) * 0.15
+            - max(float(candidate.odds or 1.0) - 1.8, 0.0) * 0.1
+        )
     return lambda candidate: candidate.pick_score
 
 
@@ -1032,12 +1234,21 @@ def _select_picks_for_tier(
     exclude_keys: set[tuple[int, str]],
     allowed_decisions: tuple[str, ...],
     sort_key,
+    include_markets: tuple[str, ...] = DEFAULT_SLIP_MARKETS,
+    exclude_events: set[int] | None = None,
+    distinct_events: bool = False,
+    force_market_diversity: bool = True,
+    max_combined_odds: float | None = None,
+    initial_combined_odds: float = 1.0,
 ) -> list[CandidatePick]:
     """Fill a slip preferring a mix of decision states when the tier allows them."""
     allowed_set = set(allowed_decisions)
 
     def base_filter(candidate: CandidatePick) -> bool:
-        return candidate.value_decision in allowed_set
+        return (
+            candidate.value_decision in allowed_set
+            and candidate.market in include_markets
+        )
 
     if allowed_set == {"PLAY"}:
         return _select_picks_simple(
@@ -1046,6 +1257,11 @@ def _select_picks_for_tier(
             exclude_keys=exclude_keys,
             sort_key=sort_key,
             extra_filter=base_filter,
+            exclude_events=exclude_events,
+            distinct_events=distinct_events,
+            force_market_diversity=force_market_diversity,
+            max_combined_odds=max_combined_odds,
+            initial_combined_odds=initial_combined_odds,
         )
 
     selected: list[CandidatePick] = []
@@ -1060,8 +1276,16 @@ def _select_picks_for_tier(
             count=1,
             exclude_keys=used,
             sort_key=sort_key,
-            extra_filter=lambda candidate, decision=decision: candidate.value_decision == decision,
+            extra_filter=lambda candidate, decision=decision: (
+                candidate.value_decision == decision
+                and candidate.market in include_markets
+            ),
             selected_context=selected,
+            exclude_events=exclude_events,
+            distinct_events=distinct_events,
+            force_market_diversity=force_market_diversity,
+            max_combined_odds=max_combined_odds,
+            initial_combined_odds=initial_combined_odds,
         )
         for pick in picks:
             selected.append(pick)
@@ -1076,10 +1300,46 @@ def _select_picks_for_tier(
             sort_key=sort_key,
             extra_filter=base_filter,
             selected_context=selected,
+            exclude_events=exclude_events,
+            distinct_events=distinct_events,
+            force_market_diversity=force_market_diversity,
+            max_combined_odds=max_combined_odds,
+            initial_combined_odds=initial_combined_odds,
         )
         selected.extend(fillers)
 
     return selected[:count]
+
+
+def _select_picks_for_profile(
+    candidates: list[CandidatePick],
+    *,
+    profile: dict[str, object],
+    count: int,
+    exclude_keys: set[tuple[int, str]] | None = None,
+    exclude_events: set[int] | None = None,
+    initial_combined_odds: float = 1.0,
+) -> list[CandidatePick]:
+    allowed = tuple(profile["allowed_decisions"])  # type: ignore[arg-type]
+    include_markets = tuple(
+        profile.get("include_markets") or DEFAULT_SLIP_MARKETS
+    )  # type: ignore[arg-type]
+    max_combined_odds = profile.get("max_combined_odds")
+    return _select_picks_for_tier(
+        candidates,
+        count=count,
+        exclude_keys=set(exclude_keys or set()),
+        allowed_decisions=allowed,
+        sort_key=_sort_key_for_mode(str(profile.get("sort_mode") or "score")),
+        include_markets=include_markets,
+        exclude_events=exclude_events,
+        distinct_events=bool(profile.get("distinct_events", False)),
+        force_market_diversity=bool(profile.get("force_market_diversity", True)),
+        max_combined_odds=(
+            float(max_combined_odds) if max_combined_odds is not None else None
+        ),
+        initial_combined_odds=initial_combined_odds,
+    )
 
 
 def generate_slips(
@@ -1138,6 +1398,37 @@ def generate_slips(
     return generated, warnings
 
 
+def generate_experimental_slips(
+    candidates: list[CandidatePick],
+) -> tuple[list[GeneratedSlip], list[str]]:
+    """Generate one independent parlay for each experimental family."""
+    warnings: list[str] = []
+    generated: list[GeneratedSlip] = []
+    for profile in EXPERIMENTAL_SLIP_PROFILES:
+        target = int(profile["target_picks"])
+        picks = _select_picks_for_profile(
+            candidates,
+            profile=profile,
+            count=target,
+        )
+        if len(picks) < target:
+            warnings.append(
+                f"Schedina '{profile['label']}': solo {len(picks)}/{target} pick disponibili."
+            )
+        if len(picks) < 2:
+            continue
+        generated.append(
+            GeneratedSlip(
+                slip_key=str(profile["slip_key"]),
+                label=str(profile["label"]),
+                description=str(profile["description"]),
+                picks=tuple(picks),
+                combined_odds=_combined_odds(picks),
+            )
+        )
+    return generated, warnings
+
+
 def _select_ladder_steps(
     candidates: list[CandidatePick],
     *,
@@ -1146,12 +1437,16 @@ def _select_ladder_steps(
     exclude_events: set[int],
     allowed_decisions: tuple[str, ...],
     sort_key,
+    include_markets: tuple[str, ...] = DEFAULT_SLIP_MARKETS,
+    max_combined_odds: float | None = None,
+    initial_combined_odds: float = 1.0,
 ) -> list[CandidatePick]:
     """Pick ``count`` singles on distinct fixtures, then order by kickoff."""
     pool = [
         candidate
         for candidate in candidates
         if candidate.value_decision in allowed_decisions
+        and candidate.market in include_markets
         and _candidate_identity(candidate) not in exclude_keys
         and candidate.event_key not in exclude_events
         and candidate.odds is not None
@@ -1165,6 +1460,7 @@ def _select_ladder_steps(
     selected: list[CandidatePick] = []
     used_events: set[int] = set()
     remaining = pool.copy()
+    combined_odds = initial_combined_odds
     while len(selected) < count and remaining:
         current = [*selected]
         remaining.sort(
@@ -1175,7 +1471,11 @@ def _select_ladder_steps(
         pick = remaining.pop(0)
         if pick.event_key in used_events:
             continue
+        projected_odds = combined_odds * float(pick.odds or 1.0)
+        if max_combined_odds is not None and projected_odds > max_combined_odds:
+            continue
         selected.append(pick)
+        combined_odds = projected_odds
         used_events.add(pick.event_key)
         remaining = [item for item in remaining if item.event_key not in used_events]
 
@@ -1242,6 +1542,48 @@ def generate_ladders(
             f"Solo {len(generated)} scalate generate: candidati insufficienti."
         )
 
+    return generated, warnings
+
+
+def generate_experimental_ladders(
+    candidates: list[CandidatePick],
+) -> tuple[list[GeneratedSlip], list[str]]:
+    """Generate one independent ladder for each experimental family."""
+    warnings: list[str] = []
+    generated: list[GeneratedSlip] = []
+    for profile in EXPERIMENTAL_LADDER_PROFILES:
+        target = int(profile["target_steps"])
+        include_markets = tuple(
+            profile.get("include_markets") or DEFAULT_SLIP_MARKETS
+        )  # type: ignore[arg-type]
+        max_combined_odds = profile.get("max_combined_odds")
+        picks = _select_ladder_steps(
+            candidates,
+            count=target,
+            exclude_keys=set(),
+            exclude_events=set(),
+            allowed_decisions=tuple(profile["allowed_decisions"]),  # type: ignore[arg-type]
+            sort_key=_sort_key_for_mode(str(profile.get("sort_mode") or "score")),
+            include_markets=include_markets,
+            max_combined_odds=(
+                float(max_combined_odds) if max_combined_odds is not None else None
+            ),
+        )
+        if len(picks) < target:
+            warnings.append(
+                f"Scalata '{profile['label']}': solo {len(picks)}/{target} step disponibili."
+            )
+        if len(picks) < 2:
+            continue
+        generated.append(
+            GeneratedSlip(
+                slip_key=str(profile["slip_key"]),
+                label=str(profile["label"]),
+                description=str(profile["description"]),
+                picks=tuple(picks),
+                combined_odds=_combined_odds(picks),
+            )
+        )
     return generated, warnings
 
 
@@ -1504,7 +1846,9 @@ def _persist_slips(
     generated_slips: list[GeneratedSlip],
 ) -> None:
     generated_at = datetime.now()
+    profile_map = _profile_by_slip_key()
     for slip_data in generated_slips:
+        profile = profile_map.get(slip_data.slip_key, {})
         slip = BettingSlip(
             slip_date=slip_date,
             slip_key=slip_data.slip_key,
@@ -1512,6 +1856,9 @@ def _persist_slips(
             description=slip_data.description,
             model_version=model_version,
             model_name=model_name,
+            strategy_family=_profile_strategy_family(profile),
+            strategy_version=_profile_strategy_version(profile),
+            is_experimental=bool(profile.get("is_experimental", False)),
             pick_count=len(slip_data.picks),
             combined_odds=slip_data.combined_odds,
             generated_at=generated_at,
@@ -1567,7 +1914,12 @@ def _add_candidate_pick(
 def _profile_by_slip_key() -> dict[str, dict[str, object]]:
     return {
         str(profile["slip_key"]): profile
-        for profile in (*SLIP_PROFILES, *LADDER_PROFILES)
+        for profile in (
+            *SLIP_PROFILES,
+            *LADDER_PROFILES,
+            *EXPERIMENTAL_SLIP_PROFILES,
+            *EXPERIMENTAL_LADDER_PROFILES,
+        )
     }
 
 
@@ -1588,6 +1940,9 @@ def _persist_new_profile_slip(
         description=str(profile["description"]),
         model_version=model_version,
         model_name=model_name,
+        strategy_family=_profile_strategy_family(profile),
+        strategy_version=_profile_strategy_version(profile),
+        is_experimental=bool(profile.get("is_experimental", False)),
         pick_count=len(picks),
         combined_odds=_combined_odds(picks),
         generated_at=generated_at,
@@ -1650,7 +2005,11 @@ def _merge_candidates_into_slips(
     used_by_tier: dict[tuple[str, ...], set[tuple[int, str]]] = defaultdict(set)
     for slip in existing:
         profile = profile_map.get(slip.slip_key)
-        if profile is None or slip.slip_key.startswith(LADDER_SLIP_KEY_PREFIX):
+        if (
+            profile is None
+            or slip.slip_key.startswith(LADDER_SLIP_KEY_PREFIX)
+            or _slip_strategy_family(slip) != "generic"
+        ):
             continue
         allowed = tuple(profile["allowed_decisions"])  # type: ignore[arg-type]
         used_by_tier[allowed].update((pick.event_key, pick.market) for pick in slip.picks)
@@ -1700,10 +2059,70 @@ def _merge_candidates_into_slips(
                 f"Schedina '{profile['label']}': solo {active_count + len(selected)}/{target} pick attive disponibili."
             )
 
+    if _strategy_experiments_enabled(model_version, model_name):
+        for profile in EXPERIMENTAL_SLIP_PROFILES:
+            slip_key = str(profile["slip_key"])
+            slip = existing_by_key.get(slip_key)
+            target = int(profile["target_picks"])
+            active_picks = (
+                [pick for pick in slip.picks if pick.outcome != "void"]
+                if slip is not None
+                else []
+            )
+            remaining = max(target - len(active_picks), 0)
+            if remaining == 0:
+                continue
+            existing_keys = (
+                {(pick.event_key, pick.market) for pick in slip.picks}
+                if slip is not None
+                else set()
+            )
+            existing_events = (
+                {pick.event_key for pick in slip.picks}
+                if slip is not None
+                else set()
+            )
+            initial_odds = 1.0
+            for pick in active_picks:
+                initial_odds *= float(pick.odds or 1.0)
+            selected = _select_picks_for_profile(
+                candidates,
+                profile=profile,
+                count=remaining,
+                exclude_keys=existing_keys,
+                exclude_events=existing_events,
+                initial_combined_odds=initial_odds,
+            )
+            if slip is None:
+                if len(selected) < 2:
+                    warnings.append(
+                        f"Schedina '{profile['label']}': solo {len(selected)}/{target} pick disponibili."
+                    )
+                    continue
+                slip = _persist_new_profile_slip(
+                    db,
+                    slip_date=slip_date,
+                    model_version=model_version,
+                    model_name=model_name,
+                    profile=profile,
+                    picks=selected,
+                )
+                existing_by_key[slip_key] = slip
+                added += len(selected)
+            else:
+                added += _append_candidates_to_slip(db, slip=slip, additions=selected)
+            if len(active_picks) + len(selected) < target:
+                warnings.append(
+                    f"Schedina '{profile['label']}': solo {len(active_picks) + len(selected)}/{target} pick attive disponibili."
+                )
+
     ladder_used_keys: set[tuple[int, str]] = set()
     ladder_used_events: set[int] = set()
     for slip in existing:
-        if not slip.slip_key.startswith(LADDER_SLIP_KEY_PREFIX):
+        if (
+            not slip.slip_key.startswith(LADDER_SLIP_KEY_PREFIX)
+            or _slip_strategy_family(slip) != "generic"
+        ):
             continue
         ladder_used_keys.update((pick.event_key, pick.market) for pick in slip.picks)
         ladder_used_events.update(pick.event_key for pick in slip.picks)
@@ -1763,6 +2182,83 @@ def _merge_candidates_into_slips(
             warnings.append(
                 f"Scalata '{profile['label']}': solo {active_count + len(selected)}/{target} step attivi disponibili."
             )
+
+    if _strategy_experiments_enabled(model_version, model_name):
+        for profile in EXPERIMENTAL_LADDER_PROFILES:
+            slip_key = str(profile["slip_key"])
+            slip = existing_by_key.get(slip_key)
+            target = int(profile["target_steps"])
+            active_picks = (
+                [pick for pick in slip.picks if pick.outcome != "void"]
+                if slip is not None
+                else []
+            )
+            remaining = max(target - len(active_picks), 0)
+            if remaining == 0:
+                continue
+            existing_keys = (
+                {(pick.event_key, pick.market) for pick in slip.picks}
+                if slip is not None
+                else set()
+            )
+            existing_events = (
+                {pick.event_key for pick in slip.picks}
+                if slip is not None
+                else set()
+            )
+            initial_odds = 1.0
+            for pick in active_picks:
+                initial_odds *= float(pick.odds or 1.0)
+            include_markets = tuple(
+                profile.get("include_markets") or DEFAULT_SLIP_MARKETS
+            )  # type: ignore[arg-type]
+            max_combined_odds = profile.get("max_combined_odds")
+            selected = _select_ladder_steps(
+                candidates,
+                count=remaining,
+                exclude_keys=existing_keys,
+                exclude_events=existing_events,
+                allowed_decisions=tuple(profile["allowed_decisions"]),  # type: ignore[arg-type]
+                sort_key=_sort_key_for_mode(str(profile.get("sort_mode") or "score")),
+                include_markets=include_markets,
+                max_combined_odds=(
+                    float(max_combined_odds) if max_combined_odds is not None else None
+                ),
+                initial_combined_odds=initial_odds,
+            )
+            if slip is not None and slip.picks:
+                last_time = max(
+                    (pick.event_time for pick in slip.picks if pick.event_time is not None),
+                    default=None,
+                )
+                if last_time is not None:
+                    selected = [
+                        pick
+                        for pick in selected
+                        if pick.event_time is not None and pick.event_time >= last_time
+                    ]
+            if slip is None:
+                if len(selected) < 2:
+                    warnings.append(
+                        f"Scalata '{profile['label']}': solo {len(selected)}/{target} step disponibili."
+                    )
+                    continue
+                slip = _persist_new_profile_slip(
+                    db,
+                    slip_date=slip_date,
+                    model_version=model_version,
+                    model_name=model_name,
+                    profile=profile,
+                    picks=selected,
+                )
+                existing_by_key[slip_key] = slip
+                added += len(selected)
+            else:
+                added += _append_candidates_to_slip(db, slip=slip, additions=selected)
+            if len(active_picks) + len(selected) < target:
+                warnings.append(
+                    f"Scalata '{profile['label']}': solo {len(active_picks) + len(selected)}/{target} step attivi disponibili."
+                )
 
     db.commit()
     return added, warnings
@@ -2311,6 +2807,9 @@ def _slip_read(
         label=slip.label,
         description=slip.description,
         slip_kind=slip_kind,
+        strategy_family=_slip_strategy_family(slip),
+        strategy_version=_slip_strategy_version(slip),
+        is_experimental=bool(getattr(slip, "is_experimental", False)),
         picks=pick_reads,
         pick_count=slip.pick_count,
         combined_odds=slip.combined_odds,
@@ -2412,6 +2911,9 @@ def _build_daily_response(
         date=slip_date,
         model_version=model_version,
         model_name=model_name,
+        match_winner_model_version=model_version,
+        match_winner_model_name=model_name,
+        market_models=_slip_market_models(model_version, model_name),
         stake=stake,
         candidate_pool_size=candidate_pool_size,
         slips=slip_reads,
@@ -2617,6 +3119,131 @@ def _slip_profit_units(slip: BettingSlipRead, stake: float) -> float:
     )
 
 
+def _new_strategy_stats_bucket() -> dict[str, Any]:
+    return {
+        "slips_won": 0,
+        "slips_lost": 0,
+        "slips_pending": 0,
+        "slips_void": 0,
+        "slips_total": 0,
+        "picks_total": 0,
+        "picks_won": 0,
+        "picks_lost": 0,
+        "picks_pending": 0,
+        "picks_void": 0,
+        "profit_units": 0.0,
+        "resolved_count": 0,
+        "strategy_versions": set(),
+        "is_experimental": False,
+    }
+
+
+def _record_strategy_stats(
+    bucket: dict[str, Any],
+    *,
+    slip_read: BettingSlipRead,
+    strategy_version: str,
+    is_experimental: bool,
+    stake: float,
+) -> float | None:
+    bucket["slips_total"] = int(bucket["slips_total"]) + 1
+    bucket["picks_total"] = int(bucket["picks_total"]) + slip_read.picks_total
+    bucket["picks_won"] = int(bucket["picks_won"]) + slip_read.picks_won
+    bucket["picks_lost"] = int(bucket["picks_lost"]) + slip_read.picks_lost
+    bucket["picks_pending"] = int(bucket["picks_pending"]) + slip_read.picks_pending
+    bucket["picks_void"] = int(bucket["picks_void"]) + slip_read.picks_void
+    bucket["strategy_versions"].add(strategy_version)
+    bucket["is_experimental"] = bool(bucket["is_experimental"]) or is_experimental
+    if slip_read.slip_status == "won":
+        bucket["slips_won"] = int(bucket["slips_won"]) + 1
+    elif slip_read.slip_status == "lost":
+        bucket["slips_lost"] = int(bucket["slips_lost"]) + 1
+    elif slip_read.slip_status == "void":
+        bucket["slips_void"] = int(bucket["slips_void"]) + 1
+    else:
+        bucket["slips_pending"] = int(bucket["slips_pending"]) + 1
+    if slip_read.slip_status not in {"won", "lost"}:
+        return None
+    profit = _slip_profit_units(slip_read, stake)
+    bucket["profit_units"] = float(bucket["profit_units"]) + profit
+    bucket["resolved_count"] = int(bucket["resolved_count"]) + 1
+    return profit
+
+
+def _build_strategy_stats_rows(
+    strategy_stats: dict[tuple[StrategyFamily, SlipKind], dict[str, Any]],
+    strategy_daily_profits: dict[
+        tuple[StrategyFamily, SlipKind], dict[date, list[float]]
+    ],
+    strategy_pending_days: dict[tuple[StrategyFamily, SlipKind], set[date]],
+    *,
+    stake: float,
+) -> list[BettingSlipStatsStrategy]:
+    family_order = {family: index for index, family in enumerate(STRATEGY_FAMILY_LABELS)}
+    rows: list[BettingSlipStatsStrategy] = []
+    for (family, kind), stats in sorted(
+        strategy_stats.items(),
+        key=lambda item: (
+            item[0][1] == "ladder",
+            family_order.get(item[0][0], 99),
+        ),
+    ):
+        daily_buckets = strategy_daily_profits.get((family, kind), {})
+        pending_days = strategy_pending_days.get((family, kind), set())
+        daily_profit = sum(
+            sum(profits) / len(profits)
+            for day, profits in daily_buckets.items()
+            if profits and day not in pending_days
+        )
+        comparable_days = sum(
+            1
+            for day, profits in daily_buckets.items()
+            if profits and day not in pending_days
+        )
+        resolved_count = int(stats["resolved_count"])
+        rows.append(
+            BettingSlipStatsStrategy(
+                strategy_family=family,
+                label=strategy_family_label(family),
+                slip_kind=kind,
+                strategy_versions=sorted(str(value) for value in stats["strategy_versions"]),
+                is_experimental=bool(stats["is_experimental"]),
+                slips_total=int(stats["slips_total"]),
+                slips_won=int(stats["slips_won"]),
+                slips_lost=int(stats["slips_lost"]),
+                slips_pending=int(stats["slips_pending"]),
+                slips_void=int(stats["slips_void"]),
+                slip_win_rate_pct=_pct(
+                    int(stats["slips_won"]),
+                    int(stats["slips_won"]) + int(stats["slips_lost"]),
+                ),
+                picks_total=int(stats["picks_total"]),
+                picks_won=int(stats["picks_won"]),
+                picks_lost=int(stats["picks_lost"]),
+                picks_pending=int(stats["picks_pending"]),
+                picks_void=int(stats["picks_void"]),
+                pick_hit_rate_pct=_pct(
+                    int(stats["picks_won"]),
+                    int(stats["picks_won"]) + int(stats["picks_lost"]),
+                ),
+                theoretical_profit_units=round(float(stats["profit_units"]), 2),
+                theoretical_roi_pct=(
+                    round(float(stats["profit_units"]) / (stake * resolved_count) * 100, 1)
+                    if resolved_count and stake
+                    else None
+                ),
+                daily_portfolio_profit_units=round(daily_profit, 2),
+                daily_portfolio_roi_pct=(
+                    round(daily_profit / (stake * comparable_days) * 100, 1)
+                    if comparable_days and stake
+                    else None
+                ),
+                comparable_days=comparable_days,
+            )
+        )
+    return rows
+
+
 def compute_betting_slip_stats(
     db: Session,
     *,
@@ -2674,7 +3301,7 @@ def compute_betting_slip_stats(
         next_fixtures.update(model_next_fixtures)
 
     slips_by_date: dict[date, list[BettingSlipRead]] = defaultdict(list)
-    profile_stats: dict[str, dict[str, int | str]] = defaultdict(
+    profile_stats: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "slips_won": 0,
             "slips_lost": 0,
@@ -2682,8 +3309,20 @@ def compute_betting_slip_stats(
             "slips_void": 0,
             "slips_total": 0,
             "slip_kind": "parlay",
+            "strategy_family": "generic",
+            "strategy_version": "legacy_v1",
+            "is_experimental": False,
+            "profit_units": 0.0,
+            "resolved_count": 0,
         }
     )
+    strategy_stats: dict[
+        tuple[StrategyFamily, SlipKind], dict[str, Any]
+    ] = defaultdict(_new_strategy_stats_bucket)
+    strategy_daily_profits: dict[
+        tuple[StrategyFamily, SlipKind], dict[date, list[float]]
+    ] = defaultdict(lambda: defaultdict(list))
+    strategy_pending_days: dict[tuple[StrategyFamily, SlipKind], set[date]] = defaultdict(set)
     kind_stats: dict[SlipKind, dict[str, float | int]] = {
         "parlay": {
             "slips_won": 0,
@@ -2738,6 +3377,9 @@ def compute_betting_slip_stats(
         profile = profile_stats[slip.slip_key]
         profile["label"] = slip.label
         profile["slip_kind"] = slip_kind_from_key(slip.slip_key)
+        profile["strategy_family"] = _slip_strategy_family(slip)
+        profile["strategy_version"] = _slip_strategy_version(slip)
+        profile["is_experimental"] = bool(getattr(slip, "is_experimental", False))
         profile["slips_total"] = int(profile["slips_total"]) + 1
         if slip_read.slip_status == "won":
             profile["slips_won"] = int(profile["slips_won"]) + 1
@@ -2751,6 +3393,11 @@ def compute_betting_slip_stats(
         else:
             profile["slips_pending"] = int(profile["slips_pending"]) + 1
             summary_slips_pending += 1
+        if slip_read.slip_status in {"won", "lost"}:
+            profile["profit_units"] = float(profile["profit_units"]) + _slip_profit_units(
+                slip_read, stake
+            )
+            profile["resolved_count"] = int(profile["resolved_count"]) + 1
 
         summary_picks_won += slip_read.picks_won
         summary_picks_lost += slip_read.picks_lost
@@ -2778,6 +3425,19 @@ def compute_betting_slip_stats(
                 slip_read, stake
             )
             kind_bucket["resolved_count"] = int(kind_bucket["resolved_count"]) + 1
+
+        strategy_key = (_slip_strategy_family(slip), slip_read.slip_kind)
+        strategy_profit = _record_strategy_stats(
+            strategy_stats[strategy_key],
+            slip_read=slip_read,
+            strategy_version=_slip_strategy_version(slip),
+            is_experimental=bool(getattr(slip, "is_experimental", False)),
+            stake=stake,
+        )
+        if strategy_profit is not None:
+            strategy_daily_profits[strategy_key][slip.slip_date].append(strategy_profit)
+        elif slip_read.slip_status == "pending":
+            strategy_pending_days[strategy_key].add(slip.slip_date)
 
     days: list[BettingSlipStatsDay] = []
     current = resolved_from
@@ -2851,6 +3511,9 @@ def compute_betting_slip_stats(
                 if stats.get("slip_kind") == "ladder"
                 else "parlay"
             ),
+            strategy_family=str(stats["strategy_family"]),
+            strategy_version=str(stats["strategy_version"]),
+            is_experimental=bool(stats["is_experimental"]),
             slips_won=int(stats["slips_won"]),
             slips_lost=int(stats["slips_lost"]),
             slips_pending=int(stats["slips_pending"]),
@@ -2859,6 +3522,17 @@ def compute_betting_slip_stats(
             slip_win_rate_pct=_pct(
                 int(stats["slips_won"]),
                 int(stats["slips_won"]) + int(stats["slips_lost"]),
+            ),
+            theoretical_profit_units=round(float(stats["profit_units"]), 2),
+            theoretical_roi_pct=(
+                round(
+                    float(stats["profit_units"])
+                    / (stake * int(stats["resolved_count"]))
+                    * 100,
+                    1,
+                )
+                if int(stats["resolved_count"]) and stake
+                else None
             ),
         )
         for slip_key, stats in sorted(
@@ -2905,6 +3579,12 @@ def compute_betting_slip_stats(
         for kind, stats in kind_stats.items()
         if int(stats["slips_total"]) > 0
     ]
+    by_strategy = _build_strategy_stats_rows(
+        strategy_stats,
+        strategy_daily_profits,
+        strategy_pending_days,
+        stake=stake,
+    )
 
     return BettingSlipStatsResponse(
         model_version=model_version,
@@ -2930,6 +3610,7 @@ def compute_betting_slip_stats(
             else None,
             by_profile=by_profile,
             by_kind=by_kind,
+            by_strategy=by_strategy,
         ),
     )
 
@@ -3008,7 +3689,7 @@ def compute_betting_slip_model_stats(
         to_date=resolved_to,
         stake=stake,
     )
-    by_kind, by_profile = _aggregate_slip_stats_by_kind_and_profile(
+    by_kind, by_profile, by_strategy = _aggregate_slip_stats_by_kind_and_profile(
         db,
         from_date=resolved_from,
         to_date=resolved_to,
@@ -3023,6 +3704,7 @@ def compute_betting_slip_model_stats(
         by_market=by_market,
         by_kind=by_kind,
         by_profile=by_profile,
+        by_strategy=by_strategy,
     )
 
 
@@ -3032,7 +3714,11 @@ def _aggregate_slip_stats_by_kind_and_profile(
     from_date: date,
     to_date: date,
     stake: float,
-) -> tuple[list[BettingSlipStatsKind], list[BettingSlipStatsProfile]]:
+) -> tuple[
+    list[BettingSlipStatsKind],
+    list[BettingSlipStatsProfile],
+    list[BettingSlipStatsStrategy],
+]:
     """Cross-model aggregates for Schedine vs Scalate and profile labels."""
     slips = list(
         db.scalars(
@@ -3046,7 +3732,7 @@ def _aggregate_slip_stats_by_kind_and_profile(
         ).all()
     )
     if not slips:
-        return [], []
+        return [], [], []
 
     event_keys = [pick.event_key for slip in slips for pick in slip.picks]
     predictions: dict[int, MatchPrediction] = {}
@@ -3095,7 +3781,7 @@ def _aggregate_slip_stats_by_kind_and_profile(
             "resolved_count": 0,
         },
     }
-    profile_stats: dict[str, dict[str, int | str]] = defaultdict(
+    profile_stats: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "slips_won": 0,
             "slips_lost": 0,
@@ -3104,8 +3790,20 @@ def _aggregate_slip_stats_by_kind_and_profile(
             "slips_total": 0,
             "slip_kind": "parlay",
             "label": "",
+            "strategy_family": "generic",
+            "strategy_version": "legacy_v1",
+            "is_experimental": False,
+            "profit_units": 0.0,
+            "resolved_count": 0,
         }
     )
+    strategy_stats: dict[
+        tuple[StrategyFamily, SlipKind], dict[str, Any]
+    ] = defaultdict(_new_strategy_stats_bucket)
+    strategy_daily_profits: dict[
+        tuple[StrategyFamily, SlipKind], dict[date, list[float]]
+    ] = defaultdict(lambda: defaultdict(list))
+    strategy_pending_days: dict[tuple[StrategyFamily, SlipKind], set[date]] = defaultdict(set)
 
     for slip in slips:
         slip_read = _slip_read(
@@ -3140,6 +3838,9 @@ def _aggregate_slip_stats_by_kind_and_profile(
         profile = profile_stats[slip.slip_key]
         profile["label"] = slip.label
         profile["slip_kind"] = kind
+        profile["strategy_family"] = _slip_strategy_family(slip)
+        profile["strategy_version"] = _slip_strategy_version(slip)
+        profile["is_experimental"] = bool(getattr(slip, "is_experimental", False))
         profile["slips_total"] = int(profile["slips_total"]) + 1
         if slip_read.slip_status == "won":
             profile["slips_won"] = int(profile["slips_won"]) + 1
@@ -3149,6 +3850,24 @@ def _aggregate_slip_stats_by_kind_and_profile(
             profile["slips_void"] = int(profile["slips_void"]) + 1
         else:
             profile["slips_pending"] = int(profile["slips_pending"]) + 1
+        if slip_read.slip_status in {"won", "lost"}:
+            profile["profit_units"] = float(profile["profit_units"]) + _slip_profit_units(
+                slip_read, stake
+            )
+            profile["resolved_count"] = int(profile["resolved_count"]) + 1
+
+        strategy_key = (_slip_strategy_family(slip), kind)
+        strategy_profit = _record_strategy_stats(
+            strategy_stats[strategy_key],
+            slip_read=slip_read,
+            strategy_version=_slip_strategy_version(slip),
+            is_experimental=bool(getattr(slip, "is_experimental", False)),
+            stake=stake,
+        )
+        if strategy_profit is not None:
+            strategy_daily_profits[strategy_key][slip.slip_date].append(strategy_profit)
+        elif slip_read.slip_status == "pending":
+            strategy_pending_days[strategy_key].add(slip.slip_date)
 
     by_kind = [
         BettingSlipStatsKind(
@@ -3191,6 +3910,9 @@ def _aggregate_slip_stats_by_kind_and_profile(
             slip_key=slip_key,
             label=str(stats["label"] or slip_key),
             slip_kind="ladder" if stats.get("slip_kind") == "ladder" else "parlay",
+            strategy_family=str(stats["strategy_family"]),
+            strategy_version=str(stats["strategy_version"]),
+            is_experimental=bool(stats["is_experimental"]),
             slips_won=int(stats["slips_won"]),
             slips_lost=int(stats["slips_lost"]),
             slips_pending=int(stats["slips_pending"]),
@@ -3199,6 +3921,17 @@ def _aggregate_slip_stats_by_kind_and_profile(
             slip_win_rate_pct=_pct(
                 int(stats["slips_won"]),
                 int(stats["slips_won"]) + int(stats["slips_lost"]),
+            ),
+            theoretical_profit_units=round(float(stats["profit_units"]), 2),
+            theoretical_roi_pct=(
+                round(
+                    float(stats["profit_units"])
+                    / (stake * int(stats["resolved_count"]))
+                    * 100,
+                    1,
+                )
+                if int(stats["resolved_count"]) and stake
+                else None
             ),
         )
         for slip_key, stats in sorted(
@@ -3209,7 +3942,13 @@ def _aggregate_slip_stats_by_kind_and_profile(
             ),
         )
     ]
-    return by_kind, by_profile
+    by_strategy = _build_strategy_stats_rows(
+        strategy_stats,
+        strategy_daily_profits,
+        strategy_pending_days,
+        stake=stake,
+    )
+    return by_kind, by_profile, by_strategy
 
 
 def _aggregate_slip_picks_by_market(

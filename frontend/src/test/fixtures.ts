@@ -222,6 +222,9 @@ export function makeSlip(overrides: Partial<BettingSlip> = {}): BettingSlip {
     slip_key: "play_easy",
     label: "Play facile",
     description: "3 picks PLAY",
+    strategy_family: "generic",
+    strategy_version: "legacy_v1",
+    is_experimental: false,
     picks: [
       {
         event_key: 1001,
@@ -275,6 +278,28 @@ export function makeDailySlips(date = TODAY): BettingSlipsDailyResponse {
     date,
     model_version: "v4",
     model_name: "voting_ensemble",
+    match_winner_model_version: "v4",
+    match_winner_model_name: "voting_ensemble",
+    market_models: [
+      {
+        market: "match_winner",
+        label: "Match Winner",
+        model_version: "v4",
+        model_name: "voting_ensemble"
+      },
+      {
+        market: "first_set_winner",
+        label: "Primo set",
+        model_version: "first_set_winner_v2",
+        model_name: "logistic_regression"
+      },
+      {
+        market: "over_under_games",
+        label: "Over/Under",
+        model_version: "over_under_games_v1",
+        model_name: "random_forest"
+      }
+    ],
     stake: 10,
     candidate_pool_size: 4,
     slips: [makeSlip()],

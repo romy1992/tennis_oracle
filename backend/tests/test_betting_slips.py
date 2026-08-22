@@ -16,10 +16,15 @@ from backend.tests.auth_helpers import (
     override_settings,
 )
 from backend.src.app.services.betting_slips import (
+    CandidatePick,
+    _persist_slips,
     _resolve_pick_status,
     _resolve_slip_status,
     build_candidate_pool,
     compute_betting_slip_model_stats,
+    compute_betting_slip_stats,
+    generate_experimental_ladders,
+    generate_experimental_slips,
     generate_ladders,
     generate_slips,
     get_betting_slip_calendar,
@@ -106,6 +111,9 @@ class BettingSlipsServiceTest(unittest.TestCase):
         actual_winner: str | None,
         predicted_winner: str = "First Player",
         combined_odds: float = 2.0,
+        strategy_family: str = "generic",
+        strategy_version: str = "legacy_v1",
+        is_experimental: bool = False,
     ):
         slip = BettingSlip(
             slip_date=slip_date,
@@ -114,6 +122,9 @@ class BettingSlipsServiceTest(unittest.TestCase):
             description="Stats test",
             model_version=model_version,
             model_name=model_name,
+            strategy_family=strategy_family,
+            strategy_version=strategy_version,
+            is_experimental=is_experimental,
             pick_count=1,
             combined_odds=combined_odds,
             generated_at=datetime(2026, 6, 28, 9, 0, 0),
@@ -148,6 +159,42 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 )
             )
         session.commit()
+
+    def _strategy_candidate(
+        self,
+        event_key: int,
+        *,
+        market: str,
+        decision: str = "PLAY",
+        odds: float = 1.6,
+        score: float = 1.0,
+    ) -> CandidatePick:
+        return CandidatePick(
+            event_key=event_key,
+            event_date=self.today,
+            event_time=time(12 + event_key % 8, 0),
+            tournament_name=f"Strategy Open {event_key % 2}",
+            surface="Hard",
+            player_1_name=f"Player A{event_key}",
+            player_2_name=f"Player B{event_key}",
+            predicted_winner="First Player",
+            predicted_winner_label=f"Player A{event_key}",
+            model_prob=0.7,
+            market_prob=0.55,
+            edge=0.15,
+            odds=odds,
+            void_odds=1.43,
+            edge_absolute=odds - 1.43,
+            edge_percent=(odds - 1.43) / 1.43 * 100,
+            expected_roi=0.7 * odds - 1.0,
+            suggested_min_edge_percent=2.0,
+            min_edge_percent=2.0,
+            value_decision=decision,
+            value_label=decision,
+            confidence=0.7,
+            pick_score=score,
+            market=market,
+        )
 
     def test_build_candidate_pool_excludes_missing_odds(self):
         with self.Session() as session:
@@ -426,6 +473,25 @@ class BettingSlipsServiceTest(unittest.TestCase):
                 picks_per_slip=2,
             )
 
+            self.assertEqual(daily.match_winner_model_version, "v2")
+            self.assertEqual(daily.match_winner_model_name, "random_forest")
+            self.assertEqual(
+                {
+                    model.market: (model.model_version, model.model_name)
+                    for model in daily.market_models
+                },
+                {
+                    "match_winner": ("v2", "random_forest"),
+                    "first_set_winner": (
+                        "first_set_winner_v2",
+                        "logistic_regression",
+                    ),
+                    "over_under_games": (
+                        "over_under_games_v1",
+                        "random_forest",
+                    ),
+                },
+            )
             self.assertEqual(len(daily.slips), 1)
             picks = daily.slips[0].picks
             self.assertEqual(len(picks), 2)
@@ -525,6 +591,80 @@ class BettingSlipsServiceTest(unittest.TestCase):
             kinds = {row.slip_kind for row in stats.by_kind}
             self.assertIn("ladder", kinds)
             self.assertTrue(any(row.slip_key.startswith("ladder_") for row in stats.by_profile))
+
+    def test_experimental_strategy_profiles_are_independent_and_conservative(self):
+        candidates = [
+            self._strategy_candidate(1, market="first_set_winner", odds=1.55, score=1.0),
+            self._strategy_candidate(2, market="first_set_winner", odds=1.60, score=0.9),
+            self._strategy_candidate(3, market="first_set_winner", odds=1.55, score=0.8),
+            self._strategy_candidate(1, market="match_winner", odds=1.70, score=1.2),
+            self._strategy_candidate(4, market="match_winner", odds=1.75, score=1.1),
+            self._strategy_candidate(5, market="over_under_games", odds=1.80, score=1.05),
+            self._strategy_candidate(
+                6,
+                market="first_set_winner",
+                decision="BORDERLINE",
+                odds=1.50,
+                score=2.0,
+            ),
+        ]
+
+        slips, warnings = generate_experimental_slips(candidates)
+        self.assertFalse(warnings)
+        by_key = {slip.slip_key: slip for slip in slips}
+        self.assertEqual(
+            set(by_key),
+            {
+                "experiment_play_only_3",
+                "experiment_strong_markets_3",
+                "experiment_selective_2",
+            },
+        )
+        for slip in slips:
+            self.assertTrue(all(pick.value_decision == "PLAY" for pick in slip.picks))
+            self.assertEqual(
+                len({pick.event_key for pick in slip.picks}),
+                len(slip.picks),
+            )
+        strong = by_key["experiment_strong_markets_3"]
+        selective = by_key["experiment_selective_2"]
+        self.assertTrue(all(pick.market == "first_set_winner" for pick in strong.picks))
+        self.assertTrue(all(pick.market == "first_set_winner" for pick in selective.picks))
+        self.assertLessEqual(selective.combined_odds, 3.2)
+        self.assertTrue(
+            {pick.event_key for pick in strong.picks}
+            & {pick.event_key for pick in selective.picks}
+        )
+
+        ladders, ladder_warnings = generate_experimental_ladders(candidates)
+        self.assertFalse(ladder_warnings)
+        self.assertEqual(len(ladders), 3)
+        self.assertTrue(all(slip.slip_key.startswith("ladder_experiment_") for slip in ladders))
+        selective_ladder = next(
+            slip for slip in ladders if slip.slip_key == "ladder_experiment_selective_3"
+        )
+        self.assertLessEqual(selective_ladder.combined_odds, 4.0)
+
+        with self.Session() as session:
+            _persist_slips(
+                session,
+                slip_date=self.today,
+                model_version="v4",
+                model_name="voting_ensemble",
+                generated_slips=[*slips, *ladders],
+            )
+            persisted = list(session.scalars(select(BettingSlip)).all())
+            families = {row.strategy_family for row in persisted}
+            self.assertEqual(families, {"play_only", "strong_markets", "selective"})
+            self.assertTrue(all(row.is_experimental for row in persisted))
+            self.assertEqual(
+                {(row.strategy_family, row.strategy_version) for row in persisted},
+                {
+                    ("play_only", "play_only_v1"),
+                    ("strong_markets", "strong_markets_v1"),
+                    ("selective", "selective_v1"),
+                },
+            )
 
     def test_persisted_slips_are_stable_on_second_load(self):
         with self.Session() as session:
@@ -854,6 +994,71 @@ class BettingSlipsServiceTest(unittest.TestCase):
             self.assertEqual(random_forest.pick_hit_rate_pct, 50.0)
             self.assertEqual(random_forest.theoretical_profit_units, 0.0)
             self.assertEqual(random_forest.theoretical_roi_pct, 0.0)
+
+    def test_strategy_stats_group_profiles_and_normalize_daily_bankroll(self):
+        with self.Session() as session:
+            self._seed_stats_slip(
+                session,
+                event_key=920,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                actual_winner="First Player",
+                combined_odds=2.0,
+            )
+            self._seed_stats_slip(
+                session,
+                event_key=921,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                actual_winner="Second Player",
+                combined_odds=2.0,
+            )
+            self._seed_stats_slip(
+                session,
+                event_key=922,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                actual_winner="First Player",
+                combined_odds=1.5,
+                strategy_family="play_only",
+                strategy_version="play_only_v1",
+                is_experimental=True,
+            )
+            self._seed_stats_slip(
+                session,
+                event_key=923,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                actual_winner=None,
+            )
+
+            response = compute_betting_slip_stats(
+                session,
+                model_version="v2",
+                model_name="random_forest",
+                from_date=self.today,
+                to_date=self.today,
+                stake=10.0,
+            )
+
+            rows = {
+                (row.strategy_family, row.slip_kind): row
+                for row in response.summary.by_strategy
+            }
+            generic = rows[("generic", "parlay")]
+            play_only = rows[("play_only", "parlay")]
+            self.assertEqual(generic.slips_total, 3)
+            self.assertEqual(generic.theoretical_roi_pct, 0.0)
+            self.assertIsNone(generic.daily_portfolio_roi_pct)
+            self.assertEqual(generic.comparable_days, 0)
+            self.assertEqual(play_only.strategy_versions, ["play_only_v1"])
+            self.assertTrue(play_only.is_experimental)
+            self.assertEqual(play_only.theoretical_roi_pct, 50.0)
+            self.assertEqual(play_only.daily_portfolio_roi_pct, 50.0)
 
     def test_model_stats_respects_date_filter(self):
         with self.Session() as session:

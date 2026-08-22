@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from backend.src.entity.base import Base
@@ -25,6 +25,9 @@ class BettingSlip(Base):
     description = Column(Text, nullable=True)
     model_version = Column(String, nullable=False)
     model_name = Column(String, nullable=False)
+    strategy_family = Column(String, nullable=False, default="generic")
+    strategy_version = Column(String, nullable=False, default="legacy_v1")
+    is_experimental = Column(Boolean, nullable=False, default=False)
     pick_count = Column(Integer, nullable=False)
     combined_odds = Column(Float, nullable=False)
     generated_at = Column(DateTime, nullable=False)

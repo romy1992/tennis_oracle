@@ -75,6 +75,9 @@ describe("BettingSlipsPage", () => {
     expect(screen.queryByLabelText("Versioni modello")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Modelli")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "voting_ensemble" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("slip-market-models")).toHaveTextContent(
+      "Match Winner v4 / voting_ensemble · Primo set first_set_winner_v2 / logistic_regression · Over/Under over_under_games_v1 / random_forest"
+    );
   });
 
   it("renders two markets from the same event as distinct picks", async () => {
@@ -109,6 +112,39 @@ describe("BettingSlipsPage", () => {
     expect(within(table).getByText("Over/Under Games")).toBeInTheDocument();
     expect(within(table).getByText("Player A")).toBeInTheDocument();
     expect(within(table).getByText("Over 20.5 games")).toBeInTheDocument();
+  });
+
+  it("filters persisted slips through the four strategy sub-tabs", async () => {
+    const daily = {
+      ...makeDailySlips(),
+      slips: [
+        makeSlip({ label: "Generica attuale", strategy_family: "generic" }),
+        makeSlip({
+          id: "experimental-play",
+          slip_key: "experiment_play_only_3",
+          label: "Solo PLAY test",
+          strategy_family: "play_only",
+          strategy_version: "play_only_v1",
+          is_experimental: true
+        })
+      ]
+    };
+    apiMocks.getDailyBettingSlips.mockResolvedValue(daily);
+    apiMocks.regenerateDailyBettingSlips.mockResolvedValue(daily);
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSlipsPage />);
+
+    expect(await screen.findByText("Generica attuale")).toBeInTheDocument();
+    const strategyTabs = screen.getByLabelText("Strategia consiglio");
+    expect(within(strategyTabs).getAllByRole("button")).toHaveLength(4);
+
+    await user.click(within(strategyTabs).getByRole("button", { name: "Solo PLAY" }));
+    expect(await screen.findByText("Solo PLAY test")).toBeInTheDocument();
+    expect(screen.queryByText("Generica attuale")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Risultati sperimentali: non pubblicati come consiglio ufficiale/)
+    ).toBeInTheDocument();
   });
 
   it("shows a prominent live section and score for picks in progress", async () => {
@@ -189,7 +225,7 @@ describe("BettingSlipsPage", () => {
     renderWithProviders(<BettingSlipsPage />);
 
     expect(
-      await screen.findByText("Nessuna schedina disponibile per questo giorno")
+      await screen.findByText("Nessuna schedina disponibile · Generiche")
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Scarica immagini" })).toBeDisabled();
   });

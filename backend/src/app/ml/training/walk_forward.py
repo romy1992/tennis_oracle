@@ -29,6 +29,7 @@ from backend.src.app.ml.model_versioning import (
     ACTIVE_MATCH_WINNER_VERSIONS,
     MODEL_VERSIONS,
     MODELS_DIR,
+    ODDS_REQUIRED_VERSIONS,
     PROCESSED_DATA_DIR,
     REPORTS_DIR,
     ModelVersion,
@@ -60,6 +61,8 @@ ShouldCancel = Callable[[], bool]
 EstimatorsFactory = Callable[[int], dict[str, Any]]
 
 MODEL_NAMES = ("logistic_regression", "random_forest")
+V4_ENSEMBLE_MODEL_NAME = "voting_ensemble"
+V4_MODEL_NAMES = (*MODEL_NAMES, V4_ENSEMBLE_MODEL_NAME)
 OFFICIAL_BENCHMARK_NAMES = (
     "market_favorite",
     "market_no_vig",
@@ -204,7 +207,7 @@ def prepare_temporal_dataframe(
     clean[target_column] = pd.to_numeric(clean[target_column], errors="coerce")
     clean = clean.dropna(subset=[date_column, target_column]).sort_values(date_column).reset_index(drop=True)
     clean[target_column] = clean[target_column].astype(int)
-    if model_version == "v3":
+    if model_version in ODDS_REQUIRED_VERSIONS:
         clean = filter_rows_with_valid_odds(clean)
     return clean
 
@@ -343,6 +346,44 @@ def _estimators(random_state: int) -> dict[str, Any]:
             n_jobs=-1,
         ),
     }
+
+
+def model_names_for_version(
+    model_version: str,
+    requested: tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    """Resolve the standard estimator set without leaking v4 into other markets."""
+    if requested is not None:
+        return requested
+    if model_version == "v4":
+        return V4_MODEL_NAMES
+    return MODEL_NAMES
+
+
+def make_estimators_factory_for_version(
+    model_version: str,
+    *,
+    reports_dir: str | Path = REPORTS_DIR,
+) -> EstimatorsFactory:
+    """Build fresh estimators for a fold, including the live v4 ensemble."""
+    if model_version != "v4":
+        return _estimators
+
+    def factory(random_state: int) -> dict[str, Any]:
+        from sklearn.ensemble import VotingClassifier
+
+        from backend.src.app.ml.training.train_v4_ensemble import build_base_estimators
+
+        estimators = _estimators(random_state)
+        base_estimators, _provenance = build_base_estimators(reports_dir)
+        estimators[V4_ENSEMBLE_MODEL_NAME] = VotingClassifier(
+            estimators=list(base_estimators),
+            voting="soft",
+            n_jobs=1,
+        )
+        return estimators
+
+    return factory
 
 
 def _clip_probabilities(series: pd.Series) -> pd.Series:
@@ -942,7 +983,7 @@ def _count_planned_fold_units(
     versions: tuple[str, ...],
     *,
     processed_dir: str | Path,
-    model_names: tuple[str, ...],
+    model_names: tuple[str, ...] | None,
     db: Session | None = None,
     should_cancel: ShouldCancel | None = None,
     prepare_progress_callback: PrepareProgressCallback | None = None,
@@ -968,7 +1009,7 @@ def _count_planned_fold_units(
         else:
             continue
         folds = generate_walk_forward_folds(dataframe, config)
-        total += len(folds) * len(model_names)
+        total += len(folds) * len(model_names_for_version(version, model_names))
     return total
 
 
@@ -1106,12 +1147,16 @@ def run_walk_forward_for_version(
     db: Session | None = None,
     processed_dir: str | Path = PROCESSED_DATA_DIR,
     reports_dir: str | Path = REPORTS_DIR,
-    model_names: tuple[str, ...] = MODEL_NAMES,
+    model_names: tuple[str, ...] | None = None,
     progress_callback: ProgressCallback | None = None,
     should_cancel: ShouldCancel | None = None,
-    estimators_factory: EstimatorsFactory = _estimators,
+    estimators_factory: EstimatorsFactory | None = None,
 ) -> WalkForwardVersionResult:
     config.validate()
+    resolved_model_names = model_names_for_version(str(model_version), model_names)
+    resolved_estimators_factory = estimators_factory or make_estimators_factory_for_version(
+        str(model_version), reports_dir=reports_dir
+    )
     if model_version not in MODEL_VERSIONS:
         return _run_walk_forward_for_market_version(
             str(model_version),
@@ -1121,7 +1166,7 @@ def run_walk_forward_for_version(
             reports_dir=reports_dir,
             progress_callback=progress_callback,
             should_cancel=should_cancel,
-            estimators_factory=estimators_factory,
+            estimators_factory=resolved_estimators_factory,
         )
 
     dataset_path = select_training_dataset(processed_dir, model_version=model_version)
@@ -1147,14 +1192,14 @@ def run_walk_forward_for_version(
                 dataset_path=str(dataset_path),
                 fold=fold,
                 config=config,
-                model_names=model_names,
-                estimators_factory=estimators_factory,
+                model_names=resolved_model_names,
+                estimators_factory=resolved_estimators_factory,
             )
         )
         if progress_callback:
             progress_callback(
                 f"{model_version} · fold {fold.fold_index + 1}/{len(folds)}",
-                len(model_names),
+                len(resolved_model_names),
                 len(folds),
             )
 
@@ -1178,7 +1223,7 @@ def run_walk_forward_validation(
     db: Session | None = None,
     processed_dir: str | Path = PROCESSED_DATA_DIR,
     reports_dir: str | Path = REPORTS_DIR,
-    model_names: tuple[str, ...] = MODEL_NAMES,
+    model_names: tuple[str, ...] | None = None,
     progress_callback: ProgressCallback | None = None,
     prepare_progress_callback: PrepareProgressCallback | None = None,
     should_cancel: ShouldCancel | None = None,
@@ -1239,12 +1284,21 @@ def run_walk_forward_validation(
         )
 
     finished = datetime.now(timezone.utc)
-    sample_mismatch_total = 0
+    sample_mismatch_folds: set[tuple[str, int]] = set()
     for version in version_results:
         for fold in version.folds:
             sample = (fold.coverage or {}).get("official_benchmark_sample")
             if isinstance(sample, dict) and sample.get("sample_mismatch_detected"):
-                sample_mismatch_total += 1
+                sample_mismatch_folds.add(
+                    (version.model_version, fold.fold.fold_index)
+                )
+    evaluated_model_names = tuple(
+        dict.fromkeys(
+            model_name
+            for version in selected_versions
+            for model_name in model_names_for_version(version, model_names)
+        )
+    )
     summary = {
         "versions": [item.model_version for item in version_results],
         "folds_completed": sum(
@@ -1263,8 +1317,10 @@ def run_walk_forward_validation(
         "official_metrics_shuffled": False,
         "public_model_unchanged": True,
         "holdout_metrics_unchanged": True,
-        "official_contenders": list(OFFICIAL_CONTENDERS),
-        "official_sample_mismatch_folds": sample_mismatch_total,
+        "official_contenders": list(
+            dict.fromkeys((*OFFICIAL_BENCHMARK_NAMES, *evaluated_model_names))
+        ),
+        "official_sample_mismatch_folds": len(sample_mismatch_folds),
     }
     return WalkForwardRunResult(
         config=resolved,

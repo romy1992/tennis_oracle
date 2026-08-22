@@ -7,7 +7,10 @@ from backend.src.app.ml.training.train_baseline import (
     ALLOWED_FEATURE_COLUMNS_V2,
     selected_feature_columns,
 )
-from backend.src.app.ml.training.value_bet_metrics import compute_value_bet_metrics
+from backend.src.app.ml.training.value_bet_metrics import (
+    compute_match_winner_play_metrics,
+    compute_value_bet_metrics,
+)
 
 
 class ValueBetMetricsTest(unittest.TestCase):
@@ -40,6 +43,38 @@ class ValueBetMetricsTest(unittest.TestCase):
         self.assertAlmostEqual(metrics["total_profit"], 0.2)
         self.assertAlmostEqual(metrics["roi"], 0.1)
         self.assertEqual(metrics["odds_coverage_rows"], 3)
+
+    def test_match_winner_play_uses_player_2_when_the_model_predicts_player_2(self):
+        test_df = pd.DataFrame(
+            [
+                {
+                    "target_player_1_win": 1,
+                    "avg_player_1_odds": 2.0,
+                    "avg_player_2_odds": 9.0,
+                },
+                {
+                    "target_player_1_win": 0,
+                    "avg_player_1_odds": 9.0,
+                    "avg_player_2_odds": 2.0,
+                },
+                {
+                    "target_player_1_win": 1,
+                    "avg_player_1_odds": 1.4,
+                    "avg_player_2_odds": 9.0,
+                },
+            ]
+        )
+
+        metrics = compute_match_winner_play_metrics(
+            test_df,
+            [0.6, 0.4, 0.7],
+            min_edge_percent=10.0,
+        )
+
+        self.assertEqual(metrics["bets_count"], 2)
+        self.assertEqual(metrics["hit_rate"], 1.0)
+        self.assertEqual(metrics["total_profit"], 2.0)
+        self.assertEqual(metrics["roi"], 1.0)
 
     def test_versioned_output_paths_keep_v1_and_add_v2(self):
         self.assertEqual(DATASET_VERSIONS["v1"].base_dataset, "tennis_winner_dataset.csv")

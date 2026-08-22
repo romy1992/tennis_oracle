@@ -26,6 +26,7 @@ from backend.src.app.ml.model_versioning import (  # noqa: E402
 )
 from backend.src.app.ml.training.value_bet_metrics import (  # noqa: E402
     DEFAULT_EDGE_THRESHOLD,
+    compute_match_winner_play_metrics,
     compute_value_bet_metrics,
 )
 
@@ -495,6 +496,11 @@ def classification_metrics(
         probability_series.loc[odds_mask],
         edge_threshold=edge_threshold,
     )
+    match_winner_play = compute_match_winner_play_metrics(
+        test_dataframe,
+        probability_series,
+        min_edge_percent=edge_threshold * 100.0,
+    )
 
     return {
         "accuracy": _round_metric(accuracy_score(y_test, predictions)),
@@ -508,6 +514,7 @@ def classification_metrics(
         "class_distribution_test": _class_distribution(y_test),
         "value_bet_overall": value_bets_overall,
         "value_bet_with_odds": value_bets_with_odds,
+        "match_winner_play": match_winner_play,
     }
 
 

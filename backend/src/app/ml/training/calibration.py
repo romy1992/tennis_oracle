@@ -29,10 +29,12 @@ from backend.src.app.ml.model_versioning import (
 )
 from backend.src.app.ml.training.train_baseline import TARGET_COLUMN
 from backend.src.app.ml.training.walk_forward import (
-    MODEL_NAMES,
+    EstimatorsFactory,
     WalkForwardConfig,
     WalkForwardFoldSpec,
     generate_walk_forward_folds,
+    make_estimators_factory_for_version,
+    model_names_for_version,
     prepare_temporal_dataframe,
     slice_fold_frames,
 )
@@ -119,6 +121,8 @@ class OosPredictionBatch:
     y_true: np.ndarray
     prob_raw: np.ndarray
     match_dates: np.ndarray
+    player_1_odds: np.ndarray | None = None
+    player_2_odds: np.ndarray | None = None
 
     @property
     def n_samples(self) -> int:
@@ -376,11 +380,11 @@ def _extract_oos_batch(
     dataset_path: str,
     config: WalkForwardConfig,
     model_name: str,
+    estimators_factory: EstimatorsFactory,
 ) -> OosPredictionBatch | None:
     from sklearn.pipeline import Pipeline
 
     from backend.src.app.ml.training.walk_forward import (
-        _estimators,
         detect_leakage_flags,
         selected_feature_columns,
     )
@@ -393,7 +397,7 @@ def _extract_oos_batch(
     y_test = test[TARGET_COLUMN].astype(int)
     if y_train.nunique() < 2 or y_test.nunique() < 2:
         return None
-    estimators = _estimators(config.random_state)
+    estimators = estimators_factory(config.random_state)
     if model_name not in estimators:
         return None
     detect_leakage_flags(
@@ -412,6 +416,16 @@ def _extract_oos_batch(
     pipeline.fit(train[feature_columns], y_train)
     prob_raw = pipeline.predict_proba(test[feature_columns])[:, 1]
     match_dates = pd.to_datetime(test["match_date"]).dt.date.to_numpy()
+    player_1_odds = (
+        pd.to_numeric(test["avg_player_1_odds"], errors="coerce").to_numpy(dtype=float)
+        if "avg_player_1_odds" in test.columns
+        else None
+    )
+    player_2_odds = (
+        pd.to_numeric(test["avg_player_2_odds"], errors="coerce").to_numpy(dtype=float)
+        if "avg_player_2_odds" in test.columns
+        else None
+    )
     return OosPredictionBatch(
         fold_index=fold.fold_index,
         test_start=fold.test_start,
@@ -419,6 +433,8 @@ def _extract_oos_batch(
         y_true=y_test.to_numpy(dtype=int),
         prob_raw=np.asarray(prob_raw, dtype=float),
         match_dates=match_dates,
+        player_1_odds=player_1_odds,
+        player_2_odds=player_2_odds,
     )
 
 
@@ -427,21 +443,29 @@ def collect_oos_predictions_for_version(
     config: WalkForwardConfig,
     *,
     processed_dir: str | Path = PROCESSED_DATA_DIR,
-    model_names: tuple[str, ...] = MODEL_NAMES,
+    reports_dir: str | Path = REPORTS_DIR,
+    model_names: tuple[str, ...] | None = None,
+    estimators_factory: EstimatorsFactory | None = None,
     should_cancel: ShouldCancel | None = None,
     on_fold_complete: Callable[[str], None] | None = None,
 ) -> dict[str, list[OosPredictionBatch]]:
     config.validate()
+    resolved_model_names = model_names_for_version(str(model_version), model_names)
+    resolved_estimators_factory = estimators_factory or make_estimators_factory_for_version(
+        str(model_version), reports_dir=reports_dir
+    )
     dataset_path = select_training_dataset_path(processed_dir, version=model_version)  # type: ignore[arg-type]
     raw = pd.read_csv(dataset_path, low_memory=False)
     dataframe = prepare_temporal_dataframe(raw, model_version=model_version)
     folds = generate_walk_forward_folds(dataframe, config)
-    batches_by_model: dict[str, list[OosPredictionBatch]] = {name: [] for name in model_names}
+    batches_by_model: dict[str, list[OosPredictionBatch]] = {
+        name: [] for name in resolved_model_names
+    }
     for fold in folds:
         if should_cancel and should_cancel():
             raise BackgroundJobCancelled("Calibration cancelled.")
         train, test = slice_fold_frames(dataframe, fold)
-        for model_name in model_names:
+        for model_name in resolved_model_names:
             batch = _extract_oos_batch(
                 fold,
                 train,
@@ -450,6 +474,7 @@ def collect_oos_predictions_for_version(
                 dataset_path=str(dataset_path),
                 config=config,
                 model_name=model_name,
+                estimators_factory=resolved_estimators_factory,
             )
             if batch is not None:
                 batches_by_model[model_name].append(batch)
@@ -548,6 +573,7 @@ def run_calibration_for_model(
     config: CalibrationConfig,
     *,
     processed_dir: str | Path = PROCESSED_DATA_DIR,
+    reports_dir: str | Path = REPORTS_DIR,
     model_name: str,
     run_id: int | None = None,
     persist_artifacts: bool = True,
@@ -561,6 +587,7 @@ def run_calibration_for_model(
         model_version,
         wf_config,
         processed_dir=processed_dir,
+        reports_dir=reports_dir,
         model_names=(model_name,),
         should_cancel=should_cancel,
         on_fold_complete=on_progress,
@@ -662,6 +689,7 @@ def run_calibration_for_model(
                 model_name=model_name,
                 method=method,
                 run_id=run_id,
+                reports_dir=reports_dir,
             )
             if path is not None:
                 artifacts[method] = str(path)
@@ -716,7 +744,7 @@ def _count_calibration_units(
     versions: tuple[str, ...],
     *,
     processed_dir: str | Path,
-    model_names: tuple[str, ...],
+    model_names: tuple[str, ...] | None,
     should_cancel: ShouldCancel | None = None,
     prepare_progress_callback: PrepareProgressCallback | None = None,
 ) -> int:
@@ -735,7 +763,7 @@ def _count_calibration_units(
         dataframe = prepare_temporal_dataframe(raw, model_version=version)
         folds = generate_walk_forward_folds(dataframe, wf)
         # OOS extraction + calibration evaluation per fold, per model.
-        total += len(folds) * 2 * len(model_names)
+        total += len(folds) * 2 * len(model_names_for_version(version, model_names))
     return total
 
 
@@ -743,8 +771,9 @@ def run_calibration_validation(
     config: CalibrationConfig,
     *,
     versions: tuple[str, ...] | None = None,
-    model_names: tuple[str, ...] = MODEL_NAMES,
+    model_names: tuple[str, ...] | None = None,
     processed_dir: str | Path = PROCESSED_DATA_DIR,
+    reports_dir: str | Path = REPORTS_DIR,
     walk_forward_run_id: int | None = None,
     run_id: int | None = None,
     persist_artifacts: bool = True,
@@ -777,7 +806,7 @@ def run_calibration_validation(
     for version in selected_versions:
         if version not in MODEL_VERSIONS:
             continue
-        for model_name in model_names:
+        for model_name in model_names_for_version(version, model_names):
             if should_cancel and should_cancel():
                 raise BackgroundJobCancelled("Calibration cancelled.")
             try:
@@ -785,6 +814,7 @@ def run_calibration_validation(
                     version,
                     config,
                     processed_dir=processed_dir,
+                    reports_dir=reports_dir,
                     model_name=model_name,
                     run_id=run_id,
                     persist_artifacts=persist_artifacts,

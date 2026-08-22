@@ -255,6 +255,7 @@ def _play_slip_pick_id(
             BettingSlip.model_version == model_version,
             BettingSlip.model_name == model_name,
             BettingSlip.slip_date == slip_date,
+            BettingSlip.is_experimental.is_(False),
             BettingSlip.slip_key.like("play_%"),
         )
         .order_by(BettingSlipPick.id.asc())

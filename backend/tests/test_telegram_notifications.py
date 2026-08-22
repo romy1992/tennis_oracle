@@ -345,6 +345,37 @@ class TelegramNotificationsServiceTest(unittest.TestCase):
                         event_winner="First Player",
                     )
                 )
+            experimental = BettingSlip(
+                slip_date=target_date,
+                slip_key="experiment_pending",
+                label="Esperimento ancora aperto",
+                description="Non deve bloccare o finire nel recap ufficiale",
+                model_version="v3",
+                model_name="logistic_regression",
+                strategy_family="play_only",
+                strategy_version="play_only_v1",
+                is_experimental=True,
+                pick_count=1,
+                combined_odds=1.8,
+                generated_at=datetime.combine(target_date, time(9, 0)),
+            )
+            session.add(experimental)
+            session.flush()
+            session.add(
+                BettingSlipPick(
+                    betting_slip_id=experimental.id,
+                    event_key=999,
+                    market="match_winner",
+                    event_date=target_date,
+                    player_1_name="Experimental A",
+                    player_2_name="Experimental B",
+                    predicted_winner="First Player",
+                    predicted_winner_label="Experimental A",
+                    odds=1.8,
+                    sort_order=0,
+                    outcome="pending",
+                )
+            )
             session.commit()
 
             sent_texts: list[str] = []
@@ -367,13 +398,14 @@ class TelegramNotificationsServiceTest(unittest.TestCase):
                     select(BettingSlipPick.outcome).order_by(BettingSlipPick.id)
                 ).all()
             )
-            self.assertEqual(outcomes, ["won", "lost"])
+            self.assertEqual(outcomes, ["won", "lost", "pending"])
             self.assertEqual(first.sent, 1)
             self.assertTrue(sent_texts)
             message = "\n".join(sent_texts)
             self.assertIn("Riepilogo schedine", message)
             self.assertIn("ROI", message)
             self.assertIn("Quota 2.00", message)
+            self.assertNotIn("Esperimento ancora aperto", message)
 
             second = run_notification_kind(
                 session,

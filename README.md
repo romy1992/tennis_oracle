@@ -861,9 +861,9 @@ Feature engineering su tabelle `ml_*` / snapshot: win-rate, H2H, giorni dall’u
 |----------|-------|
 | `temporal_train_test_split` | Split temporale (no shuffle random) |
 | `allowed_feature_columns` / `leakage_excluded_columns` | Feature ammesse per versione |
-| `filter_rows_with_valid_odds` | Filtro obbligatorio per v3 |
+| `filter_rows_with_valid_odds` | Filtro obbligatorio per v3/v4 |
 | `train_baseline` | Allena LR + RF, salva `.pkl` e metriche |
-| `classification_metrics` | accuracy, ROC-AUC, log-loss, … |
+| `classification_metrics` | accuracy, ROC-AUC, log-loss e PLAY sul lato pronosticato |
 | `market_benchmark_metrics` | Benchmark mercato sulle odds |
 | `compute_value_bet_metrics` (modulo dedicato) | Metriche value bet |
 | `update_model_registry_entry` / `write_model_comparison` | Registry JSON |
@@ -883,7 +883,7 @@ Validazione temporale multi-fold **separata** dalla holdout di `train_baseline` 
 
 Persistenza: entity `WalkForwardRun` / `WalkForwardFold` (migrazioni `0021`, `0023`), service `app/services/walk_forward.py` (`start_walk_forward_run`, `cancel_walk_forward_run`, `reconcile_orphaned_walk_forward_runs`), job `jobs/run_walk_forward.py`. Progresso incrementale (`progress_pct`, `current_phase`) e annullamento cooperativo; run orfane riconciliate all'avvio API. Il global update include una fase osservabile `walk_forward_observe` (esecuzione completa solo se `WALK_FORWARD_IN_GLOBAL_UPDATE=true`).
 
-Benchmark ufficiali inclusi nei fold walk-forward (stesso campione/range/regole): `market_favorite`, `market_no_vig`, `atp_ranking`, `elo`, `logistic_regression`, `random_forest`. Le metriche ufficiali includono accuracy, log loss, Brier score, ROI, yield, drawdown e CLV (se disponibile; in OOS offline senza closing odds viene marcata non disponibile). Il report salva anche `official_benchmark_sample` per impedire confronti silenziosi su campioni differenti.
+Benchmark ufficiali inclusi nei fold walk-forward (stesso campione/range/regole): `market_favorite`, `market_no_vig`, `atp_ranking`, `elo`, `logistic_regression`, `random_forest` e, per v4, `voting_ensemble`. Le metriche ufficiali includono accuracy, log loss, Brier score, ROI, yield, drawdown e CLV (se disponibile; in OOS offline senza closing odds viene marcata non disponibile). `match_winner_play` replica inoltre la regola live sul lato effettivamente pronosticato, con edge `% = quota × probabilità − 1`. Il report salva anche `official_benchmark_sample` per impedire confronti silenziosi su campioni differenti.
 
 Mercati extra (fuori da `MODEL_VERSIONS` match-winner):
 
@@ -913,6 +913,14 @@ python -m backend.src.app.ml.training.train_extra_markets_ensemble --market over
 | `write_calibration_report` | JSON sotto `data/reports/calibration/` (+ `calibration_latest.json`) |
 
 Persistenza: entity `CalibrationRun` / `CalibrationResult` (migrazioni `0022`, `0023`), service `app/services/calibration.py` (`start_calibration_run`, `cancel_calibration_run`, `reconcile_orphaned_calibration_runs`), job `jobs/run_calibration.py`, UI `CalibrationPage`. Progresso e annullamento come walk-forward. Pickle calibratori in `data/reports/calibration/artifacts/calibration_run_{id}_{version}_{model}_{method}.pkl` (volume `REPORTS_HOST_PATH`, scrivibile in Docker; non sovrascrive run precedenti). **Non** attiva automaticamente la calibrazione sul modello pubblico.
+
+Per v4, walk-forward e calibrazione standard includono automaticamente anche il modello pubblico `voting_ensemble`; LR/RF restano disponibili come confronti. La ritaratura offline della soglia PLAY usa fold maturi e selezione solo sui fold OOS precedenti:
+
+```bash
+python -m backend.src.app.ml.training.match_winner_threshold
+```
+
+Il report dedicato viene scritto sotto `backend/data/reports/experiments/` e non modifica modello, registry, configurazione live o report `latest` ufficiali.
 
 #### `app/ml/training/probability_band_analysis.py` (ML-03)
 
@@ -1132,6 +1140,8 @@ python -m backend.src.jobs.run_walk_forward --dry-run
 # calibrazione probabilità OOS (dipende da walk-forward; non attiva modello pubblico)
 python -m backend.src.jobs.run_calibration --dry-run
 python -m backend.src.jobs.run_calibration
+# ritaratura soglia PLAY match-winner OOS (solo esperimento, nessuna attivazione)
+python -m backend.src.app.ml.training.match_winner_threshold
 python -m jobs.generate_upcoming_predictions --model-version v3
 ```
 
@@ -1142,6 +1152,7 @@ Artefatti:
 - Metriche holdout: `backend/data/reports/baseline_*_metrics.json`
 - Metriche walk-forward: `backend/data/reports/walk_forward/` (DB: `walk_forward_run` / `walk_forward_fold`)
 - Calibrazione probabilità: `backend/data/reports/calibration/` (DB: `calibration_run` / `calibration_result`)
+- Esperimenti soglia PLAY: `backend/data/reports/experiments/`
 
 **Anti-leakage**: feature solo con dati *precedenti* al match; `standing` corrente non usata come rank pre-match; split temporale in training; walk-forward ufficiale senza shuffle e senza sovrapposizione train/test.
 

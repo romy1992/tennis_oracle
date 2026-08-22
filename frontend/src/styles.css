@@ -745,6 +745,25 @@ label.checkbox-field input {
   color: #ffffff;
 }
 
+.strategy-tabs {
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.strategy-tabs button {
+  border-radius: 10px;
+}
+
+.strategy-note {
+  margin-bottom: 16px;
+  margin-top: 0;
+}
+
+.table-wrap tr.active-row td {
+  background: #eef6ff;
+  font-weight: 700;
+}
+
 .action-button {
   background: #ffffff;
   border: 1px solid #cfd8e6;

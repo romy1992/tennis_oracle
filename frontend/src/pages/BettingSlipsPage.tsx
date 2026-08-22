@@ -13,7 +13,8 @@ import type {
   BettingSlipsDailyResponse,
   MLModelVersion,
   ModelsVersionsResultsResponse,
-  SlipKind
+  SlipKind,
+  SlipStrategyFamily
 } from "../types/api";
 import { classifySingleBetValue } from "../utils/minEdge";
 import {
@@ -27,6 +28,36 @@ import { formatLiveScore, isLiveMatch } from "../utils/liveScore";
 
 const STAKE_PRESETS = [1, 5, 10, 25, 50];
 const LIVE_UI_REFRESH_MS = 60_000;
+const STRATEGY_TABS: Array<{
+  key: SlipStrategyFamily;
+  label: string;
+  description: string;
+}> = [
+  {
+    key: "generic",
+    label: "Generiche",
+    description: "Profili storici attuali, conservati senza modifiche."
+  },
+  {
+    key: "play_only",
+    label: "Solo PLAY",
+    description: "Solo pick PLAY su eventi distinti e tutti i mercati."
+  },
+  {
+    key: "strong_markets",
+    label: "Mercati forti",
+    description: "Strategia v1 concentrata sul vincitore del primo set."
+  },
+  {
+    key: "selective",
+    label: "Selettive",
+    description: "Poche pick prudenti; puo anche non produrre alcun consiglio."
+  }
+];
+
+function strategyFamilyOf(slip: BettingSlip): SlipStrategyFamily {
+  return slip.strategy_family ?? "generic";
+}
 
 async function downloadBrowserFile(
   file: { blob: Blob; filename: string | null },
@@ -181,23 +212,37 @@ function SlipStatsPanel({
   title,
   subtitle,
   stats,
-  focusKind
+  focusKind,
+  focusStrategyFamily
 }: {
   title: string;
   subtitle: string;
   stats: BettingSlipStatsResponse | null;
   focusKind?: "parlay" | "ladder";
+  focusStrategyFamily?: SlipStrategyFamily;
 }) {
   const daysWithSlips = [...(stats?.days ?? [])]
     .filter((day) => day.slips_total > 0)
     .sort((left, right) => right.date.localeCompare(left.date));
 
-  const profiles = (stats?.summary.by_profile ?? []).filter((profile) =>
-    focusKind ? (profile.slip_kind ?? "parlay") === focusKind : true
+  const profiles = (stats?.summary.by_profile ?? []).filter((profile) => {
+    const kindMatches = focusKind ? (profile.slip_kind ?? "parlay") === focusKind : true;
+    const familyMatches = focusStrategyFamily
+      ? (profile.strategy_family ?? "generic") === focusStrategyFamily
+      : true;
+    return kindMatches && familyMatches;
+  });
+  const strategies = (stats?.summary.by_strategy ?? []).filter((strategy) =>
+    focusKind ? strategy.slip_kind === focusKind : true
   );
-  const kinds = stats?.summary.by_kind ?? [];
+  const activeStrategy = focusStrategyFamily
+    ? strategies.find((strategy) => strategy.strategy_family === focusStrategyFamily)
+    : undefined;
+  const scopedStats =
+    activeStrategy ??
+    (focusStrategyFamily === "generic" && strategies.length === 0 ? stats?.summary : undefined);
 
-  if (!stats || stats.summary.slips_total === 0) {
+  if (!stats || !scopedStats || scopedStats.slips_total === 0) {
     return (
       <section className="panel slip-stats-panel">
         <header className="section-header">
@@ -206,7 +251,10 @@ function SlipStatsPanel({
             <p>{subtitle}</p>
           </div>
         </header>
-        <EmptyState title="Nessun dato" message="Non ci sono schedine salvate per questo periodo." />
+        <EmptyState
+          title="Nessun dato per questa strategia"
+          message="Il sub-tab non ha ancora schedine o scalate salvate nel periodo selezionato."
+        />
       </section>
     );
   }
@@ -222,46 +270,57 @@ function SlipStatsPanel({
       <div className="metrics-grid">
         <div className="metric-card">
           <span>Schedine totali</span>
-          <strong>{stats.summary.slips_total}</strong>
+          <strong>{scopedStats.slips_total}</strong>
         </div>
         <div className="metric-card">
           <span>Win rate schedine</span>
-          <strong>{formatPct(stats.summary.slip_win_rate_pct)}</strong>
+          <strong>{formatPct(scopedStats.slip_win_rate_pct)}</strong>
         </div>
         <div className="metric-card">
           <span>Hit rate pick</span>
-          <strong>{formatPct(stats.summary.pick_hit_rate_pct)}</strong>
+          <strong>{formatPct(scopedStats.pick_hit_rate_pct)}</strong>
         </div>
         <div className="metric-card">
           <span>Profitto teorico</span>
-          <strong>{formatMoney(stats.summary.theoretical_profit_units)}</strong>
+          <strong>{formatMoney(scopedStats.theoretical_profit_units)}</strong>
+        </div>
+        <div className="metric-card">
+          <span>ROI per schedina</span>
+          <strong>{formatPct(scopedStats.theoretical_roi_pct)}</strong>
         </div>
       </div>
 
-      {kinds.length > 1 ? (
+      {strategies.length > 1 ? (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Tipo</th>
-                <th>Totale</th>
+                <th>Strategia</th>
+                <th>Chiuse</th>
                 <th>Prese</th>
                 <th>Perse</th>
                 <th>Win rate</th>
                 <th>Profitto</th>
                 <th>ROI</th>
+                <th>ROI giornaliero</th>
+                <th>Giorni</th>
               </tr>
             </thead>
             <tbody>
-              {kinds.map((kind) => (
-                <tr key={kind.slip_kind}>
-                  <td>{kind.label}</td>
-                  <td>{kind.slips_total}</td>
-                  <td>{kind.slips_won}</td>
-                  <td>{kind.slips_lost}</td>
-                  <td>{formatPct(kind.slip_win_rate_pct)}</td>
-                  <td>{formatMoney(kind.theoretical_profit_units)}</td>
-                  <td>{formatPct(kind.theoretical_roi_pct)}</td>
+              {strategies.map((strategy) => (
+                <tr
+                  key={`${strategy.slip_kind}-${strategy.strategy_family}`}
+                  className={strategy.strategy_family === focusStrategyFamily ? "active-row" : undefined}
+                >
+                  <td>{strategy.label}</td>
+                  <td>{strategy.slips_won + strategy.slips_lost}</td>
+                  <td>{strategy.slips_won}</td>
+                  <td>{strategy.slips_lost}</td>
+                  <td>{formatPct(strategy.slip_win_rate_pct)}</td>
+                  <td>{formatMoney(strategy.theoretical_profit_units)}</td>
+                  <td>{formatPct(strategy.theoretical_roi_pct)}</td>
+                  <td>{formatPct(strategy.daily_portfolio_roi_pct)}</td>
+                  <td>{strategy.comparable_days}</td>
                 </tr>
               ))}
             </tbody>
@@ -269,7 +328,7 @@ function SlipStatsPanel({
         </div>
       ) : null}
 
-      {daysWithSlips.length > 1 ? (
+      {!focusStrategyFamily && daysWithSlips.length > 1 ? (
         <div className="table-wrap">
           <table>
             <thead>
@@ -315,6 +374,8 @@ function SlipStatsPanel({
                 <th>Prese</th>
                 <th>Perse</th>
                 <th>Win rate</th>
+                <th>Profitto</th>
+                <th>ROI</th>
               </tr>
             </thead>
             <tbody>
@@ -326,6 +387,8 @@ function SlipStatsPanel({
                   <td>{profile.slips_won}</td>
                   <td>{profile.slips_lost}</td>
                   <td>{formatPct(profile.slip_win_rate_pct)}</td>
+                  <td>{formatMoney(profile.theoretical_profit_units)}</td>
+                  <td>{formatPct(profile.theoretical_roi_pct)}</td>
                 </tr>
               ))}
             </tbody>
@@ -595,6 +658,7 @@ export function BettingSlipsPage() {
   const [stake, setStake] = useState(10);
   const [minEdgePercent, setMinEdgePercent] = useState(2);
   const [viewKind, setViewKind] = useState<SlipKind>("parlay");
+  const [strategyFamily, setStrategyFamily] = useState<SlipStrategyFamily>("generic");
   const [loading, setLoading] = useState(true);
   const [loadingDay, setLoadingDay] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -857,8 +921,11 @@ export function BettingSlipsPage() {
   const selectedOverallStats = selectedModel ? overallStatsByModel[selectedModel] ?? null : null;
   const visibleSlips = (selectedDaily?.slips ?? []).filter(
     (slip) =>
-      (slip.slip_kind ?? (slip.slip_key.startsWith("ladder_") ? "ladder" : "parlay")) === viewKind
+      (slip.slip_kind ?? (slip.slip_key.startsWith("ladder_") ? "ladder" : "parlay")) ===
+        viewKind && strategyFamilyOf(slip) === strategyFamily
   );
+  const selectedStrategy =
+    STRATEGY_TABS.find((strategy) => strategy.key === strategyFamily) ?? STRATEGY_TABS[0];
   const historicalOutcomesMissing =
     Boolean(selectedCalendarDay?.is_past) &&
     Boolean(selectedDaily?.slips.some((slip) => slip.picks_pending > 0));
@@ -886,8 +953,8 @@ export function BettingSlipsPage() {
         <div>
           <h2>Consiglio schedina</h2>
           <p>
-            {formatDate(selectedDate)} · Tab Schedine (multi-leg) o Scalate (reinvestimento
-            progressivo) · mercati Match / 1° set / O/U
+            {formatDate(selectedDate)} · Confronta Schedine e Scalate nelle quattro strategie
+            persistite · mercati Match / 1° set / O/U
           </p>
         </div>
         <div className="page-header-actions">
@@ -1000,6 +1067,14 @@ export function BettingSlipsPage() {
         <p className="note">Pool PLAY disponibile: {selectedDaily.candidate_pool_size}</p>
       ) : null}
 
+      {selectedDaily?.market_models.length ? (
+        <p className="note" data-testid="slip-market-models">
+          Modelli del pool: {selectedDaily.market_models.map((model) => (
+            `${model.label} ${model.model_version} / ${model.model_name}`
+          )).join(" · ")}
+        </p>
+      ) : null}
+
       {selectedDaily?.warnings.map((warning) => (
         <p key={`${selectedDaily.model_name}-${warning}`} className="note">
           {warning}
@@ -1048,6 +1123,24 @@ export function BettingSlipsPage() {
           Scalate
         </button>
       </div>
+      <div className="tab-list strategy-tabs" aria-label="Strategia consiglio">
+        {STRATEGY_TABS.map((strategy) => (
+          <button
+            key={strategy.key}
+            type="button"
+            className={strategyFamily === strategy.key ? "active" : undefined}
+            onClick={() => setStrategyFamily(strategy.key)}
+          >
+            {strategy.label}
+          </button>
+        ))}
+      </div>
+      <p className="note strategy-note">
+        <strong>{selectedStrategy.label}:</strong> {selectedStrategy.description}
+        {strategyFamily !== "generic"
+          ? " Risultati sperimentali: non pubblicati come consiglio ufficiale."
+          : ""}
+      </p>
       {viewKind === "ladder" ? (
         <p className="note">
           Ogni step è una singola: se vinci, il ritorno viene reinvestito nello step successivo
@@ -1067,13 +1160,13 @@ export function BettingSlipsPage() {
         <EmptyState
           title={
             viewKind === "ladder"
-              ? "Nessuna scalata disponibile per questo giorno"
-              : "Nessuna schedina disponibile per questo giorno"
+              ? `Nessuna scalata disponibile · ${selectedStrategy.label}`
+              : `Nessuna schedina disponibile · ${selectedStrategy.label}`
           }
           message={
-            viewKind === "ladder"
-              ? 'Serve un pool di almeno 2 PLAY (o PLAY+Border). Usa "Arricchisci schedine" o Aggiorna tutto.'
-              : 'Seleziona un altro giorno o usa "Aggiorna tutto" nella sidebar.'
+            strategyFamily === "generic"
+              ? 'Seleziona un altro giorno o usa "Aggiorna tutto" nella sidebar.'
+              : "La strategia non ha trovato almeno due pick idonee oppure il giorno precede l'avvio dell'esperimento."
           }
         />
       ) : null}
@@ -1097,9 +1190,10 @@ export function BettingSlipsPage() {
       {!loadingDay ? (
         <SlipStatsPanel
           title={viewKind === "ladder" ? "Statistiche giorno (focus scalate)" : "Statistiche giorno"}
-          subtitle={`Risultati per ${formatDate(selectedDate)}${selectedModel ? ` · ${selectedModel}` : ""}. Profili filtrati sul tab attivo.`}
+          subtitle={`Risultati per ${formatDate(selectedDate)}${selectedModel ? ` · Match Winner: ${selectedModel}` : ""}. Profili filtrati sul tab attivo.`}
           stats={selectedDayStats}
           focusKind={viewKind}
+          focusStrategyFamily={strategyFamily}
         />
       ) : null}
 
@@ -1109,11 +1203,12 @@ export function BettingSlipsPage() {
         }
         subtitle={
           selectedOverallStats
-            ? `Storico completo dal ${formatDate(selectedOverallStats.from_date)} al ${formatDate(selectedOverallStats.to_date)}${selectedModel ? ` · ${selectedModel}` : ""}.`
+            ? `Storico completo dal ${formatDate(selectedOverallStats.from_date)} al ${formatDate(selectedOverallStats.to_date)}${selectedModel ? ` · Match Winner: ${selectedModel}` : ""}.`
             : "Storico completo di tutte le schedine salvate."
         }
         stats={selectedOverallStats}
         focusKind={viewKind}
+        focusStrategyFamily={strategyFamily}
       />
 
       <p className="disclaimer">

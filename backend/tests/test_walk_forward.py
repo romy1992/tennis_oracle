@@ -223,6 +223,10 @@ class WalkForwardTemporalTest(unittest.TestCase):
             self.assertTrue(result.summary["public_model_unchanged"])
             self.assertFalse(result.summary["official_metrics_shuffled"])
             self.assertIn("official_contenders", result.summary)
+            self.assertLessEqual(
+                result.summary["official_sample_mismatch_folds"],
+                sum(version.coverage["folds_planned"] for version in result.versions),
+            )
 
     def test_insufficient_data_marks_skipped_fold(self):
         dataframe = _synthetic_dataset(n_days=120, matches_per_day=1)

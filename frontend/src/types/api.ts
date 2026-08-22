@@ -552,6 +552,7 @@ export type LiveScore = {
 };
 
 export type SlipKind = "parlay" | "ladder";
+export type SlipStrategyFamily = "generic" | "play_only" | "strong_markets" | "selective";
 
 export type BettingSlip = {
   id: string;
@@ -559,6 +560,9 @@ export type BettingSlip = {
   label: string;
   description: string | null;
   slip_kind?: SlipKind;
+  strategy_family?: SlipStrategyFamily;
+  strategy_version?: string;
+  is_experimental?: boolean;
   picks: BettingSlipPick[];
   pick_count: number;
   combined_odds: number;
@@ -577,10 +581,21 @@ export type BettingSlip = {
   generated_at: string | null;
 };
 
+export type BettingSlipMarketModel = {
+  market: string;
+  label: string;
+  model_version: string;
+  model_name: string;
+};
+
 export type BettingSlipsDailyResponse = {
   date: string;
+  /** Legacy query namespace: these two fields identify only Match Winner. */
   model_version: MLModelVersion;
   model_name: string;
+  match_winner_model_version: MLModelVersion;
+  match_winner_model_name: string;
+  market_models: BettingSlipMarketModel[];
   stake: number;
   candidate_pool_size: number;
   slips: BettingSlip[];
@@ -619,11 +634,41 @@ export type BettingSlipStatsProfile = {
   slip_key: string;
   label: string;
   slip_kind?: SlipKind;
+  strategy_family?: SlipStrategyFamily;
+  strategy_version?: string;
+  is_experimental?: boolean;
   slips_won: number;
   slips_lost: number;
   slips_pending: number;
   slips_total: number;
   slip_win_rate_pct: number | null;
+  theoretical_profit_units?: number;
+  theoretical_roi_pct?: number | null;
+};
+
+export type BettingSlipStatsStrategy = {
+  strategy_family: SlipStrategyFamily;
+  label: string;
+  slip_kind: SlipKind;
+  strategy_versions: string[];
+  is_experimental: boolean;
+  slips_total: number;
+  slips_won: number;
+  slips_lost: number;
+  slips_pending: number;
+  slips_void: number;
+  slip_win_rate_pct: number | null;
+  picks_total: number;
+  picks_won: number;
+  picks_lost: number;
+  picks_pending: number;
+  picks_void: number;
+  pick_hit_rate_pct: number | null;
+  theoretical_profit_units: number;
+  theoretical_roi_pct: number | null;
+  daily_portfolio_profit_units: number;
+  daily_portfolio_roi_pct: number | null;
+  comparable_days: number;
 };
 
 export type BettingSlipStatsKind = {
@@ -660,6 +705,7 @@ export type BettingSlipStatsSummary = {
   theoretical_roi_pct: number | null;
   by_profile: BettingSlipStatsProfile[];
   by_kind?: BettingSlipStatsKind[];
+  by_strategy?: BettingSlipStatsStrategy[];
 };
 
 export type BettingSlipStatsResponse = {
@@ -709,6 +755,7 @@ export type BettingSlipModelStatsResponse = {
   by_market?: BettingSlipMarketStatsRow[];
   by_kind?: BettingSlipStatsKind[];
   by_profile?: BettingSlipStatsProfile[];
+  by_strategy?: BettingSlipStatsStrategy[];
 };
 
 export type BettingSlipsQueryParams = {

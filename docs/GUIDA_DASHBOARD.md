@@ -194,7 +194,7 @@ Dettaglio su margine, void e stati partita: [GUIDA_UTENTE.md — Margine di sicu
 
 ### A cosa serve
 
-Propone fino a **10 schedine** multi-leg al giorno e fino a **3 scalate** progressive (tab dedicato): in cima alle schedine **Play · Doppia**, poi difficoltà crescente; le scalate reinvestono il ritorno di ogni step nello step successivo (ordine di orario).
+Propone le schedine multi-leg e le scalate progressive in quattro sotto-sezioni confrontabili. **Generiche** conserva i profili storici (fino a 10 schedine e 3 scalate); **Solo PLAY**, **Mercati forti** e **Selettive** sono corsie sperimentali indipendenti. Le scalate reinvestono il ritorno di ogni step nello step successivo (ordine di orario).
 
 ### Quando aprirla
 
@@ -206,6 +206,7 @@ Propone fino a **10 schedine** multi-leg al giorno e fino a **3 scalate** progre
 ### Cosa NON fa / con cosa non confonderla
 
 - **Non** pubblica automaticamente nel registro live (salvo pipeline dedicata sui PLAY singoli).  
+- Le tre corsie sperimentali **non** vengono inviate dai comandi o dai recap Telegram ufficiali finché non vengono promosse.
 - **Non** sostituisce analisi ROI per segmento.  
 - **Media quote bookmakers** = media mercato sul pick, non quota singolo bookmaker.  
 - **Void** in colonna = quota break-even, non partita annullata (pick **Annullato** = void settlement).
@@ -217,6 +218,7 @@ Profili e regole settlement: [GUIDA_UTENTE.md — Consiglio schedine](GUIDA_UTEN
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
 | Tab versione / modello | Una lista schedine alla volta | Confronta modelli cambiando tab |
+| Sotto-tab strategia | Generiche / Solo PLAY / Mercati forti / Selettive | Cambia famiglia senza eliminare i profili esistenti |
 | Calendario (storico / prossime) | Giorno da analizzare | Rigenera solo **oggi/futuro** |
 | Margine sicurezza | Ricalifica PLAY/BORDERLINE/NO BET | Coerente con pagina Partite |
 | Simula puntata (€) | Ricalcola vincita/profitto | Default 10 €; preset 1–50 |
@@ -235,13 +237,25 @@ Profili e regole settlement: [GUIDA_UTENTE.md — Consiglio schedine](GUIDA_UTEN
 | Stato schedina | Presa / Persa / In corso / Annullata | Una pick persa → schedina persa |
 | Pool PLAY disponibile | Candidati giornata | Se basso, warning e schedine mancanti |
 | Statistiche giorno / complessive | Win rate schedine, hit pick, profitto teorico | Pending esclusi dalle % |
+| Confronto strategie | ROI standard e ROI giornaliero normalizzato | Il normalizzato assegna la stessa puntata totale a ogni famiglia/giorno |
+
+### Sotto-tab sperimentali
+
+Le corsie sperimentali vengono abilitate dal modello pubblico Match Winner `v4 / voting_ensemble`; questa etichetta non descrive l'intero pool. Le gambe Primo set usano `first_set_winner_v2 / logistic_regression`, quelle Over/Under `over_under_games_v1 / random_forest`. Tutte passano nello stesso flusso delle generiche: persistenza nel database, aggiornamento esiti, gestione void, storico e statistiche. Non modificano né ricostruiscono le schedine generiche già salvate.
+
+- **Solo PLAY** — solo decisioni PLAY, eventi distinti; schedina da 3 pick e scalata da 3 step.
+- **Mercati forti** (`strong_markets_v1`) — solo PLAY del mercato vincitore 1° set, su eventi distinti; 3 pick/step.
+- **Selettive** (`selective_v1`) — versione più corta e prudente del mercato forte: schedina da 2 pick con quota combinata massima 3,20; scalata da 3 step con massimo 4,00.
+
+La classifica mostra sia il ROI per singola uscita sia il **ROI giornaliero normalizzato**. Quest'ultimo è il confronto principale: simula una sola unità di budget per famiglia al giorno, divisa tra le uscite chiuse, evitando che Generiche pesi di più solo perché produce più profili. Una giornata entra nel confronto normalizzato solo quando la famiglia non ha più schedine in corso.
 
 ### Esempio pratico
 
 1. Seleziona **oggi**, modello **logistic_regression**, v3.  
 2. Leggi pool PLAY: se basso, aspettati meno schedine (la Doppia richiede almeno 2 PLAY).  
 3. Confronta profilo **Play · Doppia** vs **Play sicura** vs **Mista bilanciata**.  
-4. Copia schedina scelta e monitora esiti (pallini verde/rosso/grigio).
+4. Apri **Solo PLAY**, **Mercati forti** e **Selettive** e confronta il ROI giornaliero normalizzato a parità di tipo (Schedine o Scalate).
+5. Copia schedina scelta e monitora esiti (pallini verde/rosso/grigio).
 
 ### Segnali da tenere d’occhio
 
@@ -252,7 +266,7 @@ Profili e regole settlement: [GUIDA_UTENTE.md — Consiglio schedine](GUIDA_UTEN
 ### Limiti noti
 
 - Profitto/ROI schedine = **simulazione** storica, non registro live.  
-- Rigenerazione sovrascrive schedine del giorno per quel modello.  
+- Le giornate chiuse restano append-only; le nuove famiglie compaiono solo nelle giornate ancora generabili.
 - Una pick persa invalida l’intera schedina.  
 - In generazione/rigenerazione il pool esclude partite già **annullate / rinviate / abbandonate / esito mancante / in corso** (status noto al momento dell’update).
 
