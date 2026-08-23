@@ -104,4 +104,47 @@ describe("CalibrationPage", () => {
     await user.click(screen.getByRole("button", { name: /Avvia calibrazione/i }));
     expect(apiMocks.startCalibrationRun).toHaveBeenCalled();
   });
+
+  it("shows the production calibration for each active market", async () => {
+    const user = userEvent.setup();
+    const baseResult = calibrationRun.results[0];
+    apiMocks.getCalibrationRun.mockResolvedValue({
+      ...calibrationRun,
+      versions_requested: "first_set_winner_v2,over_under_games_v1,v4",
+      results: [
+        {
+          ...baseResult,
+          id: 32,
+          model_version: "v4",
+          model_name: "voting_ensemble"
+        },
+        {
+          ...baseResult,
+          id: 33,
+          model_version: "first_set_winner_v2",
+          model_name: "logistic_regression",
+          oos_samples_total: 123
+        },
+        {
+          ...baseResult,
+          id: 34,
+          model_version: "over_under_games_v1",
+          model_name: "random_forest",
+          oos_samples_total: 234
+        }
+      ]
+    });
+
+    renderWithProviders(<CalibrationPage />);
+    expect(await screen.findByText(/Calibrazione probabilità/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Vincitore 1° set" }));
+    expect(screen.getByLabelText("Modello")).toHaveValue("logistic_regression");
+    expect(screen.getByText("123")).toBeInTheDocument();
+    expect(screen.queryByText(/Calibrazione non disponibile/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Over/Under games" }));
+    expect(screen.getByLabelText("Modello")).toHaveValue("random_forest");
+    expect(screen.getByText("234")).toBeInTheDocument();
+  });
 });

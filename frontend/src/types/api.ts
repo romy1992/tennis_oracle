@@ -1620,7 +1620,7 @@ export type WalkForwardTriggerRequest = {
   embargo_days?: number;
   edge_threshold?: number;
   random_state?: number;
-  versions?: MLModelVersion[] | null;
+  versions?: string[] | null;
   blocking?: boolean;
 };
 

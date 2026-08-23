@@ -14,8 +14,7 @@ import type {
 import {
   DEFAULT_LIVE_MARKET,
   isArchivedMatchWinnerVersion,
-  marketFromInternalVersion,
-  marketLabel
+  marketFromInternalVersion
 } from "../utils/markets";
 
 function formatPct(value: number | null | undefined) {
@@ -92,6 +91,11 @@ function metricFromAggregate(
 
 const ACTIVE_RUN_STATUSES = new Set(["pending", "running"]);
 const RUN_POLL_INTERVAL_MS = 12_000;
+const PRODUCTION_MODEL_BY_MARKET: Record<LiveDashboardMarket, string> = {
+  match_winner: "voting_ensemble",
+  first_set_winner: "logistic_regression",
+  over_under_games: "random_forest"
+};
 
 function syncListItemProgress(
   item: CalibrationRunListItem,
@@ -230,7 +234,9 @@ export function CalibrationPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [selectedMarket, setSelectedMarket] = useState<LiveDashboardMarket>(DEFAULT_LIVE_MARKET);
   const [includeArchived, setIncludeArchived] = useState(false);
-  const [modelFilter, setModelFilter] = useState<string>("all");
+  const [modelFilter, setModelFilter] = useState<string>(
+    PRODUCTION_MODEL_BY_MARKET[DEFAULT_LIVE_MARKET]
+  );
   const [methodView, setMethodView] = useState<"raw" | "platt" | "isotonic">("raw");
 
   useEffect(() => {
@@ -394,10 +400,9 @@ export function CalibrationPage() {
         <div>
           <h2>Calibrazione probabilità</h2>
           <p className="muted">
-            Analisi su probabilità OOS del walk-forward per il mercato{" "}
-            <strong>Vincitore partita</strong> (modello live di default). Non attiva
-            automaticamente la calibrazione sul modello pubblico e non include 1° set /
-            Over-Under.
+            Analisi OOS separata per Vincitore partita, Vincitore 1° set e Over/Under.
+            Il filtro apre il rispettivo modello di produzione; Platt e isotonic restano
+            diagnostici e non vengono attivati automaticamente sulle previsioni live.
           </p>
         </div>
         <div className="actions inline">
@@ -435,16 +440,12 @@ export function CalibrationPage() {
         <>
           <MarketTabs
             value={selectedMarket}
-            onChange={setSelectedMarket}
+            onChange={(market) => {
+              setSelectedMarket(market);
+              setModelFilter(PRODUCTION_MODEL_BY_MARKET[market]);
+            }}
             ariaLabel="Mercato calibrazione"
           />
-
-          {selectedMarket !== "match_winner" ? (
-            <EmptyState
-              title={`Calibrazione non disponibile per ${marketLabel(selectedMarket)}`}
-              message="Questa analisi OOS riguarda oggi solo il Vincitore partita. 1° set e Over/Under hanno pipeline dedicate."
-            />
-          ) : null}
 
           <div className="toolbar">
             <label>
@@ -498,7 +499,10 @@ export function CalibrationPage() {
             <>
               <div className="metric-grid">
                 <MetricCard label="Stato" value={statusLabel(run.status)} />
-                <MetricCard label="Campioni OOS" value={String(run.summary?.oos_samples_total ?? "-")} />
+                <MetricCard
+                  label="Campioni OOS"
+                  value={String(selectedResult?.oos_samples_total ?? "-")}
+                />
                 <MetricCard
                   label="ECE grezzo"
                   value={formatNum(metricFromAggregate(selectedResult, "raw", "ece"))}
@@ -576,7 +580,7 @@ export function CalibrationPage() {
               ) : (
                 <EmptyState
                   title="Nessun risultato per i filtri"
-                  message="Prova a cambiare mercato, includere l'archivio o cambiare modello."
+                  message="La run selezionata potrebbe precedere la calibrazione multi-mercato. Prova una run più recente o cambia modello."
                 />
               )}
             </>

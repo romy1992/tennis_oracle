@@ -872,7 +872,7 @@ Hit rate delle **pick per mercato** (Match / 1° set / O/U) e esito complessivo 
 
 ### A cosa serve
 
-Validazione **temporale multi-fold** sul mercato **Vincitore partita** (default: modello live; le nuove run non includono più le versioni archiviate). Non modifica il modello in produzione e non include 1° set / Over-Under.
+Validazione **temporale multi-fold** separata per **Vincitore partita**, **Vincitore 1° set** e **Over/Under Games** (default: modelli live; le nuove run non includono più le versioni archiviate). Non modifica i modelli in produzione.
 
 ### Quando aprirla
 
@@ -891,9 +891,9 @@ Validazione **temporale multi-fold** sul mercato **Vincitore partita** (default:
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
 | Modalità Expanding / Rolling | Finestra training crescente vs fissa | Expanding = più dati nel tempo; rolling = adattamento recente |
-| Avvia walk-forward | Nuova run background (solo mercato live) | Una run attiva alla volta; barra avanzamento + **Annulla** |
+| Avvia walk-forward | Nuova run multi-mercato in background | Una run attiva alla volta; barra avanzamento + **Annulla** |
 | Selezione run (tabella) | Storico ultime 20 run | Clic riga per dettaglio; colonna Mercati (non v*) |
-| Tab mercato | Navigazione per mercato (Match / 1° set / O/U) | Solo Match ha fold; gli altri mercati mostrano empty state |
+| Tab mercato | Navigazione per mercato (Match / 1° set / O/U) | Ogni mercato mostra esclusivamente i propri fold |
 | Includi archivio | Mostra fold storici v1–v3 su run vecchie | Spento di default |
 | Filtro contender | Tabella fold filtrata per benchmark ufficiale o modello ML | Contender: `market_favorite`, `market_no_vig`, `atp_ranking`, `elo`, `logistic_regression`, `random_forest` |
 | Paginazione giorno test | Naviga i fold per giorno/finestra test | Evita confronto visivo tra periodi lontani |
@@ -937,7 +937,7 @@ Validazione **temporale multi-fold** sul mercato **Vincitore partita** (default:
 
 ### A cosa serve
 
-Verifica se le **probabilità** del modello **Vincitore partita** (live di default) corrispondono alle frequenze reali (reliability curve), confrontando probabilità **grezza**, **Platt scaling** e **isotonic regression** su dati out-of-sample del walk-forward.
+Verifica separatamente se le **probabilità** dei modelli live di **Vincitore partita**, **Vincitore 1° set** e **Over/Under Games** corrispondono alle frequenze reali (reliability curve), confrontando probabilità **grezza**, **Platt scaling** e **isotonic regression** su dati out-of-sample del walk-forward.
 
 ### Quando aprirla
 
@@ -955,8 +955,8 @@ Verifica se le **probabilità** del modello **Vincitore partita** (live di defau
 
 | Controllo | Cosa fa | Valore consigliato / nota |
 |-----------|---------|---------------------------|
-| Avvia calibrazione | Nuova run (background, solo live match-winner) | Barra avanzamento + Annulla |
-| Tab mercato | Navigazione Match / 1° set / O/U | Solo Match ha risultati |
+| Avvia calibrazione | Nuova run multi-mercato in background | Vincitore partita, Vincitore 1° set e Over/Under restano separati; barra avanzamento + Annulla |
+| Tab mercato | Navigazione Match / 1° set / O/U | Ogni mercato mostra esclusivamente i propri risultati |
 | Includi archivio | Mostra risultati storici v1–v3 | Spento di default |
 | Run (select) | Scegli storico run | — |
 | Modello | Filtra risultati | Ensemble / LR / RF |
@@ -976,7 +976,7 @@ Verifica se le **probabilità** del modello **Vincitore partita** (live di defau
 
 ### Esempio pratico
 
-1. Completa walk-forward sul Vincitore partita (modello live).  
+1. Completa il walk-forward multi-mercato sui modelli live.
 2. Avvia calibrazione, apri run completata.  
 3. Se ECE grezzo 0.08 e Platt 0.04 → Platt aiuta; valuta deploy manuale.  
 4. Fascia 50–60% con gap +10pp → evita stake alti su quel bin.

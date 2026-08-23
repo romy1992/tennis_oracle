@@ -136,12 +136,14 @@ def main(argv: list[str] | None = None) -> int:
             methods=tuple(methods) if methods else ("raw", "platt", "isotonic"),  # type: ignore[arg-type]
             walk_forward=wf,
         )
-        result = run_calibration_validation(
-            config,
-            versions=tuple(versions) if versions else None,
-            walk_forward_run_id=request.walk_forward_run_id,
-            persist_artifacts=False,
-        )
+        with SessionLocal() as db:
+            result = run_calibration_validation(
+                config,
+                versions=tuple(versions) if versions else None,
+                db=db,
+                walk_forward_run_id=request.walk_forward_run_id,
+                persist_artifacts=False,
+            )
         path = write_calibration_report(result)
         payload = calibration_result_to_dict(result)
         payload["report_path"] = str(path)

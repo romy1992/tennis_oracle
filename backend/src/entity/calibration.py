@@ -37,7 +37,7 @@ class CalibrationRun(Base):
     wf_edge_threshold = Column(Float, nullable=False)
     wf_random_state = Column(Integer, nullable=False, default=42)
     methods_requested = Column(String(64), nullable=False, default="raw,platt,isotonic")
-    versions_requested = Column(String(64), nullable=False)
+    versions_requested = Column(String(128), nullable=False)
     origin = Column(String(32), nullable=False, default="manual")
     current_phase = Column(String(256), nullable=True)
     progress_pct = Column(Float, nullable=True)
@@ -79,7 +79,7 @@ class CalibrationResult(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     run_id = Column(Integer, ForeignKey("calibration_run.id", ondelete="CASCADE"), nullable=False, index=True)
-    model_version = Column(String(8), nullable=False, index=True)
+    model_version = Column(String(32), nullable=False, index=True)
     model_name = Column(String(64), nullable=False, index=True)
     dataset_path = Column(String(512), nullable=False, default="")
     date_min = Column(String(16), nullable=True)

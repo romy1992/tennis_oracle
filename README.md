@@ -1070,7 +1070,7 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 | `SubscriptionsDashboardPage` | Dashboard abbonamenti: KPI Free/Pro/Founder, conversione/churn, filtri utenti, timeline eventi, azioni manuali e export CSV |
 | `WeeklyBetaReportPage` | Report settimanale beta: KPI utenti/bot + tip live **match_winner** in headline e tabella `by_market` (1° set / O/U) senza mischiare ROI |
 | `WalkForwardPage` | Validazione walk-forward per mercato (default Vincitore partita live); non aggiorna modello pubblico |
-| `CalibrationPage` | Calibrazione OOS match-winner; non attiva modello pubblico |
+| `CalibrationPage` | Calibrazione OOS separata per i tre mercati attivi; non attiva modello pubblico |
 | `ProbabilityBandsPage` | Fasce probabilità/edge: live con tab mercato; OOS match-winner |
 | `SegmentRoiPage` | ROI per segmento: live con tab mercato; OOS match-winner |
 
