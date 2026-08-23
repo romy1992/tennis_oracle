@@ -34,7 +34,9 @@ class CalibrationConfigSchema(BaseModel):
     embargo_days: int | None = Field(default=None, ge=0)
     edge_threshold: float | None = Field(default=None, ge=0.0)
     random_state: int | None = None
-    versions: list[Literal["v1", "v2", "v3", "v4"]] | None = None
+    # Match-winner tags or extra-market labels. Runtime validation uses the
+    # shared active walk-forward market registry without importing ML here.
+    versions: list[str] | None = None
     walk_forward_run_id: int | None = None
 
 

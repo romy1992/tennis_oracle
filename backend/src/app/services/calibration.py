@@ -17,8 +17,6 @@ from sqlalchemy.orm import Session, selectinload
 from backend.src.app.core.config import Settings, get_settings
 from backend.src.app.db.session import SessionLocal
 from backend.src.app.ml.model_versioning import (
-    ACTIVE_MATCH_WINNER_VERSIONS,
-    MODEL_VERSIONS,
     REPORTS_DIR,
 )
 from backend.src.app.ml.training.calibration import (
@@ -104,13 +102,20 @@ def config_from_settings(
 
 
 def resolve_versions(overrides: CalibrationTriggerRequest | None = None) -> tuple[str, ...]:
-    """Default: live match-winner versions only (not archived v1–v3)."""
+    """Default: every active market; archived match-winner remains opt-in."""
+    from backend.src.app.ml.training.walk_forward_markets import (
+        ACTIVE_WALK_FORWARD_MARKET_VERSIONS,
+        ALL_WALK_FORWARD_VERSIONS,
+    )
+
     if overrides and overrides.versions:
-        unknown = [item for item in overrides.versions if item not in MODEL_VERSIONS]
+        unknown = [
+            item for item in overrides.versions if item not in ALL_WALK_FORWARD_VERSIONS
+        ]
         if unknown:
             raise ValueError(f"Versioni calibrazione sconosciute: {unknown}")
         return tuple(overrides.versions)
-    return tuple(sorted(ACTIVE_MATCH_WINNER_VERSIONS))
+    return ACTIVE_WALK_FORWARD_MARKET_VERSIONS
 
 
 def result_to_read(result: CalibrationResult) -> CalibrationResultRead:
@@ -521,6 +526,7 @@ def execute_calibration_run(run_id: int) -> CalibrationRun:
             result = run_calibration_validation(
                 config,
                 versions=versions,
+                db=db,
                 walk_forward_run_id=run.walk_forward_run_id,
                 run_id=run.id,
                 persist_artifacts=True,

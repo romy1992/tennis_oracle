@@ -48,7 +48,7 @@ Nel menu laterale trovi:
 | **Fasce probabilità** | Analisi per fasce di probabilità o edge: in Live usa i tab mercato (Match / 1° set / O/U); Walk-forward/Backtest restano sul Vincitore partita |
 | **ROI per segmento** | Prestazioni per segmento con tab mercato in sorgente Live; OOS solo match-winner |
 | **Walk-forward** | Validazione temporale multi-periodo sul **Vincitore partita** (modello live; archivio opzionale). Separata dalle metriche live |
-| **Calibrazione** | Calibrazione probabilità OOS del Vincitore partita. Non attiva automaticamente la calibrazione sulle previsioni live |
+| **Calibrazione** | Calibrazione probabilità OOS separata per Vincitore partita, Vincitore 1° set e Over/Under. Non attiva automaticamente la calibrazione sulle previsioni live |
 | **Storico pubblicazioni** | Registro immutabile dei tip pubblicati per mercato (Match / 1° set / O/U): hash, fonte, versioni; dopo l’inizio partita non si modifica, le correzioni creano una nuova versione |
 | **Statistiche live** | Performance dei tip pubblicati per mercato: hit rate, stake, profitto, ROI/yield, drawdown, serie e distribuzioni. Solo registro immutabile; non confondere con training o backtest |
 | **Report aggiornamento** | Esito dell’ultima run “Aggiorna tutto”: errori, warning, fasi e combo modello |

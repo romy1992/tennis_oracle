@@ -306,6 +306,77 @@ class CalibrationIntegrationTest(unittest.TestCase):
             self.assertEqual(raw_first.log_loss, raw_second.log_loss)
             self.assertEqual(raw_first.ece, raw_second.ece)
 
+    def test_extra_markets_use_their_walk_forward_dataset_contracts(self):
+        from backend.src.app.ml.training.walk_forward_markets import (
+            EXTRA_MARKET_SPECS,
+            WalkForwardMarketSpec,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            processed = Path(tmp) / "processed"
+            processed.mkdir()
+            base = _synthetic_dataset(n_days=200, matches_per_day=2)
+            first_set = base.assign(
+                target_first_set_winner=base["target_player_1_win"],
+            )
+            over_under = base.assign(
+                target_over_under_games=1 - base["target_player_1_win"],
+            )
+
+            def load_first_set(_db, _processed_dir):
+                return first_set.copy(), processed / "first_set.csv"
+
+            def load_over_under(_db, _processed_dir):
+                return over_under.copy(), processed / "over_under.csv"
+
+            specs = {
+                "first_set_winner_v2": WalkForwardMarketSpec(
+                    version_label="first_set_winner_v2",
+                    target_column="target_first_set_winner",
+                    feature_columns_extra=(),
+                    load_dataframe=load_first_set,
+                    evaluate_fold=lambda *args, **kwargs: [],
+                ),
+                "over_under_games_v1": WalkForwardMarketSpec(
+                    version_label="over_under_games_v1",
+                    target_column="target_over_under_games",
+                    feature_columns_extra=(),
+                    load_dataframe=load_over_under,
+                    evaluate_fold=lambda *args, **kwargs: [],
+                ),
+            }
+            wf = WalkForwardConfig(
+                mode="expanding",
+                initial_train_days=70,
+                test_days=20,
+                step_days=20,
+                min_train_rows=15,
+                min_test_rows=5,
+                random_state=42,
+            )
+            config = CalibrationConfig(
+                n_bins=5,
+                min_bin_samples=2,
+                min_calibrator_train_samples=8,
+                walk_forward=wf,
+            )
+
+            with unittest.mock.patch.dict(EXTRA_MARKET_SPECS, specs):
+                result = run_calibration_validation(
+                    config,
+                    versions=("first_set_winner_v2", "over_under_games_v1"),
+                    model_names=("logistic_regression",),
+                    processed_dir=processed,
+                    db=object(),  # type: ignore[arg-type]
+                    persist_artifacts=False,
+                )
+
+            self.assertEqual(
+                {model.model_version for model in result.models},
+                {"first_set_winner_v2", "over_under_games_v1"},
+            )
+            self.assertTrue(all(model.oos_samples_total > 0 for model in result.models))
+
 
 class CalibrationArtifactResilienceTest(unittest.TestCase):
     def test_metrics_kept_when_artifact_save_raises_read_only(self):
@@ -364,12 +435,17 @@ class CalibrationArtifactResilienceTest(unittest.TestCase):
 
 
 class ResolveVersionsDefaultTests(unittest.TestCase):
-    def test_service_default_is_active_match_winner_only(self) -> None:
-        from backend.src.app.ml.model_versioning import ACTIVE_MATCH_WINNER_VERSIONS
+    def test_service_default_is_every_active_market(self) -> None:
+        from backend.src.app.ml.training.walk_forward_markets import (
+            ACTIVE_WALK_FORWARD_MARKET_VERSIONS,
+        )
         from backend.src.app.services.calibration import resolve_versions
 
-        self.assertEqual(resolve_versions(None), tuple(sorted(ACTIVE_MATCH_WINNER_VERSIONS)))
-        self.assertEqual(resolve_versions(None), ("v4",))
+        self.assertEqual(resolve_versions(None), ACTIVE_WALK_FORWARD_MARKET_VERSIONS)
+        self.assertEqual(
+            set(resolve_versions(None)),
+            {"v4", "first_set_winner_v2", "over_under_games_v1"},
+        )
 
 
 if __name__ == "__main__":
