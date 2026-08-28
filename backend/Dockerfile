@@ -64,9 +64,9 @@ WORKDIR /app
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8000/health || exit 1
-
 # Default: API. Override for migrate / bot / jobs (see docker-compose).
 # Alembic runs with working_dir=/app/backend; bot/jobs use PYTHONPATH=/app.
-CMD ["uvicorn", "backend.src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Railway injects PORT; local Docker/Compose keeps the 8000 fallback.
+# Health checks are configured per service so the same image can also run the
+# non-HTTP Telegram bot without inheriting an API-only image health check.
+CMD ["sh", "-c", "exec uvicorn backend.src.app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
