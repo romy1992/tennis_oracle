@@ -17,6 +17,7 @@
 /backend/.venv/
 /backend/venv/
 /backend/src/back_up_db/
+/.codex-remote-attachments
 
 # Frontend
 frontend/node_modules/
