@@ -6,9 +6,11 @@ from unittest.mock import patch
 from backend.src.app.main import app
 from backend.src.app.services.global_update import (
     _execute_global_update,
+    get_models_versions_results,
     start_global_update,
 )
 from backend.src.entity.global_update_run import GlobalUpdateRun, GlobalUpdateRunItem
+from backend.src.entity.public_model_registry import PublicModelRegistryEntry
 from backend.tests.db_helpers import create_session_factory, create_test_engine, make_api_client
 from backend.tests.auth_helpers import (
     auth_header_for_admin,
@@ -296,6 +298,38 @@ class GlobalUpdateServiceTest(unittest.TestCase):
         payload = response.json()
         self.assertIn("versions", payload)
         self.assertEqual(payload["date"], date.today().isoformat())
+
+    @patch("backend.src.app.services.global_update.list_enabled_combinations")
+    def test_models_versions_results_includes_active_registry_without_artifact(
+        self, mock_combinations
+    ):
+        mock_combinations.return_value = []
+        now = datetime.now()
+        with self.Session() as session:
+            session.add(
+                PublicModelRegistryEntry(
+                    model_version="v4",
+                    model_name="voting_ensemble",
+                    status="active",
+                    activated_at=now,
+                    approval_metrics_json="{}",
+                    artifacts_json="{}",
+                    motivation="test active model",
+                    created_at=now,
+                    created_by="test",
+                    updated_at=now,
+                )
+            )
+            session.commit()
+
+            payload = get_models_versions_results(session)
+
+        self.assertEqual(len(payload["versions"]), 1)
+        self.assertEqual(payload["versions"][0]["version"], "v4")
+        self.assertEqual(
+            [model["model"] for model in payload["versions"][0]["models"]],
+            ["voting_ensemble"],
+        )
 
 
 if __name__ == "__main__":

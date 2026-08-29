@@ -305,4 +305,25 @@ describe("BettingSlipsPage", () => {
     expect(await screen.findByText("Schedine non disponibili")).toBeInTheDocument();
     expect(screen.getByText("schedine offline")).toBeInTheDocument();
   });
+
+  it("shows an error instead of loading forever when the model catalog is empty", async () => {
+    apiMocks.getModelsVersionsResults.mockResolvedValue({
+      date: "2026-07-21",
+      last_updated_at: null,
+      last_run_id: null,
+      last_run_origin: null,
+      versions: []
+    });
+
+    renderWithProviders(<BettingSlipsPage />);
+
+    expect(await screen.findByText("Schedine non disponibili")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Nessun modello disponibile nel catalogo. Verifica il modello pubblico attivo."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Caricamento schedine...")).not.toBeInTheDocument();
+    expect(apiMocks.getBettingSlipCalendar).not.toHaveBeenCalled();
+  });
 });
