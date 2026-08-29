@@ -52,6 +52,15 @@ backups
 **/*.pkl
 **/*.joblib
 
+# Audited production-serving artifacts. Keep every other trained model ignored.
+!backend/data/models/
+!backend/data/models/v4/
+!backend/data/models/v4/voting_ensemble.pkl
+!backend/data/models/first_set_winner_v2/
+!backend/data/models/first_set_winner_v2/logistic_regression.pkl
+!backend/data/models/over_under_games_v1/
+!backend/data/models/over_under_games_v1/random_forest.pkl
+
 # Logs
 **/logs
 **/*.log

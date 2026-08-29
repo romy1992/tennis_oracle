@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # Multi-stage backend image for tennis_oracle (API, Alembic, bot, jobs).
 # Build context: repository root.
-# Does NOT bake datasets, trained models, logs, or secrets — mount models if needed.
+# Bakes only the audited production-serving model artifacts listed below.
+# Datasets, historical/experimental models, logs, and secrets remain excluded.
 
 ARG PYTHON_VERSION=3.12
 
@@ -54,7 +55,14 @@ COPY backend/src backend/src
 COPY backend/scripts backend/scripts
 COPY backend/properties/config.env.example backend/properties/config.env.example
 
-# Empty dirs for optional bind-mounts (models, reports); never bake artifacts
+# Railway does not mount the local models directory. Keep this allowlist
+# intentionally narrow: these are the three artifacts used by the active
+# Match Winner, First Set Winner, and Over/Under serving pipelines.
+COPY backend/data/models/v4/voting_ensemble.pkl backend/data/models/v4/voting_ensemble.pkl
+COPY backend/data/models/first_set_winner_v2/logistic_regression.pkl backend/data/models/first_set_winner_v2/logistic_regression.pkl
+COPY backend/data/models/over_under_games_v1/random_forest.pkl backend/data/models/over_under_games_v1/random_forest.pkl
+
+# Empty dirs for optional bind-mounts and generated runtime data.
 RUN mkdir -p backend/data/models backend/data/processed backend/data/reports backend/logs \
     && chown -R app:app /app
 
