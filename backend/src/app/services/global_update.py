@@ -60,6 +60,7 @@ from backend.src.app.services.pipeline_lock import (
     release_pipeline_lock,
 )
 from backend.src.app.services.predictions import list_next_fixtures
+from backend.src.app.services.public_model_registry import resolve_public_model_from_registry
 from backend.src.entity.global_update_run import GlobalUpdateRun, GlobalUpdateRunItem
 from backend.src.service.import_fixtures import run_daily_fixture_import
 from backend.src.service.import_next_fixtures import run_daily_next_fixture_import
@@ -1510,6 +1511,30 @@ def get_models_versions_results(db: Session, *, target_date: date | None = None)
     latest_run = get_latest_run(db)
 
     combinations = list_enabled_combinations()
+
+    # Reading persisted predictions/slips must keep working in deployments where
+    # model artifacts are mounted or provisioned outside the API image.  The
+    # artifact-based list above intentionally remains the source of truth for
+    # running a new global update, while the catalog also exposes the official
+    # active registry combination so read-only pages can load existing data.
+    registry_combination = resolve_public_model_from_registry(db)
+    if registry_combination is not None:
+        registry_version, registry_model = registry_combination
+        registry_key = (registry_version, registry_model)
+        existing_keys = {
+            (combo.model_version, combo.model_name) for combo in combinations
+        }
+        if (
+            registry_version in MODEL_VERSIONS
+            and registry_model in MODEL_NAMES
+            and registry_key not in existing_keys
+        ):
+            combinations.append(
+                ModelCombination(
+                    model_version=registry_version,  # type: ignore[arg-type]
+                    model_name=registry_model,
+                )
+            )
     version_map: dict[str, list[dict[str, Any]]] = {}
 
     for combo in combinations:

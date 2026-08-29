@@ -684,10 +684,23 @@ export function BettingSlipsPage() {
 
   useEffect(() => {
     async function loadCatalog() {
-      const catalog = await apiClient.getModelsVersionsResults();
-      setAvailableVersions(catalog.versions);
-      if (catalog.versions.length > 0) {
-        setActiveVersion(resolvePreferredModelVersion(catalog.versions));
+      try {
+        const catalog = await apiClient.getModelsVersionsResults();
+        setAvailableVersions(catalog.versions);
+        if (catalog.versions.length === 0) {
+          setError(
+            "Nessun modello disponibile nel catalogo. Verifica il modello pubblico attivo."
+          );
+          setLoading(false);
+          return;
+        }
+        setError(null);
+        if (catalog.versions.length > 0) {
+          setActiveVersion(resolvePreferredModelVersion(catalog.versions));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Catalogo modelli non disponibile.");
+        setLoading(false);
       }
     }
     void loadCatalog();
@@ -819,7 +832,11 @@ export function BettingSlipsPage() {
   }, [loadDayData, selectedCalendarDay?.is_today, selectedDate]);
 
   useEffect(() => {
-    if (!lastCompletedAt || lastCompletedAt === lastReloadToken) {
+    if (
+      !activeModels.length ||
+      !lastCompletedAt ||
+      lastCompletedAt === lastReloadToken
+    ) {
       return;
     }
     setLastReloadToken(lastCompletedAt);
@@ -834,7 +851,14 @@ export function BettingSlipsPage() {
           : "Schedine aggiornate dall'ultima run globale."
       );
     });
-  }, [lastCompletedAt, lastReloadToken, loadDayData, selectedDate, selectedCalendarDay?.is_past]);
+  }, [
+    activeModels.length,
+    lastCompletedAt,
+    lastReloadToken,
+    loadDayData,
+    selectedDate,
+    selectedCalendarDay?.is_past
+  ]);
 
   async function handleRegenerate() {
     if (selectedCalendarDay?.is_past) {
