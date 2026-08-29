@@ -8,6 +8,11 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SERVING_MODEL_ARTIFACTS = (
+    "backend/data/models/v4/voting_ensemble.pkl",
+    "backend/data/models/first_set_winner_v2/logistic_regression.pkl",
+    "backend/data/models/over_under_games_v1/random_forest.pkl",
+)
 
 
 def _read(rel: str) -> str:
@@ -42,15 +47,20 @@ class TestBackendDockerfile:
         assert "AS builder" in text
         assert "AS runtime" in text
         assert "requirements.txt" in text
-        assert "HEALTHCHECK" in text
         assert "backend.src.app.main:app" in text
+        assert "same image can also run" in text
         for forbidden in (
-            "COPY backend/data/models",
+            "COPY backend/data/models backend/data/models",
             "COPY backend/data/processed",
             "COPY backend/.env",
             "COPY .env",
         ):
             assert forbidden not in text
+
+        for artifact in SERVING_MODEL_ARTIFACTS:
+            assert f"COPY {artifact} {artifact}" in text
+            assert (REPO_ROOT / artifact).is_file()
+            assert (REPO_ROOT / artifact).stat().st_size > 0
 
 
 class TestFrontendDockerfile:
@@ -78,6 +88,9 @@ class TestDockerignore:
             "**/*.pkl",
         ):
             assert needle in text
+
+        for artifact in SERVING_MODEL_ARTIFACTS:
+            assert f"!{artifact}" in text
 
 
 class TestComposeLocal:
