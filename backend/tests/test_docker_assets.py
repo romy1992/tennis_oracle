@@ -13,6 +13,9 @@ SERVING_MODEL_ARTIFACTS = (
     "backend/data/models/first_set_winner_v2/logistic_regression.pkl",
     "backend/data/models/over_under_games_v1/random_forest.pkl",
 )
+WALK_FORWARD_DATASET = (
+    "backend/data/processed/tennis_winner_dataset_with_odds_v3.csv.gz"
+)
 
 
 def _read(rel: str) -> str:
@@ -51,7 +54,7 @@ class TestBackendDockerfile:
         assert "same image can also run" in text
         for forbidden in (
             "COPY backend/data/models backend/data/models",
-            "COPY backend/data/processed",
+            "COPY backend/data/processed backend/data/processed",
             "COPY backend/.env",
             "COPY .env",
         ):
@@ -61,6 +64,10 @@ class TestBackendDockerfile:
             assert f"COPY {artifact} {artifact}" in text
             assert (REPO_ROOT / artifact).is_file()
             assert (REPO_ROOT / artifact).stat().st_size > 0
+
+        assert f"COPY {WALK_FORWARD_DATASET} {WALK_FORWARD_DATASET}" in text
+        assert (REPO_ROOT / WALK_FORWARD_DATASET).is_file()
+        assert (REPO_ROOT / WALK_FORWARD_DATASET).stat().st_size > 0
 
 
 class TestFrontendDockerfile:
@@ -91,6 +98,7 @@ class TestDockerignore:
 
         for artifact in SERVING_MODEL_ARTIFACTS:
             assert f"!{artifact}" in text
+        assert f"!{WALK_FORWARD_DATASET}" in text
 
 
 class TestComposeLocal:

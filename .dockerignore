@@ -61,6 +61,10 @@ backups
 !backend/data/models/over_under_games_v1/
 !backend/data/models/over_under_games_v1/random_forest.pkl
 
+# Single compressed dataset required by the active Dev walk-forward markets.
+!backend/data/processed/
+!backend/data/processed/tennis_winner_dataset_with_odds_v3.csv.gz
+
 # Logs
 **/logs
 **/*.log

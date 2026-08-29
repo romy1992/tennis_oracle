@@ -140,10 +140,18 @@ def calibrator_artifact_path(
 
 def dataset_candidates(version: ModelVersion) -> list[str]:
     paths = DATASET_VERSIONS[version]
-    return [
+    filenames = [
         paths.with_odds_dataset,
         paths.atp_enriched_dataset,
         paths.base_dataset,
+    ]
+    # Prefer the ordinary CSV during local development, while also accepting
+    # its gzip-compressed equivalent in lean cloud images. pandas.read_csv
+    # infers gzip compression from the suffix transparently.
+    return [
+        candidate
+        for filename in filenames
+        for candidate in (filename, f"{filename}.gz")
     ]
 
 
