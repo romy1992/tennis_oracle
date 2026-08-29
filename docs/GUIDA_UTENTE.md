@@ -150,9 +150,9 @@ Dentro i gruppi lunghi ci sono varianti (sicura / bilanciata / value). Se i cand
 
 Questi profili restano disponibili nel sotto-tab **Generiche**. Gli altri sotto-tab non li sostituiscono e vengono valutati in parallelo:
 
-- **Solo PLAY** — solo pick PLAY, una partita per pick
-- **Mercati forti** — nella versione `strong_markets_v1`, solo PLAY sul vincitore del 1° set
-- **Selettive** — meno pick e tetto alla quota combinata per ridurre la fragilità della multipla
+- **Solo PLAY** — solo pronostici PLAY (valore più alto secondo il modello), una partita per pick
+- **Mercati forti** — nella versione `strong_markets_v1`, solo PLAY sul vincitore del 1° set (mercato più affidabile)
+- **Selettive** — poche scelte prudenti e tetto alla quota combinata; se non bastano le condizioni, può non uscire nulla
 
 Le tre famiglie sperimentali sono attive quando il selettore **Match Winner** è `v4 / voting_ensemble`. Questa coppia identifica soltanto il modello Match Winner, non l'intero pool: il Primo set usa `first_set_winner_v2 / logistic_regression` e l'Over/Under usa `over_under_games_v1 / random_forest`. Le famiglie sono persistite e chiuse con lo stesso motore di Generiche, quindi entrano nello storico e nelle statistiche. La classifica per famiglia include un ROI giornaliero normalizzato: una sola unità di budget per famiglia/giorno, divisa tra le uscite chiuse. La giornata viene conteggiata solo quando quella famiglia non ha più schedine in corso. È la metrica da usare per il confronto equo quando una famiglia produce più schedine di un'altra.
 
@@ -283,7 +283,7 @@ Con `/feedback` puoi segnalare un problema o un suggerimento: scegli una categor
 
 Se invii troppi comandi in poco tempo, il bot ti chiede di attendere qualche secondo (protezione anti-abuso). Lo stesso tipo di limite vale anche per le API del server.
 
-Con `/schedine` ricevi le schedine multi-leg **Generiche** della pagina **Consiglio schedina** (fino a 10, con Play · Doppia in cima e mercati misti Match / 1° set / O/U). Con `/scalate` ricevi le scalate progressive Generiche (reinvestimento step per step in ordine di orario), come nel tab **Scalate** della dashboard. Le famiglie Solo PLAY, Mercati forti e Selettive restano visibili e misurate sul web ma non vengono inviate dal bot finché sono sperimentali. Se i due motori del giorno producono contenuti diversi, il bot li mostra entrambi etichettati con l’accuratezza storica (senza nomi tecnici); se sono uguali ne manda una sola. Il primo messaggio indica data, legenda esiti (verde = Presa, rosso = Persa, grigio = In corso, grigio scuro = Annullata) e i tre mercati. Nelle immagini: **Mercato** e **Predizione** colorati come sul web (Match grigio, 1° set viola, O/U blu); sulle scalate compare anche la **puntata dello step**.
+`/schedine` e `/scalate` aprono quattro sotto-scelte con pulsanti: **Generiche**, **Solo PLAY**, **Mercati forti** e **Selettive**. Sono disponibili anche i sottocomandi testuali `/schedine generiche|play|forti|selettive` e `/scalate generiche|play|forti|selettive`. **Generiche** sono le schedine “di sempre” (vari profili: sicure, bilanciate, value). **Solo PLAY** tiene solo i pronostici PLAY, cioè quelli con il valore più alto secondo il modello, su partite diverse e tutti i mercati. **Mercati forti** guarda solo il vincitore del primo set (ancora sperimentale). **Selettive** propone poche scelte prudenti a quote contenute e, se non ci sono condizioni buone, può non produrre nulla. Ogni risposta ripete nome e significato della famiglia scelta. Tutte le uscite provengono dagli stessi record persistiti e seguono quindi lo stesso flusso di esiti e statistiche della dashboard. Il primo messaggio indica inoltre data, legenda esiti (verde = Presa, rosso = Persa, grigio = In corso, grigio scuro = Annullata) e i tre mercati. Nelle immagini: **Mercato** e **Predizione** sono colorati come sul web (Match grigio, 1° set viola, O/U blu); sulle scalate compare anche la **puntata dello step**.
 
 Con `/partite` ricevi le partite di oggi con **una riga per mercato** (Match, 1° set, O/U Games quando pubblicati): Superficie (in italiano: Cemento/Terra/Erba/Sintetico), Mercato, Predizione, Percentuale di riuscita, Quota, Stato. Anche qui, se i motori danno pronostici diversi li vedi entrambi con etichetta accuratezza; l’intro include data, legende e ultimo aggiornamento.
 

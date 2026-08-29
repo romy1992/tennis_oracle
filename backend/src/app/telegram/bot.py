@@ -71,6 +71,7 @@ from .dates import parse_date_or_offset, prediction_window, today_rome
 from .images import render_betting_slip_png, render_bot_stats_png, render_fixtures_png
 from .messages import (
     BETA_TERMS_TEXT,
+    BETTING_SLIP_STRATEGY_FAMILIES,
     FEEDBACK_ASK_MESSAGE_TEXT,
     FEEDBACK_ASK_RATING_TEXT,
     FEEDBACK_CANCELLED_TEXT,
@@ -87,6 +88,7 @@ from .messages import (
     append_message_footer,
     build_welcome_text,
     format_betting_slip_photo_caption,
+    format_betting_slip_strategy_menu,
     format_betting_slip_text,
     format_betting_slips,
     format_betting_slips_intro,
@@ -107,6 +109,7 @@ from .messages import (
     format_predictions_summary,
     format_subscription_overview,
     format_user_error,
+    normalize_betting_slip_strategy_family,
     split_message,
 )
 from .fixture_value import enrich_fixtures_with_value, expand_fixtures_by_market
@@ -126,6 +129,10 @@ MENU_SCHEDINE = "menu:schedine"
 MENU_SCALATE = "menu:scalate"
 MENU_STATISTICHE = "menu:statistiche"
 MENU_HELP = "menu:help"
+SLIP_STRATEGY_CB_PREFIX = "slips:"
+SLIP_STRATEGY_CALLBACK_PATTERN = (
+    r"^slips:(parlay|ladder):(generic|play_only|strong_markets|selective)$"
+)
 
 # ConversationHandler states for /feedback (in-memory only; nothing persisted until submit).
 FEEDBACK_CATEGORY, FEEDBACK_RATING, FEEDBACK_MESSAGE = range(3)
@@ -170,6 +177,21 @@ def main_menu_keyboard(*, flags: dict[str, bool] | None = None) -> InlineKeyboar
     return InlineKeyboardMarkup(rows)
 
 
+def betting_slip_strategy_keyboard(*, slip_kind: str) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    families = list(BETTING_SLIP_STRATEGY_FAMILIES.items())
+    for index in range(0, len(families), 2):
+        row = [
+            InlineKeyboardButton(
+                label,
+                callback_data=f"{SLIP_STRATEGY_CB_PREFIX}{slip_kind}:{family}",
+            )
+            for family, (label, _description) in families[index : index + 2]
+        ]
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+
 def _public_bot_commands(*, flags: dict[str, bool]) -> list[BotCommand]:
     commands = [
         BotCommand("start", "avvia il bot"),
@@ -179,8 +201,8 @@ def _public_bot_commands(*, flags: dict[str, bool]) -> list[BotCommand]:
     if _flag_enabled(flags, FEATURE_TELEGRAM_FIXTURES):
         commands.append(BotCommand("partite", "partite di oggi"))
     if _flag_enabled(flags, FEATURE_TELEGRAM_SLIPS):
-        commands.append(BotCommand("schedine", "schedine di oggi"))
-        commands.append(BotCommand("scalate", "scalate di oggi"))
+        commands.append(BotCommand("schedine", "scegli famiglia schedine"))
+        commands.append(BotCommand("scalate", "scegli famiglia scalate"))
     if _flag_enabled(flags, FEATURE_TELEGRAM_STATISTICS):
         commands.append(BotCommand("statistiche", "andamento"))
     if _flag_enabled(flags, FEATURE_TELEGRAM_NOTIFICATIONS):
@@ -979,14 +1001,62 @@ async def ten_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 @tracked(action="/schedine", event_type="command")
 @require_command_access(command_key=COMMAND_SCHEDINE)
 async def schedine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _run_with_loading(update, LOADING_SCHEDINE, _schedine_body, context)
+    strategy_family, invalid_choice = _requested_betting_slip_strategy(
+        update,
+        context,
+        slip_kind="parlay",
+    )
+    if strategy_family is None:
+        await _reply(
+            update,
+            format_betting_slip_strategy_menu(
+                slip_kind="parlay",
+                invalid_choice=invalid_choice,
+            ),
+            reply_markup=betting_slip_strategy_keyboard(slip_kind="parlay"),
+        )
+        return
+    await _run_with_loading(
+        update,
+        LOADING_SCHEDINE,
+        lambda current_update, current_context: _schedine_body(
+            current_update,
+            current_context,
+            strategy_family=strategy_family,
+        ),
+        context,
+    )
 
 
 @rate_limited(expensive=True)
 @tracked(action="/scalate", event_type="command")
 @require_command_access(command_key=COMMAND_SCALATE)
 async def scalate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _run_with_loading(update, LOADING_SCALATE, _scalate_body, context)
+    strategy_family, invalid_choice = _requested_betting_slip_strategy(
+        update,
+        context,
+        slip_kind="ladder",
+    )
+    if strategy_family is None:
+        await _reply(
+            update,
+            format_betting_slip_strategy_menu(
+                slip_kind="ladder",
+                invalid_choice=invalid_choice,
+            ),
+            reply_markup=betting_slip_strategy_keyboard(slip_kind="ladder"),
+        )
+        return
+    await _run_with_loading(
+        update,
+        LOADING_SCALATE,
+        lambda current_update, current_context: _scalate_body(
+            current_update,
+            current_context,
+            strategy_family=strategy_family,
+        ),
+        context,
+    )
 
 
 @rate_limited(expensive=True)
@@ -1003,7 +1073,36 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _run_with_loading(update, LOADING_STATISTICHE, _statistiche_body, context)
 
 
-async def _schedine_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def _requested_betting_slip_strategy(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    slip_kind: str,
+) -> tuple[str | None, str | None]:
+    query = update.callback_query
+    if query is not None:
+        data = query.data or ""
+        expected_prefix = f"{SLIP_STRATEGY_CB_PREFIX}{slip_kind}:"
+        if data.startswith(expected_prefix):
+            raw = data.removeprefix(expected_prefix)
+            resolved = normalize_betting_slip_strategy_family(raw)
+            return resolved, None if resolved else raw
+        # The top-level Schedine/Scalate menu button opens the selector.
+        return None, None
+
+    raw = " ".join(context.args or []).strip()
+    if not raw:
+        return None, None
+    resolved = normalize_betting_slip_strategy_family(raw)
+    return resolved, None if resolved else raw
+
+
+async def _schedine_body(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    strategy_family: str,
+) -> None:
     target_date = today_rome()
     settings = _settings(context)
     api = _api(context)
@@ -1037,10 +1136,16 @@ async def _schedine_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         last_updated=last_updated,
         feedback_url=settings.telegram_feedback_url,
         slip_kind="parlay",
+        strategy_family=strategy_family,
     )
 
 
-async def _scalate_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _scalate_body(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    strategy_family: str,
+) -> None:
     target_date = today_rome()
     settings = _settings(context)
     api = _api(context)
@@ -1074,6 +1179,7 @@ async def _scalate_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         last_updated=last_updated,
         feedback_url=settings.telegram_feedback_url,
         slip_kind="ladder",
+        strategy_family=strategy_family,
     )
 
 
@@ -1277,6 +1383,7 @@ async def _reply_betting_slips(
     last_updated: Any = None,
     feedback_url: str | None = None,
     slip_kind: str = "parlay",
+    strategy_family: str = "generic",
 ) -> None:
     message = _effective_message(update)
     if message is None:
@@ -1285,7 +1392,14 @@ async def _reply_betting_slips(
     if isinstance(payloads, dict):
         payloads = [payloads]
 
-    payloads = [filter_slips_by_kind(payload, slip_kind=slip_kind) for payload in payloads]
+    payloads = [
+        filter_slips_by_kind(
+            payload,
+            slip_kind=slip_kind,
+            strategy_family=strategy_family,
+        )
+        for payload in payloads
+    ]
     non_empty = [payload for payload in payloads if payload.get("slips")]
     if not non_empty:
         empty_payload = payloads[0] if payloads else {"date": slip_date, "slips": []}
@@ -1297,6 +1411,7 @@ async def _reply_betting_slips(
                 last_updated=last_updated,
                 feedback_url=feedback_url,
                 slip_kind=slip_kind,
+                strategy_family=strategy_family,
             ),
         )
         return
@@ -1315,6 +1430,7 @@ async def _reply_betting_slips(
             last_updated=last_updated,
             feedback_url=feedback_url,
             slip_kind=slip_kind,
+            strategy_family=strategy_family,
         ),
     )
 
@@ -1579,6 +1695,22 @@ def build_application(settings: TelegramSettings | None = None) -> Application:
     )
     application.add_handler(
         CallbackQueryHandler(
+            _with_callback_answer(schedine),
+            pattern=SLIP_STRATEGY_CALLBACK_PATTERN.replace(
+                "(parlay|ladder)", "parlay"
+            ),
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            _with_callback_answer(scalate),
+            pattern=SLIP_STRATEGY_CALLBACK_PATTERN.replace(
+                "(parlay|ladder)", "ladder"
+            ),
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
             _with_callback_answer(statistiche), pattern=rf"^{MENU_STATISTICHE}$"
         )
     )
@@ -1600,6 +1732,11 @@ def build_application(settings: TelegramSettings | None = None) -> Application:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    # python-telegram-bot uses httpx; its INFO request log contains the full
+    # Telegram Bot API URL, whose path embeds the bot token. Keep transport
+    # details out of application/container logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     application = build_application()
     logger.info("Telegram bot avviato in polling.")
     application.run_polling()
