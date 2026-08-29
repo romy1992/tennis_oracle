@@ -35,6 +35,87 @@ LOADING_SCHEDINE = "Caricamento schedine in corso…"
 LOADING_SCALATE = "Caricamento scalate in corso…"
 LOADING_STATISTICHE = "Caricamento statistiche in corso…"
 
+BETTING_SLIP_STRATEGY_FAMILIES: dict[str, tuple[str, str]] = {
+    "generic": (
+        "Generiche",
+        "Le schedine “di sempre”: vari profili (sicure, bilanciate, value) con mix di "
+        "pronostici più o meno selettivi.",
+    ),
+    "play_only": (
+        "Solo PLAY",
+        "Solo pronostici PLAY, cioè quelli con il valore più alto secondo il modello "
+        "(quota interessante rispetto alle probabilità stimate), su partite diverse e "
+        "tutti i mercati.",
+    ),
+    "strong_markets": (
+        "Mercati forti",
+        "Solo sul vincitore del primo set, il mercato dove il modello è più affidabile; "
+        "ancora in fase sperimentale.",
+    ),
+    "selective": (
+        "Selettive",
+        "Poche scelte prudenti e con quote contenute: se le condizioni non bastano, "
+        "può non uscire nessuna schedina.",
+    ),
+}
+
+BETTING_SLIP_STRATEGY_ALIASES: dict[str, str] = {
+    "generic": "generic",
+    "generica": "generic",
+    "generiche": "generic",
+    "attuali": "generic",
+    "play": "play_only",
+    "solo_play": "play_only",
+    "play_only": "play_only",
+    "forti": "strong_markets",
+    "mercati_forti": "strong_markets",
+    "strong_markets": "strong_markets",
+    "selettiva": "selective",
+    "selettive": "selective",
+    "selective": "selective",
+}
+
+
+def normalize_betting_slip_strategy_family(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = "_".join(value.strip().lower().replace("-", "_").split())
+    return BETTING_SLIP_STRATEGY_ALIASES.get(normalized)
+
+
+def betting_slip_strategy_label(strategy_family: str) -> str:
+    return BETTING_SLIP_STRATEGY_FAMILIES.get(
+        strategy_family,
+        (strategy_family.replace("_", " ").title(), ""),
+    )[0]
+
+
+def betting_slip_strategy_description(strategy_family: str) -> str:
+    return BETTING_SLIP_STRATEGY_FAMILIES.get(strategy_family, ("", ""))[1]
+
+
+def format_betting_slip_strategy_menu(
+    *,
+    slip_kind: str,
+    invalid_choice: str | None = None,
+) -> str:
+    noun = "scalate" if slip_kind == "ladder" else "schedine"
+    command = "scalate" if slip_kind == "ladder" else "schedine"
+    lines = [f"Scegli la famiglia di {noun}:", ""]
+    if invalid_choice:
+        lines.extend([f"Scelta non riconosciuta: {invalid_choice}.", ""])
+    for family, (label, description) in BETTING_SLIP_STRATEGY_FAMILIES.items():
+        experiment = " [sperimentale]" if family != "generic" else ""
+        lines.append(f"{label}{experiment} — {description}")
+    lines.extend(
+        [
+            "",
+            f"Puoi usare i pulsanti oppure scrivere /{command} "
+            "generiche | play | forti | selettive.",
+        ]
+    )
+    return "\n".join(lines)
+
 def build_welcome_text(
     *,
     include_fixtures: bool = True,
@@ -54,8 +135,8 @@ def build_welcome_text(
     if include_fixtures:
         lines.append("/partite - partite di oggi")
     if include_slips:
-        lines.append("/schedine - schedine di oggi")
-        lines.append("/scalate - scalate progressive di oggi")
+        lines.append("/schedine - scegli famiglia delle schedine di oggi")
+        lines.append("/scalate - scegli famiglia delle scalate progressive di oggi")
     if include_statistics:
         lines.append("/statistiche - andamento")
 
@@ -101,9 +182,12 @@ def build_help_text(
     if include_fixtures:
         lines.append("/partite - partite e pronostici di oggi (con indicazione di valore)")
     if include_slips:
-        lines.append("/schedine - schedine proposte di oggi")
         lines.append(
-            "/scalate - scalate progressive (reinvestimento step per step in ordine di orario)"
+            "/schedine [generiche|play|forti|selettive] - scegli le schedine di oggi"
+        )
+        lines.append(
+            "/scalate [generiche|play|forti|selettive] - scalate progressive "
+            "(reinvestimento step per step in ordine di orario)"
         )
     if include_statistics:
         lines.append("/statistiche - andamento storico (partite e schedine)")
@@ -720,17 +804,23 @@ def format_betting_slips_empty(
     last_updated: Any = None,
     feedback_url: str | None = None,
     slip_kind: str = "parlay",
+    strategy_family: str = "generic",
 ) -> str:
     suffix = f"\n\nNote: {'; '.join(warnings)}" if warnings else ""
+    strategy_label = betting_slip_strategy_label(strategy_family)
+    strategy_description = betting_slip_strategy_description(strategy_family)
+    strategy_note = (
+        f"\nFamiglia: {strategy_label}. {strategy_description}" if strategy_label else ""
+    )
     if slip_kind == "ladder":
         body = (
-            f"Nessuna scalata disponibile per {slip_date}.{suffix}\n\n"
+            f"Nessuna scalata disponibile per {slip_date}.{strategy_note}{suffix}\n\n"
             "Servono almeno due step PLAY (o PLAY+Border) con orari distinti. "
             "Riprova dopo l'aggiornamento giornaliero."
         )
     else:
         body = (
-            f"Nessuna schedina disponibile per {slip_date}.{suffix}\n\n"
+            f"Nessuna schedina disponibile per {slip_date}.{strategy_note}{suffix}\n\n"
             "Può dipendere da margini insufficienti o da dati non ancora aggiornati. "
             "Riprova più tardi."
         )
@@ -749,18 +839,29 @@ def format_betting_slips_intro(
     last_updated: Any = None,
     feedback_url: str | None = None,
     slip_kind: str = "parlay",
+    strategy_family: str = "generic",
 ) -> str:
     del min_edge_percent  # kept for call-site compatibility; not shown in intro
     resolved_date = slip_date or (payload or {}).get("date") or "oggi"
+    strategy_label = betting_slip_strategy_label(strategy_family)
+    strategy_description = betting_slip_strategy_description(strategy_family)
+    experiment = " · sperimentale" if strategy_family != "generic" else ""
+    strategy_text = (
+        f"Famiglia: {strategy_label}{experiment}\n{strategy_description}\n\n"
+    )
     if slip_kind == "ladder":
         body = (
             f"Scalate di oggi ({resolved_date})\n\n"
+            f"{strategy_text}"
             "Ogni step è una singola: se vinci, il ritorno viene reinvestito nello step "
             "successivo (ordine di orario). Alla prima persa la catena si interrompe.\n\n"
             f"{STATUS_LEGEND}\n{MARKETS_LEGEND}"
         )
     else:
-        body = f"Schedine di oggi ({resolved_date})\n\n{STATUS_LEGEND}\n{MARKETS_LEGEND}"
+        body = (
+            f"Schedine di oggi ({resolved_date})\n\n{strategy_text}"
+            f"{STATUS_LEGEND}\n{MARKETS_LEGEND}"
+        )
     return append_message_footer(
         body,
         last_updated=last_updated,
@@ -776,18 +877,34 @@ def slip_kind_of(slip: dict[str, Any]) -> str:
     return "ladder" if key.startswith("ladder_") else "parlay"
 
 
+def slip_strategy_family_of(slip: dict[str, Any]) -> str:
+    explicit = str(slip.get("strategy_family") or "").strip()
+    if explicit:
+        return explicit
+    # Defensive legacy handling: an experimental row without strategy metadata
+    # must not leak into the Generiche view.
+    return "experimental_unknown" if bool(slip.get("is_experimental", False)) else "generic"
+
+
 def filter_slips_by_kind(
     payload: dict[str, Any],
     *,
     slip_kind: str,
     include_experimental: bool = False,
+    strategy_family: str | None = None,
 ) -> dict[str, Any]:
-    """Return one kind from the daily payload, excluding experiments by default."""
+    """Return one kind/family, preserving the legacy experiment switch."""
     slips = [
         slip
         for slip in (payload.get("slips") or [])
         if slip_kind_of(slip) == slip_kind
-        and (include_experimental or not bool(slip.get("is_experimental", False)))
+        and (
+            (
+                slip_strategy_family_of(slip) == strategy_family
+                if strategy_family is not None
+                else include_experimental or not bool(slip.get("is_experimental", False))
+            )
+        )
     ]
     filtered = dict(payload)
     filtered["slips"] = slips
@@ -926,8 +1043,13 @@ def format_betting_slips(
     last_updated: Any = None,
     feedback_url: str | None = None,
     slip_kind: str = "parlay",
+    strategy_family: str = "generic",
 ) -> str:
-    filtered = filter_slips_by_kind(payload, slip_kind=slip_kind)
+    filtered = filter_slips_by_kind(
+        payload,
+        slip_kind=slip_kind,
+        strategy_family=strategy_family,
+    )
     slips = filtered.get("slips") or []
     slip_date = filtered.get("date") or "oggi"
     if not slips:
@@ -937,6 +1059,7 @@ def format_betting_slips(
             last_updated=last_updated,
             feedback_url=feedback_url,
             slip_kind=slip_kind,
+            strategy_family=strategy_family,
         )
 
     lines = [
@@ -946,6 +1069,7 @@ def format_betting_slips(
             last_updated=last_updated,
             feedback_url=feedback_url,
             slip_kind=slip_kind,
+            strategy_family=strategy_family,
         )
     ]
     for slip in slips:

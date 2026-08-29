@@ -13,6 +13,18 @@ fixtures_repo = FixtureRepository()
 
 logging.basicConfig(level=logging.INFO)
 
+FIXTURE_COLUMNS = {column.name for column in Fixture.__table__.columns}
+
+
+def _fixture_kwargs(payload: dict) -> dict:
+    """Keep only keys that map to actual Fixture columns.
+
+    The API occasionally adds new fields (e.g. doubles player keys like
+    ``first_player_dp1_key``) that have no corresponding column, which would
+    otherwise break ``Fixture(**payload)``.
+    """
+    return {key: value for key, value in payload.items() if key in FIXTURE_COLUMNS}
+
 
 def import_all_fixtures(date_start="2000-01-01", date_stop=None, params=None):
     """
@@ -35,7 +47,7 @@ def import_all_fixtures(date_start="2000-01-01", date_stop=None, params=None):
             if response and len(response) > 0:
 
                 # Filtro le partite scaricate per evitare di inserire partite già presenti nel database e le salvo
-                fixtures = [Fixture(**fixture) for fixture in response
+                fixtures = [Fixture(**_fixture_kwargs(fixture)) for fixture in response
                             if fixture.get("event_key") not in search_fixture_key]
 
                 if len(fixtures) > 0:
@@ -130,7 +142,7 @@ def import_fixtures_by_params(params):
                 fixture for fixture in response if fixture.get("event_key") in search_fixture_key
             ]
             # Filtro le partite scaricate per evitare di inserire partite già presenti nel database e le salvo
-            fixtures = [Fixture(**fixture) for fixture in response
+            fixtures = [Fixture(**_fixture_kwargs(fixture)) for fixture in response
                         if fixture.get("event_key") not in search_fixture_key]
             fixture_updates = []
             for fixture in existing_payloads:

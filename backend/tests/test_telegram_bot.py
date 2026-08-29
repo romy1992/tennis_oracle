@@ -1,7 +1,15 @@
 import unittest
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
-from backend.src.app.telegram.bot import MENU_HELP, MENU_PARTITE, MENU_SCALATE, main_menu_keyboard
+from backend.src.app.telegram.bot import (
+    MENU_HELP,
+    MENU_PARTITE,
+    MENU_SCALATE,
+    _requested_betting_slip_strategy,
+    betting_slip_strategy_keyboard,
+    main_menu_keyboard,
+)
 from backend.src.app.telegram.dates import parse_date_or_offset
 from backend.src.app.telegram.fixture_value import enrich_fixture_value, expand_fixtures_by_market
 from backend.src.app.telegram.images import _score_snapshot_label
@@ -10,6 +18,7 @@ from backend.src.app.telegram.messages import (
     account_status_label,
     append_message_footer,
     filter_slips_by_kind,
+    format_betting_slip_strategy_menu,
     format_betting_slips,
     format_betting_slip_photo_caption,
     format_betting_slip_text,
@@ -26,6 +35,7 @@ from backend.src.app.telegram.messages import (
     format_subscription_overview,
     format_user_error,
     format_welcome_text,
+    normalize_betting_slip_strategy_family,
     predicted_winner_name,
     slip_kind_of,
     split_message,
@@ -595,6 +605,7 @@ class TelegramBotUxTest(unittest.TestCase):
                     "slip_key": "experiment_play_only_3",
                     "slip_kind": "parlay",
                     "is_experimental": True,
+                    "strategy_family": "play_only",
                     "label": "Solo PLAY",
                     "picks": [],
                 },
@@ -602,6 +613,7 @@ class TelegramBotUxTest(unittest.TestCase):
                     "slip_key": "ladder_experiment_play_only_3",
                     "slip_kind": "ladder",
                     "is_experimental": True,
+                    "strategy_family": "play_only",
                     "label": "Scalata · Solo PLAY",
                     "picks": [],
                 },
@@ -618,12 +630,84 @@ class TelegramBotUxTest(unittest.TestCase):
             [s["slip_key"] for s in all_parlays["slips"]],
             ["play_safe", "experiment_play_only_3"],
         )
+        play_only = filter_slips_by_kind(
+            payload,
+            slip_kind="parlay",
+            strategy_family="play_only",
+        )
+        self.assertEqual(
+            [s["slip_key"] for s in play_only["slips"]],
+            ["experiment_play_only_3"],
+        )
         self.assertEqual(slip_kind_of(ladders["slips"][0]), "ladder")
         intro = format_betting_slips_intro(slip_date="2026-06-28", slip_kind="ladder")
         self.assertIn("Scalate di oggi", intro)
         self.assertIn("reinvestito", intro)
         caption = format_betting_slip_photo_caption(ladders["slips"][0])
         self.assertIn("step", caption)
+
+    def test_strategy_subcommands_and_keyboard_explain_all_families(self):
+        self.assertEqual(normalize_betting_slip_strategy_family("generiche"), "generic")
+        self.assertEqual(normalize_betting_slip_strategy_family("solo play"), "play_only")
+        self.assertEqual(normalize_betting_slip_strategy_family("forti"), "strong_markets")
+        self.assertEqual(normalize_betting_slip_strategy_family("selettive"), "selective")
+        self.assertIsNone(normalize_betting_slip_strategy_family("sconosciuta"))
+
+        text = format_betting_slip_strategy_menu(slip_kind="parlay")
+        self.assertIn("Generiche", text)
+        self.assertIn("Solo PLAY", text)
+        self.assertIn("Mercati forti", text)
+        self.assertIn("Selettive", text)
+        self.assertIn("valore più alto", text)
+        self.assertIn("vincitore del primo set", text)
+        self.assertIn("può non uscire nessuna schedina", text)
+        self.assertIn("/schedine generiche | play | forti | selettive", text)
+
+        markup = betting_slip_strategy_keyboard(slip_kind="ladder")
+        callbacks = [
+            button.callback_data
+            for row in markup.inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(
+            callbacks,
+            [
+                "slips:ladder:generic",
+                "slips:ladder:play_only",
+                "slips:ladder:strong_markets",
+                "slips:ladder:selective",
+            ],
+        )
+
+    def test_selected_strategy_is_repeated_in_slip_intro(self):
+        intro = format_betting_slips_intro(
+            slip_date="2026-08-23",
+            slip_kind="parlay",
+            strategy_family="strong_markets",
+        )
+        self.assertIn("Famiglia: Mercati forti · sperimentale", intro)
+        self.assertIn("vincitore del primo set", intro)
+
+    def test_strategy_request_accepts_callback_and_text_subcommand(self):
+        callback_update = SimpleNamespace(
+            callback_query=SimpleNamespace(data="slips:parlay:play_only")
+        )
+        family, invalid = _requested_betting_slip_strategy(
+            callback_update,
+            SimpleNamespace(args=[]),
+            slip_kind="parlay",
+        )
+        self.assertEqual(family, "play_only")
+        self.assertIsNone(invalid)
+
+        command_update = SimpleNamespace(callback_query=None)
+        family, invalid = _requested_betting_slip_strategy(
+            command_update,
+            SimpleNamespace(args=["mercati", "forti"]),
+            slip_kind="ladder",
+        )
+        self.assertEqual(family, "strong_markets")
+        self.assertIsNone(invalid)
 
     def test_help_and_welcome_hide_subscription_commands_when_disabled(self):
         help_text = format_help_text(include_subscription_commands=False)
