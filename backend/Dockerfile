@@ -62,6 +62,10 @@ COPY backend/data/models/v4/voting_ensemble.pkl backend/data/models/v4/voting_en
 COPY backend/data/models/first_set_winner_v2/logistic_regression.pkl backend/data/models/first_set_winner_v2/logistic_regression.pkl
 COPY backend/data/models/over_under_games_v1/random_forest.pkl backend/data/models/over_under_games_v1/random_forest.pkl
 
+# Compressed active v3 feature dataset used by Railway Dev walk-forward.
+# Historical datasets remain excluded from the image.
+COPY backend/data/processed/tennis_winner_dataset_with_odds_v3.csv.gz backend/data/processed/tennis_winner_dataset_with_odds_v3.csv.gz
+
 # Empty dirs for optional bind-mounts and generated runtime data.
 RUN mkdir -p backend/data/models backend/data/processed backend/data/reports backend/logs \
     && chown -R app:app /app
