@@ -18,6 +18,7 @@ from backend.src.entity.player import Player
 from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
 from backend.src.entity.published_prediction import PublishedPrediction
 from backend.src.entity.rate_limit_bucket import RateLimitBucket
+from backend.src.entity.scheduled_report_job import ScheduledReportJob
 from backend.src.entity.standing import Standing
 from backend.src.entity.subscription import (
     AccessLog,
@@ -77,4 +78,5 @@ __all__ = [
     "CalibrationResult",
     "PublicModelRegistryEntry",
     "RateLimitBucket",
+    "ScheduledReportJob",
 ]

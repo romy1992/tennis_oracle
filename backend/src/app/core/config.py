@@ -124,6 +124,27 @@ class Settings(BaseSettings):
     calibration_min_bin_samples: int = 30
     calibration_min_calibrator_train_samples: int = 100
 
+    # Dedicated scheduled-report worker. Keep the API in-app cron disabled;
+    # this worker owns the daily update and Monday validation cascade.
+    scheduled_reports_enabled: bool = False
+    scheduled_reports_timezone: str = "Europe/Rome"
+    scheduled_global_update_time: str = "08:00"
+    scheduled_weekly_validation_day: int = 0  # Monday (datetime.weekday)
+    scheduled_weekly_validation_time: str = "10:00"
+    scheduled_reports_poll_seconds: int = 30
+    scheduled_job_source_name: str | None = None
+    scheduled_job_source_url: str | None = None
+    scheduled_job_source_path: str | None = None
+
+    # Resend HTTPS API report delivery. The API key must be injected at runtime
+    # and never committed to env templates or repository files.
+    report_email_enabled: bool = False
+    report_email_to: str = ""
+    resend_api_key: str | None = None
+    resend_api_base: str = "https://api.resend.com"
+    resend_from: str | None = None
+    resend_timeout_seconds: float = 20.0
+
     # Public-model config for live tip publication (ML-07 registry preferred; env fallback).
     # Default: automatic publication disabled. No silent fallback to another model.
     live_publication_enabled: bool = False

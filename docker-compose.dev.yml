@@ -91,6 +91,19 @@ services:
       - ./backend/properties/config.env:/app/backend/properties/config.env:ro
     command: ["python", "-m", "backend.src.app.telegram.bot"]
 
+  scheduler:
+    environment:
+      SCHEDULED_JOB_SOURCE_NAME: ${SCHEDULED_JOB_SOURCE_NAME:-tennis-oracle-local-dev}
+      SCHEDULED_JOB_SOURCE_URL: ${SCHEDULED_JOB_SOURCE_URL:-http://localhost:8000}
+      SCHEDULED_JOB_SOURCE_PATH: ${SCHEDULED_JOB_SOURCE_PATH:-/app}
+    volumes:
+      - ./backend/src:/app/backend/src
+      - ./backend/.env:/app/backend/.env:ro
+      - ./backend/properties/config.env:/app/backend/properties/config.env:ro
+      - ${MODELS_HOST_PATH:-./backend/data/models}:/app/backend/data/models:ro
+      - ${PROCESSED_HOST_PATH:-./backend/data/processed}:/app/backend/data/processed:ro
+      - ${REPORTS_HOST_PATH:-./backend/data/reports}:/app/backend/data/reports
+
 volumes:
   frontend_dev_node_modules:
     name: tennis_oracle_frontend_dev_node_modules

@@ -64,3 +64,18 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-production}
       SYNC_CLOUD: ${SYNC_CLOUD:-false}
+
+  scheduler:
+    restart: always
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      SCHEDULED_REPORTS_ENABLED: ${SCHEDULED_REPORTS_ENABLED:-false}
+      # TODO: set SCHEDULED_JOB_SOURCE_URL when tennis-oracle-prod goes online.
+      SCHEDULED_JOB_SOURCE_NAME: ${SCHEDULED_JOB_SOURCE_NAME:-tennis-oracle-prod}
+      SCHEDULED_JOB_SOURCE_URL: ${SCHEDULED_JOB_SOURCE_URL}
+      SCHEDULED_JOB_SOURCE_PATH: ${SCHEDULED_JOB_SOURCE_PATH:-/app}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

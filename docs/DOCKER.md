@@ -84,6 +84,20 @@ docker compose --profile jobs run --rm job
 
 Vedi [SCHEDULING.md](SCHEDULING.md) (lock, resume, exit code, sync cloud).
 
+### Scheduler report persistente
+
+Worker separato dall'API per il job giornaliero delle 08:00 e la cascata del
+lunedì alle 10:00:
+
+```bash
+docker compose --profile scheduler up --build -d scheduler
+docker compose logs -f scheduler
+```
+
+Prima dell'avvio imposta `SCHEDULED_REPORTS_ENABLED=true`, la provenienza
+`SCHEDULED_JOB_SOURCE_*`, `REPORT_EMAIL_ENABLED=true` e `RESEND_API_KEY` come
+secret runtime. Dettagli e gate della cascata: [SCHEDULING.md](SCHEDULING.md#scheduler-report-dedicato-0800--lunedì-1000).
+
 ---
 
 ## Modalità sviluppo (hot-reload)
