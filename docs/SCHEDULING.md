@@ -65,6 +65,114 @@ pip install -r requirements.txt
 alembic upgrade head
 ```
 
+## Scheduler report dedicato (08:00 + lunedì 10:00)
+
+Il servizio persistente `backend.src.jobs.run_report_scheduler` è separato
+dall'API e usa il fuso `Europe/Rome`:
+
+1. ogni giorno alle **08:00** esegue la stessa pipeline di **Aggiorna tutto**;
+2. ogni lunedì alle **10:00** verifica la run giornaliera dello stesso lunedì;
+3. avvia il walk-forward solo se la run giornaliera è esattamente `completed`;
+4. avvia la calibrazione solo se il walk-forward è esattamente `completed`;
+5. passa alla calibrazione il `walk_forward_run_id` appena generato;
+6. invia sempre un riepilogo email, anche quando la cascata fallisce o viene saltata.
+
+`completed_with_errors` non supera nessuno dei due gate. Il registro
+`scheduled_report_job` assegna una chiave unica per job/data: se local, dev e
+prod puntano accidentalmente allo stesso database, una sola origine acquisisce
+lo slot. Nel registro e nell'email restano ambiente, nome sorgente, URL,
+hostname e path runtime dell'origine vincente.
+
+Configurazione non sensibile:
+
+```env
+GLOBAL_UPDATE_CRON_ENABLED=false
+WALK_FORWARD_IN_GLOBAL_UPDATE=false
+
+SCHEDULED_REPORTS_ENABLED=true
+SCHEDULED_REPORTS_TIMEZONE=Europe/Rome
+SCHEDULED_GLOBAL_UPDATE_TIME=08:00
+SCHEDULED_WEEKLY_VALIDATION_DAY=0
+SCHEDULED_WEEKLY_VALIDATION_TIME=10:00
+SCHEDULED_REPORTS_POLL_SECONDS=30
+
+# DEV Railway attualmente online
+SCHEDULED_JOB_SOURCE_NAME=tennis-oracle-dev
+SCHEDULED_JOB_SOURCE_URL=https://frontend-dev-dd35.up.railway.app/
+SCHEDULED_JOB_SOURCE_PATH=/app
+
+# TODO PROD: quando sara online, configurare:
+# SCHEDULED_JOB_SOURCE_NAME=tennis-oracle-prod
+# SCHEDULED_JOB_SOURCE_URL=https://<frontend-prod-url>/
+
+REPORT_EMAIL_ENABLED=true
+REPORT_EMAIL_TO=trottarosario@gmail.com
+RESEND_API_BASE=https://api.resend.com
+# DEV: valido se trottarosario@gmail.com e l'email dell'account Resend.
+RESEND_FROM="Tennis Oracle <onboarding@resend.dev>"
+RESEND_TIMEOUT_SECONDS=20
+```
+
+Secret obbligatorio, da impostare nel secret store dell'ambiente e mai nel
+repository:
+
+```env
+RESEND_API_KEY=<chiave-API-Resend>
+```
+
+Resend riceve il messaggio e gli allegati tramite HTTPS. Il mittente
+`onboarding@resend.dev` è utilizzabile soltanto in DEV e può inviare unicamente
+all'indirizzo associato all'account Resend. Per PROD va verificato un dominio
+proprio e impostato `RESEND_FROM` con un indirizzo di quel dominio:
+<https://resend.com/docs/knowledge-base/403-error-resend-dev-domain>.
+
+### Avvio Compose
+
+Locale/prod-like:
+
+```bash
+docker compose --profile scheduler up --build -d scheduler
+docker compose logs -f scheduler
+```
+
+Staging/dev isolato:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+  --env-file .env.staging --profile scheduler up --build -d scheduler
+```
+
+Produzione con overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  --profile scheduler up --build -d scheduler
+```
+
+Su un provider che crea servizi direttamente dal `backend/Dockerfile`, crea un
+servizio worker per ogni ambiente con start command:
+
+```bash
+python -m backend.src.jobs.run_report_scheduler
+```
+
+Dev e prod devono avere `SCHEDULED_JOB_SOURCE_NAME`, URL e secret distinti. Il
+worker non espone una porta HTTP e deve avere restart automatico.
+
+### Esecuzione controllata singola
+
+I comandi seguenti eseguono job reali e rispettano la deduplica DB della data:
+
+```bash
+python -m backend.src.jobs.run_report_scheduler --run due
+python -m backend.src.jobs.run_report_scheduler --run daily --date 2026-08-31
+python -m backend.src.jobs.run_report_scheduler --run weekly --date 2026-08-31
+```
+
+Con `REPORT_EMAIL_ENABLED=false` il job viene eseguito e registrato, ma l'email
+risulta `disabled`. Il worker persistente rifiuta invece l'avvio quando l'email
+è abilitata ma mancano destinatario, `RESEND_API_KEY` o mittente Resend.
+
 ## Docker one-shot
 
 ```bash

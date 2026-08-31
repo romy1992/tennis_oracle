@@ -144,6 +144,35 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  scheduler:
+    env_file: !override
+      - path: .env.staging
+        required: false
+      - path: backend/.env
+        required: false
+      - path: backend/properties/config.env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/tennis_db_staging}
+      DATABASE_SOURCE_URL: ${DATABASE_SOURCE_URL:-postgresql://postgres:postgres@db:5432/tennis_db_staging}
+      DATABASE_TARGET_URL: ${DATABASE_TARGET_URL:-}
+      SYNC_CLOUD: ${SYNC_CLOUD:-false}
+      SCHEDULED_REPORTS_ENABLED: ${SCHEDULED_REPORTS_ENABLED:-false}
+      SCHEDULED_JOB_SOURCE_NAME: ${SCHEDULED_JOB_SOURCE_NAME:-tennis-oracle-dev}
+      SCHEDULED_JOB_SOURCE_URL: ${SCHEDULED_JOB_SOURCE_URL:-https://frontend-dev-dd35.up.railway.app/}
+      SCHEDULED_JOB_SOURCE_PATH: ${SCHEDULED_JOB_SOURCE_PATH:-/app}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   postgres_data_staging:
     name: tennis_oracle_staging_postgres_data

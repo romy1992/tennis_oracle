@@ -219,6 +219,17 @@ GLOBAL_UPDATE_STEP_TIMEOUT_SECONDS=3600
 GLOBAL_UPDATE_LOCK_TTL_SECONDS=21600
 ```
 
+Scheduler report dedicato: **Aggiorna tutto ogni giorno alle 08:00** e, il
+lunedì alle 10:00, cascata stretta **walk-forward → calibrazione**. La
+calibrazione non parte se il walk-forward fallisce e la cascata non parte se la
+run giornaliera non è `completed`. Report JSON ed esiti vengono inviati tramite
+Resend HTTPS API, includendo ambiente/URL/hostname/path di provenienza. Configurazione e
+deploy: [docs/SCHEDULING.md](docs/SCHEDULING.md#scheduler-report-dedicato-0800--lunedì-1000).
+
+```bash
+docker compose --profile scheduler up --build -d scheduler
+```
+
 ### Docker (locale / produzione)
 
 Guida completa: [docs/DOCKER.md](docs/DOCKER.md).
@@ -231,7 +242,7 @@ docker compose up --build -d  # migrate + api + frontend (db-1 spento)
 docker compose down           # arresto (volume embedded conservato; non usare -v)
 ```
 
-Comandi separati: `docker compose run --rm migrate`, `docker compose --profile bot up -d bot`, `docker compose --profile jobs run --rm job`. Postgres embedded (opzionale): `docker compose --profile embedded-db up -d db`. Overlay prod: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d`.
+Comandi separati: `docker compose run --rm migrate`, `docker compose --profile bot up -d bot`, `docker compose --profile jobs run --rm job`, `docker compose --profile scheduler up -d scheduler`. Postgres embedded (opzionale): `docker compose --profile embedded-db up -d db`. Overlay prod: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d`.
 
 Dopo modifiche al codice (stack **prod-like**): `docker compose build api` / `build frontend` poi `up -d`. Per coding con hot-reload: [docs/DOCKER.md — modalità sviluppo](docs/DOCKER.md#modalità-sviluppo-hot-reload) (`docker-compose.dev.yml`). Dataset/modelli/log/segreti **non** finiscono nelle immagini; volume `postgres_data` solo se usi il profilo `embedded-db`. Sul host: modelli via `MODELS_HOST_PATH`, dataset CSV via `PROCESSED_HOST_PATH`, report via `REPORTS_HOST_PATH` (necessari per walk-forward in container).
 

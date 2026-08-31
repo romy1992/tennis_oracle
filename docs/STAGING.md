@@ -70,6 +70,33 @@ docker compose -f docker-compose.yml -f docker-compose.staging.yml \
   --env-file .env.staging --profile jobs run --rm job
 ```
 
+### Scheduler report sempre attivo
+
+Configura in `.env.staging` la sorgente DEV Railway, il destinatario email e
+`RESEND_API_KEY` tramite secret store; poi abilita `SCHEDULED_REPORTS_ENABLED`
+e `REPORT_EMAIL_ENABLED`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+  --env-file .env.staging --profile scheduler up --build -d scheduler
+```
+
+Controllo visibile:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+  --env-file .env.staging logs -f scheduler
+```
+
+Nel report devono comparire `APP_ENV=staging`, `SCHEDULED_JOB_SOURCE_NAME`,
+`SCHEDULED_JOB_SOURCE_URL`, hostname e path configurato. Vedi
+[SCHEDULING.md](SCHEDULING.md#scheduler-report-dedicato-0800--lunedì-1000).
+
+Il DEV Railway attivo usa `SCHEDULED_JOB_SOURCE_NAME=tennis-oracle-dev` e
+`SCHEDULED_JOB_SOURCE_URL=https://frontend-dev-dd35.up.railway.app/`.
+TODO PROD: usare `SCHEDULED_JOB_SOURCE_NAME=tennis-oracle-prod` e aggiungere il
+relativo URL pubblico quando l'ambiente sara online.
+
 ### Smoke test
 
 ```bash

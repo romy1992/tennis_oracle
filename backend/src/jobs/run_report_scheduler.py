@@ -1,0 +1,218 @@
+"""Persistent scheduler for daily and weekly operational report jobs.
+
+The process is intended to run as one dedicated service in local/dev/prod.
+Database schedule keys still prevent duplicates when multiple services point at
+the same target database.
+
+Examples:
+  python -m backend.src.jobs.run_report_scheduler
+  python -m backend.src.jobs.run_report_scheduler --run due
+  python -m backend.src.jobs.run_report_scheduler --run daily --date 2026-08-31
+  python -m backend.src.jobs.run_report_scheduler --run weekly --date 2026-08-31
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import signal
+import sys
+import threading
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+from backend.src.app.core.config import get_settings
+from backend.src.app.core.env_files import load_backend_env_files
+from backend.src.app.db.session import SessionLocal
+from backend.src.app.observability.context import ensure_correlation_id
+from backend.src.app.observability.email_reports import validate_email_settings
+from backend.src.app.observability.setup import setup_observability
+from backend.src.app.services.scheduled_reports import (
+    DAILY_JOB_NAME,
+    WEEKLY_JOB_NAME,
+    get_scheduled_job,
+    parse_schedule_time,
+    resolve_job_source,
+    run_daily_scheduled_report,
+    run_weekly_scheduled_report,
+)
+
+load_backend_env_files(override=False)
+
+logger = logging.getLogger(__name__)
+_STOP = threading.Event()
+
+
+def _parse_date(raw: str | None, timezone_name: str) -> date:
+    if raw:
+        return date.fromisoformat(raw)
+    return datetime.now(ZoneInfo(timezone_name)).date()
+
+
+def _status_exit_code(status: str) -> int:
+    if status == "completed":
+        return 0
+    if status == "completed_with_errors":
+        return 1
+    if status == "skipped":
+        return 2
+    return 3
+
+
+def run_daily(scheduled_date: date) -> int:
+    settings = get_settings()
+    with SessionLocal() as db:
+        row, claimed = run_daily_scheduled_report(
+            db,
+            settings,
+            scheduled_date=scheduled_date,
+        )
+        logger.info(
+            "scheduled_daily job_id=%s status=%s claimed=%s source=%s",
+            row.id,
+            row.status,
+            claimed,
+            row.source_name,
+        )
+        return _status_exit_code(row.status)
+
+
+def run_weekly(scheduled_date: date) -> int:
+    settings = get_settings()
+    with SessionLocal() as db:
+        row, claimed = run_weekly_scheduled_report(
+            db,
+            settings,
+            scheduled_date=scheduled_date,
+        )
+        logger.info(
+            "scheduled_weekly job_id=%s status=%s claimed=%s source=%s",
+            row.id,
+            row.status,
+            claimed,
+            row.source_name,
+        )
+        return _status_exit_code(row.status)
+
+
+def run_due(now: datetime | None = None) -> list[tuple[str, int]]:
+    settings = get_settings()
+    tz = ZoneInfo(settings.scheduled_reports_timezone)
+    local_now = now.astimezone(tz) if now is not None else datetime.now(tz)
+    source = resolve_job_source(settings)
+    results: list[tuple[str, int]] = []
+
+    daily_clock = parse_schedule_time(settings.scheduled_global_update_time)
+    if local_now.time().replace(tzinfo=None) >= daily_clock:
+        with SessionLocal() as db:
+            if get_scheduled_job(db, DAILY_JOB_NAME, local_now.date()) is None:
+                row, _ = run_daily_scheduled_report(
+                    db,
+                    settings,
+                    scheduled_date=local_now.date(),
+                    source=source,
+                )
+                results.append((DAILY_JOB_NAME, _status_exit_code(row.status)))
+
+    if not (0 <= settings.scheduled_weekly_validation_day <= 6):
+        raise ValueError("SCHEDULED_WEEKLY_VALIDATION_DAY deve essere compreso tra 0 e 6")
+    weekly_clock = parse_schedule_time(settings.scheduled_weekly_validation_time)
+    if (
+        local_now.weekday() == settings.scheduled_weekly_validation_day
+        and local_now.time().replace(tzinfo=None) >= weekly_clock
+    ):
+        with SessionLocal() as db:
+            if get_scheduled_job(db, WEEKLY_JOB_NAME, local_now.date()) is None:
+                row, _ = run_weekly_scheduled_report(
+                    db,
+                    settings,
+                    scheduled_date=local_now.date(),
+                    source=source,
+                )
+                results.append((WEEKLY_JOB_NAME, _status_exit_code(row.status)))
+    return results
+
+
+def _handle_stop(_signum: int, _frame: object) -> None:
+    _STOP.set()
+
+
+def serve() -> int:
+    settings = get_settings()
+    source = resolve_job_source(settings)
+    parse_schedule_time(settings.scheduled_global_update_time)
+    parse_schedule_time(settings.scheduled_weekly_validation_time)
+    ZoneInfo(settings.scheduled_reports_timezone)
+
+    if not settings.scheduled_reports_enabled:
+        logger.warning(
+            "scheduled_reports disabled source=%s environment=%s; worker remains idle",
+            source.name,
+            source.environment,
+        )
+    else:
+        missing_email = validate_email_settings(settings)
+        if missing_email:
+            logger.error(
+                "scheduled_reports email configuration incomplete: %s",
+                ", ".join(missing_email),
+            )
+            return 5
+        logger.info(
+            "scheduled_reports started daily=%s weekly_day=%s weekly_time=%s timezone=%s "
+            "source=%s url=%s host=%s path=%s",
+            settings.scheduled_global_update_time,
+            settings.scheduled_weekly_validation_day,
+            settings.scheduled_weekly_validation_time,
+            settings.scheduled_reports_timezone,
+            source.name,
+            source.url or "-",
+            source.hostname,
+            source.path,
+        )
+
+    poll_seconds = max(5, int(settings.scheduled_reports_poll_seconds))
+    while not _STOP.is_set():
+        if settings.scheduled_reports_enabled:
+            try:
+                for job_name, exit_code in run_due():
+                    logger.info("scheduled_reports completed job=%s exit=%s", job_name, exit_code)
+            except Exception:
+                logger.exception("scheduled_reports polling iteration failed")
+        _STOP.wait(poll_seconds)
+    logger.info("scheduled_reports stopped")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run tennis_oracle scheduled report jobs")
+    parser.add_argument(
+        "--run",
+        choices=["serve", "due", "daily", "weekly"],
+        default="serve",
+        help="Persistent worker or one-shot execution mode",
+    )
+    parser.add_argument("--date", default=None, help="Schedule date in YYYY-MM-DD")
+    args = parser.parse_args(argv)
+
+    settings = get_settings()
+    setup_observability(settings)
+    ensure_correlation_id(f"report-scheduler-{os.getpid()}")
+    target_date = _parse_date(args.date, settings.scheduled_reports_timezone)
+
+    if args.run == "daily":
+        return run_daily(target_date)
+    if args.run == "weekly":
+        return run_weekly(target_date)
+    if args.run == "due":
+        results = run_due()
+        return max((code for _, code in results), default=0)
+
+    signal.signal(signal.SIGTERM, _handle_stop)
+    signal.signal(signal.SIGINT, _handle_stop)
+    return serve()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

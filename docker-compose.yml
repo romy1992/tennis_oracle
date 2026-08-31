@@ -175,6 +175,47 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # Dedicated, opt-in scheduler for daily reports and the Monday validation
+  # cascade. Run exactly one service per environment; the database schedule
+  # ledger still deduplicates local/dev/prod workers sharing the same DB.
+  #   docker compose --profile scheduler up -d scheduler
+  scheduler:
+    profiles: ["scheduler"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: tennis_oracle-backend:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    env_file: *backend-env-files
+    environment:
+      <<: *backend-db-env
+      DATABASE_TARGET_URL: ${DATABASE_TARGET_URL:-}
+      SYNC_CLOUD: ${SYNC_CLOUD:-false}
+      SCHEDULED_REPORTS_ENABLED: ${SCHEDULED_REPORTS_ENABLED:-false}
+      SCHEDULED_JOB_SOURCE_NAME: ${SCHEDULED_JOB_SOURCE_NAME:-tennis-oracle-local}
+      SCHEDULED_JOB_SOURCE_URL: ${SCHEDULED_JOB_SOURCE_URL:-http://localhost:8000}
+      SCHEDULED_JOB_SOURCE_PATH: ${SCHEDULED_JOB_SOURCE_PATH:-/app}
+      REPORT_EMAIL_ENABLED: ${REPORT_EMAIL_ENABLED:-false}
+      REPORT_EMAIL_TO: ${REPORT_EMAIL_TO:-trottarosario@gmail.com}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_API_BASE: ${RESEND_API_BASE:-https://api.resend.com}
+      RESEND_FROM: ${RESEND_FROM:-Tennis Oracle <onboarding@resend.dev>}
+      RESEND_TIMEOUT_SECONDS: ${RESEND_TIMEOUT_SECONDS:-20}
+    <<: *host-gateway
+    volumes:
+      - ./backend/.env:/app/backend/.env:ro
+      - ./backend/properties/config.env:/app/backend/properties/config.env:ro
+      - ${MODELS_HOST_PATH:-./backend/data/models}:/app/backend/data/models:ro
+      - ${PROCESSED_HOST_PATH:-./backend/data/processed}:/app/backend/data/processed:ro
+      - ${REPORTS_HOST_PATH:-./backend/data/reports}:/app/backend/data/reports
+    working_dir: /app
+    command: ["python", "-m", "backend.src.jobs.run_report_scheduler"]
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   postgres_data:
     name: tennis_oracle_postgres_data
