@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useGlobalUpdate } from "../hooks/useGlobalUpdate";
@@ -23,12 +23,29 @@ export function GlobalUpdateControls() {
     useGlobalUpdate();
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [outsideHoursWarning, setOutsideHoursWarning] = useState<string | null>(null);
+  const [forcing, setForcing] = useState(false);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!outsideHoursWarning) return;
+    cancelButtonRef.current?.focus();
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !forcing) setOutsideHoursWarning(null);
+    }
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [forcing, outsideHoursWarning]);
 
   async function handleClick() {
     try {
       setActionError(null);
       await triggerUpdate(true);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 423) {
+        setOutsideHoursWarning(err.message);
+        return;
+      }
       const message =
         err instanceof ApiError
           ? err.message
@@ -36,6 +53,26 @@ export function GlobalUpdateControls() {
             ? err.message
             : "Errore durante l'aggiornamento globale.";
       setActionError(message);
+    }
+  }
+
+  async function handleForceOutsideHours() {
+    try {
+      setActionError(null);
+      setForcing(true);
+      await triggerUpdate(true, undefined, true);
+      setOutsideHoursWarning(null);
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Errore durante l'aggiornamento globale forzato.";
+      setActionError(message);
+      setOutsideHoursWarning(null);
+    } finally {
+      setForcing(false);
     }
   }
 
@@ -107,6 +144,50 @@ export function GlobalUpdateControls() {
             </Link>
           ) : null}
           {actionError ? <small className="action-error">{actionError}</small> : null}
+        </div>
+      ) : null}
+      {outsideHoursWarning ? (
+        <div className="global-update-modal-backdrop" role="presentation">
+          <div
+            className="global-update-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="global-update-outside-hours-title"
+            aria-describedby="global-update-outside-hours-description"
+          >
+            <h2 id="global-update-outside-hours-title">Aggiornamento fuori orario</h2>
+            <div id="global-update-outside-hours-description">
+              <p>{outsideHoursWarning}</p>
+              <p>
+                Se scegli <strong>Forza</strong>:
+              </p>
+              <ul>
+                <li>la pipeline globale viene avviata comunque;</li>
+                <li>il pool schedine di oggi può ricevere nuove pick anche dopo la chiusura;</li>
+                <li>il risultato giornaliero può differire da quello congelato all'orario limite.</li>
+              </ul>
+              <p>Le giornate storiche e le partite già iniziate restano protette.</p>
+            </div>
+            <div className="global-update-modal-actions">
+              <button
+                ref={cancelButtonRef}
+                type="button"
+                className="action-button secondary"
+                onClick={() => setOutsideHoursWarning(null)}
+                disabled={forcing}
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                className="action-button primary"
+                onClick={() => void handleForceOutsideHours()}
+                disabled={forcing}
+              >
+                {forcing ? "Avvio..." : "Forza"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

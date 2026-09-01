@@ -164,7 +164,7 @@ class ProtectedRoutesAuthTest(unittest.TestCase):
         ):
             response = self.client.post(
                 "/api/global-update",
-                json={"force": True},
+                json={"force": True, "force_outside_hours": True},
                 headers=self.headers,
             )
         # 409 when no run returned and no active run

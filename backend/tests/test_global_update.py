@@ -152,13 +152,59 @@ class GlobalUpdateServiceTest(unittest.TestCase):
         with patch("backend.src.app.services.global_update._execute_global_update"):
             response = self.client.post(
                 "/api/global-update",
-                json={"force": True},
+                json={"force": True, "force_outside_hours": True},
                 headers=self.auth_headers,
             )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIn("run_id", payload)
         self.assertEqual(payload["status"], "pending")
+
+    @patch("backend.src.app.api.routes.global_update.start_global_update")
+    @patch("backend.src.app.api.routes.global_update.get_betting_slip_pool_window")
+    def test_post_global_update_requires_confirmation_outside_hours(
+        self, mock_window, mock_start
+    ):
+        mock_window.return_value = SimpleNamespace(
+            is_closed=True,
+            close_time="10:00",
+            timezone="Europe/Rome",
+        )
+
+        response = self.client.post(
+            "/api/global-update",
+            json={"force": True},
+            headers=self.auth_headers,
+        )
+
+        self.assertEqual(response.status_code, 423)
+        self.assertIn("10:00", response.json()["detail"])
+        mock_start.assert_not_called()
+
+    @patch("backend.src.app.api.routes.global_update.start_global_update")
+    @patch("backend.src.app.api.routes.global_update.get_betting_slip_pool_window")
+    def test_post_global_update_accepts_explicit_outside_hours_force(
+        self, mock_window, mock_start
+    ):
+        mock_window.return_value = SimpleNamespace(
+            is_closed=True,
+            close_time="10:00",
+            timezone="Europe/Rome",
+        )
+        mock_start.return_value = (
+            SimpleNamespace(id=42, status="pending"),
+            "Global update started.",
+        )
+
+        response = self.client.post(
+            "/api/global-update",
+            json={"force": True, "force_outside_hours": True},
+            headers=self.auth_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["run_id"], 42)
+        self.assertTrue(mock_start.call_args.kwargs["force_outside_hours"])
 
     @patch("backend.src.app.services.global_update.list_enabled_combinations")
     def test_post_global_update_endpoint_with_versions_filter(self, mock_combinations):
@@ -169,7 +215,7 @@ class GlobalUpdateServiceTest(unittest.TestCase):
         with patch("backend.src.app.services.global_update._execute_global_update"):
             response = self.client.post(
                 "/api/global-update",
-                json={"force": True, "versions": ["v4"]},
+                json={"force": True, "force_outside_hours": True, "versions": ["v4"]},
                 headers=self.auth_headers,
             )
         self.assertEqual(response.status_code, 200)

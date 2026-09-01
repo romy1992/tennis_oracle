@@ -271,8 +271,13 @@ Cron esempio (dopo il job delle 09:00):
 
 Il pool delle schedine e' append-only fino a `BETTING_SLIP_POOL_CLOSE_TIME`
 (default `10:00`, timezone `BETTING_SLIP_TIMEZONE=Europe/Rome`). Dopo la soglia
-`betting_slip_day.pool_locked_at` impedisce definitivamente nuove pick; polling
-live e settlement continuano senza rigenerare le schedine.
+`betting_slip_day.pool_locked_at` impedisce normalmente nuove pick; polling live
+e settlement continuano senza rigenerare le schedine.
+
+Il pulsante admin **Aggiorna tutto**, se usato dopo la soglia, mostra una
+conferma esplicita. **Annulla** mantiene il pool chiuso; **Forza** avvia la
+pipeline e consente eccezionalmente nuove pick nel pool della sola giornata
+corrente. Le giornate storiche e le partite già iniziate restano protette.
 
 ```env
 BETTING_SLIP_TIMEZONE=Europe/Rome

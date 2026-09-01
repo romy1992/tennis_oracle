@@ -94,6 +94,13 @@ DEFAULT_STAKE = 10.0
 DEFAULT_PICKS_PER_SLIP = 5
 
 
+@dataclass(frozen=True)
+class BettingSlipPoolWindow:
+    is_closed: bool
+    close_time: str
+    timezone: str
+
+
 def _parse_clock_time(value: str) -> time:
     try:
         parsed = time.fromisoformat(value.strip())
@@ -130,6 +137,29 @@ def _pool_close_utc_naive(
         tzinfo=tz,
     )
     return local_close.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def get_betting_slip_pool_window(
+    *,
+    settings: Settings | None = None,
+    now: datetime | None = None,
+    slip_date: date | None = None,
+) -> BettingSlipPoolWindow:
+    """Return the server-authoritative daily pool cutoff state."""
+    settings = settings or get_settings()
+    local_now = _local_now(settings, now)
+    target_date = slip_date or local_now.date()
+    close_time = _parse_clock_time(settings.betting_slip_pool_close_time)
+    local_close = datetime.combine(
+        target_date,
+        close_time,
+        tzinfo=ZoneInfo(settings.betting_slip_timezone),
+    )
+    return BettingSlipPoolWindow(
+        is_closed=local_now >= local_close,
+        close_time=close_time.strftime("%H:%M"),
+        timezone=settings.betting_slip_timezone,
+    )
 
 # Mercati inclusi di default nel pool "a valore" delle schedine. Tutti e tre
 # hanno quote bookmaker reali (Home/Away, Home/Away 1st Set, O/U games).
@@ -1634,8 +1664,9 @@ def _get_or_create_slip_day_window(
     model_name: str,
     settings: Settings,
     now: datetime | None = None,
-) -> tuple[BettingSlipDay, bool, datetime]:
-    """Return registry row, whether additions are allowed, and UTC-naive now."""
+    force_outside_hours: bool = False,
+) -> tuple[BettingSlipDay, bool, datetime, bool]:
+    """Return registry row, whether additions are allowed, UTC now, and override use."""
     local_now = _local_now(settings, now)
     now_utc = _utc_now_naive(local_now)
     row = db.scalar(
@@ -1667,16 +1698,22 @@ def _get_or_create_slip_day_window(
         row.pool_closes_at = close_at
 
     effective_close = row.pool_closes_at or close_at
-    additions_allowed = (
+    normal_additions_allowed = (
         row.pool_locked_at is None
         and slip_date >= local_now.date()
         and now_utc < effective_close
     )
+    forced_after_close = (
+        force_outside_hours
+        and slip_date == local_now.date()
+        and (row.pool_locked_at is not None or now_utc >= effective_close)
+    )
+    additions_allowed = normal_additions_allowed or forced_after_close
     if not additions_allowed and row.pool_locked_at is None:
         row.pool_locked_at = now_utc
     row.updated_at = now_utc
     db.flush()
-    return row, additions_allowed, now_utc
+    return row, additions_allowed, now_utc, forced_after_close
 
 
 def _count_upcoming_fixtures_on_date(db: Session, slip_date: date) -> int:
@@ -2935,19 +2972,21 @@ def get_daily_betting_slips(
     regenerate: bool = False,
     settings: Settings | None = None,
     now: datetime | None = None,
+    force_outside_hours: bool = False,
 ) -> BettingSlipsDailyResponse:
     settings = settings or get_settings()
     target_date = slip_date or _local_now(settings, now).date()
     resolved_model_name, model_warning = _resolve_betting_model_name(model_version, model_name)
 
     warnings: list[str] = [model_warning] if model_warning else []
-    registry, additions_allowed, now_utc = _get_or_create_slip_day_window(
+    registry, additions_allowed, now_utc, forced_after_close = _get_or_create_slip_day_window(
         db,
         slip_date=target_date,
         model_version=model_version,
         model_name=resolved_model_name,
         settings=settings,
         now=now,
+        force_outside_hours=force_outside_hours,
     )
     candidate_pool_size = int(registry.candidate_pool_size or 0)
 
@@ -2963,6 +3002,10 @@ def get_daily_betting_slips(
     )
 
     if additions_allowed:
+        if forced_after_close:
+            warnings.append(
+                "Pool giornaliero aggiornato fuori orario dopo conferma manuale."
+            )
         candidates = build_candidate_pool(
             db,
             slip_date=target_date,

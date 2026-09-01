@@ -11,6 +11,7 @@ from backend.src.app.schemas.global_update import (
     GlobalUpdateStartResponse,
     ModelsVersionsResultsResponse,
 )
+from backend.src.app.services.betting_slips import get_betting_slip_pool_window
 from backend.src.app.services.global_update import (
     build_run_report,
     cancel_global_update,
@@ -42,6 +43,15 @@ def trigger_global_update(
     db: Session = Depends(get_db),
 ) -> GlobalUpdateStartResponse:
     payload = body or GlobalUpdateStartRequest()
+    pool_window = get_betting_slip_pool_window()
+    if pool_window.is_closed and not payload.force_outside_hours:
+        raise HTTPException(
+            status_code=423,
+            detail=(
+                "La finestra del pool schedine di oggi è chiusa dalle "
+                f"{pool_window.close_time} ({pool_window.timezone})."
+            ),
+        )
     try:
         run, message = start_global_update(
             db,
@@ -53,6 +63,7 @@ def trigger_global_update(
             resume_run_id=payload.resume_run_id,
             sync_cloud=payload.sync_cloud,
             versions=payload.versions,
+            force_outside_hours=payload.force_outside_hours,
         )
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=503, detail="Database not available.") from exc

@@ -460,6 +460,7 @@ def start_global_update(
     resume_run_id: int | None = None,
     blocking: bool = False,
     versions: list[str] | None = None,
+    force_outside_hours: bool = False,
 ) -> tuple[GlobalUpdateRun | None, str]:
     """Create or resume a run and start processing.
 
@@ -563,6 +564,7 @@ def start_global_update(
                     days_forward,
                     days_back_fixtures,
                     sync_cloud=run.sync_cloud == "true" or sync_cloud,
+                    force_outside_hours=force_outside_hours,
                 )
             finally:
                 with _active_thread_lock:
@@ -583,6 +585,7 @@ def start_global_update(
                     days_forward,
                     days_back_fixtures,
                     sync_cloud=sync_flag,
+                    force_outside_hours=force_outside_hours,
                 )
             finally:
                 with _active_thread_lock:
@@ -675,6 +678,7 @@ def _execute_global_update(
     days_back_fixtures: int,
     *,
     sync_cloud: bool = False,
+    force_outside_hours: bool = False,
 ) -> None:
     global _active_run_id
     settings = get_settings()
@@ -1073,6 +1077,7 @@ def _execute_global_update(
                                     model_version=combo.model_version,
                                     model_name=combo.model_name,
                                     regenerate=False,
+                                    force_outside_hours=force_outside_hours,
                                 )
                                 local_slips = len(daily.slips)
                                 local_warnings.extend(daily.warnings)
