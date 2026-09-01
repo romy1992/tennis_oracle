@@ -18,6 +18,7 @@ GlobalUpdateItemStatus = Literal["pending", "running", "completed", "failed", "s
 
 class GlobalUpdateStartRequest(BaseModel):
     force: bool = False
+    force_outside_hours: bool = False
     days_forward: int = Field(default=10, ge=1, le=30)
     days_back_fixtures: int = Field(default=3, ge=0, le=30)
     resume: bool = False

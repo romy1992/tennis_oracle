@@ -270,6 +270,47 @@ a {
   text-underline-offset: 2px;
 }
 
+.global-update-modal-backdrop {
+  align-items: center;
+  background: rgb(15 23 42 / 72%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 1000;
+}
+
+.global-update-modal {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 35%);
+  color: #172033;
+  max-width: 560px;
+  padding: 24px;
+  width: 100%;
+}
+
+.global-update-modal h2 {
+  margin: 0 0 14px;
+}
+
+.global-update-modal p,
+.global-update-modal ul {
+  line-height: 1.55;
+}
+
+.global-update-modal ul {
+  padding-left: 22px;
+}
+
+.global-update-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
 .global-update-meta .action-error-link:hover {
   color: #fee2e2;
 }

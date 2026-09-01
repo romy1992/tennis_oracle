@@ -114,6 +114,62 @@ describe("GlobalUpdateControls", () => {
     expect(await screen.findByText("Run già attiva")).toBeInTheDocument();
   });
 
+  it("shows the outside-hours warning and lets the admin cancel", async () => {
+    apiMocks.getGlobalUpdateStatus.mockResolvedValue(idleGlobalUpdate);
+    apiMocks.startGlobalUpdate.mockRejectedValue(
+      new ApiError(
+        "La finestra del pool schedine di oggi è chiusa dalle 10:00 (Europe/Rome).",
+        423
+      )
+    );
+    const user = userEvent.setup();
+
+    renderWithProviders(<GlobalUpdateControls />);
+    await screen.findByRole("button", { name: "Aggiorna tutto" });
+    await user.click(screen.getByRole("button", { name: "Aggiorna tutto" }));
+
+    expect(await screen.findByRole("dialog", { name: "Aggiornamento fuori orario" }))
+      .toBeInTheDocument();
+    expect(screen.getByText(/può ricevere nuove pick/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Annulla" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(apiMocks.startGlobalUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("forces the update after an explicit outside-hours confirmation", async () => {
+    apiMocks.getGlobalUpdateStatus.mockResolvedValue(idleGlobalUpdate);
+    apiMocks.startGlobalUpdate
+      .mockRejectedValueOnce(
+        new ApiError(
+          "La finestra del pool schedine di oggi è chiusa dalle 10:00 (Europe/Rome).",
+          423
+        )
+      )
+      .mockResolvedValueOnce({ run_id: 10, status: "pending" });
+    const user = userEvent.setup();
+
+    renderWithProviders(<GlobalUpdateControls />);
+    await screen.findByRole("button", { name: "Aggiorna tutto" });
+    await user.click(screen.getByRole("button", { name: "Aggiorna tutto" }));
+    await screen.findByRole("dialog", { name: "Aggiornamento fuori orario" });
+
+    apiMocks.getGlobalUpdateStatus.mockResolvedValue(runningGlobalUpdate);
+    await user.click(screen.getByRole("button", { name: "Forza" }));
+
+    await waitFor(() => {
+      expect(apiMocks.startGlobalUpdate).toHaveBeenNthCalledWith(2, {
+        force: true,
+        force_outside_hours: true,
+        versions: undefined
+      });
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Aggiornamento globale..." }))
+      .toBeDisabled();
+  });
+
   it("can cancel a running update", async () => {
     apiMocks.getGlobalUpdateStatus.mockResolvedValue(runningGlobalUpdate);
     apiMocks.cancelGlobalUpdate.mockResolvedValue({ run_id: 7, status: "cancelled" });

@@ -805,6 +805,29 @@ class BettingSlipsServiceTest(unittest.TestCase):
             )
             self.assertIsNotNone(registry.pool_locked_at)
 
+    def test_pool_can_be_forced_after_cutoff_for_current_day(self):
+        settings = make_test_settings(
+            betting_slip_timezone="Europe/Rome",
+            betting_slip_pool_close_time="10:00",
+        )
+        with self.Session() as session:
+            self._seed_candidates(session, count=3)
+            forced = get_daily_betting_slips(
+                session,
+                slip_date=self.today,
+                model_version="v2",
+                model_name="random_forest",
+                settings=settings,
+                now=datetime.combine(self.today, time(11, 0)),
+                force_outside_hours=True,
+            )
+
+            pick_ids = set(session.scalars(select(BettingSlipPick.id)).all())
+            self.assertTrue(pick_ids)
+            self.assertTrue(
+                any("fuori orario" in warning.lower() for warning in forced.warnings)
+            )
+
     def test_cancelled_pick_is_persisted_as_void_before_cutoff(self):
         settings = make_test_settings(
             betting_slip_timezone="Europe/Rome",

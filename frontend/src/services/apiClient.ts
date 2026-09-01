@@ -338,6 +338,7 @@ export const apiClient = {
   startGlobalUpdate: (
     params: {
       force?: boolean;
+      force_outside_hours?: boolean;
       days_forward?: number;
       days_back_fixtures?: number;
       versions?: string[];
