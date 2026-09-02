@@ -31,7 +31,7 @@ from backend.src.app.observability.setup import setup_observability
 from backend.src.app.services.scheduled_reports import (
     DAILY_JOB_NAME,
     WEEKLY_JOB_NAME,
-    get_scheduled_job,
+    list_stale_daily_report_dates,
     parse_schedule_time,
     resolve_job_source,
     run_daily_scheduled_report,
@@ -102,17 +102,39 @@ def run_due(now: datetime | None = None) -> list[tuple[str, int]]:
     local_now = now.astimezone(tz) if now is not None else datetime.now(tz)
     source = resolve_job_source(settings)
     results: list[tuple[str, int]] = []
+    attempted_daily_dates: set[date] = set()
+
+    # A one-shot Railway cron only sees today's schedule by default.  Inspect
+    # older stale rows too, so a report lost immediately before a deploy or
+    # process kill can be completed on a later tick.  The service layer still
+    # reclaims it only when the matching global update is terminal.
+    with SessionLocal() as db:
+        stale_daily_dates = list_stale_daily_report_dates(db, settings, now=local_now)
+    for stale_date in stale_daily_dates:
+        attempted_daily_dates.add(stale_date)
+        with SessionLocal() as db:
+            row, claimed = run_daily_scheduled_report(
+                db,
+                settings,
+                scheduled_date=stale_date,
+                source=source,
+            )
+            if claimed:
+                results.append((DAILY_JOB_NAME, _status_exit_code(row.status)))
 
     daily_clock = parse_schedule_time(settings.scheduled_global_update_time)
-    if local_now.time().replace(tzinfo=None) >= daily_clock:
+    if (
+        local_now.time().replace(tzinfo=None) >= daily_clock
+        and local_now.date() not in attempted_daily_dates
+    ):
         with SessionLocal() as db:
-            if get_scheduled_job(db, DAILY_JOB_NAME, local_now.date()) is None:
-                row, _ = run_daily_scheduled_report(
-                    db,
-                    settings,
-                    scheduled_date=local_now.date(),
-                    source=source,
-                )
+            row, claimed = run_daily_scheduled_report(
+                db,
+                settings,
+                scheduled_date=local_now.date(),
+                source=source,
+            )
+            if claimed:
                 results.append((DAILY_JOB_NAME, _status_exit_code(row.status)))
 
     if not (0 <= settings.scheduled_weekly_validation_day <= 6):

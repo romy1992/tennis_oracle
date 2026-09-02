@@ -557,49 +557,59 @@ def start_global_update(
             message = "Global update started."
 
         if blocking:
+            # The pipeline clears ``_active_run_id`` from its own ``finally``
+            # block.  Do not execute it while holding this non-reentrant lock:
+            # doing so deadlocks as soon as the pipeline tries to clear the
+            # active id after completing.
             _active_run_id = run.id
-            try:
-                _execute_global_update(
-                    run.id,
-                    days_forward,
-                    days_back_fixtures,
-                    sync_cloud=run.sync_cloud == "true" or sync_cloud,
-                    force_outside_hours=force_outside_hours,
-                )
-            finally:
-                with _active_thread_lock:
-                    if _active_run_id == run.id:
-                        _active_run_id = None
-            db.expire_all()
-            refreshed = get_run_by_id(db, run.id)
-            return refreshed, message
+            blocking_run_id = run.id
+            blocking_sync_flag = run.sync_cloud == "true" or sync_cloud
+        else:
+            run_id_for_thread = run.id
+            sync_flag = run.sync_cloud == "true" or sync_cloud
 
-        run_id_for_thread = run.id
-        sync_flag = run.sync_cloud == "true" or sync_cloud
+            def _thread_target() -> None:
+                global _active_run_id
+                try:
+                    _execute_global_update(
+                        run_id_for_thread,
+                        days_forward,
+                        days_back_fixtures,
+                        sync_cloud=sync_flag,
+                        force_outside_hours=force_outside_hours,
+                    )
+                finally:
+                    with _active_thread_lock:
+                        if _active_run_id == run_id_for_thread:
+                            _active_run_id = None
 
-        def _thread_target() -> None:
-            global _active_run_id
-            try:
-                _execute_global_update(
-                    run_id_for_thread,
-                    days_forward,
-                    days_back_fixtures,
-                    sync_cloud=sync_flag,
-                    force_outside_hours=force_outside_hours,
-                )
-            finally:
-                with _active_thread_lock:
-                    if _active_run_id == run_id_for_thread:
-                        _active_run_id = None
+            thread = threading.Thread(
+                target=_thread_target,
+                name=f"global-update-{run_id_for_thread}",
+                daemon=True,
+            )
+            _active_run_id = run_id_for_thread
+            thread.start()
+            return run, message
 
-        thread = threading.Thread(
-            target=_thread_target,
-            name=f"global-update-{run_id_for_thread}",
-            daemon=True,
+    try:
+        _execute_global_update(
+            blocking_run_id,
+            days_forward,
+            days_back_fixtures,
+            sync_cloud=blocking_sync_flag,
+            force_outside_hours=force_outside_hours,
         )
-        _active_run_id = run_id_for_thread
-        thread.start()
-        return run, message
+    finally:
+        # Also clear here for injected/test executors that do not run the
+        # production pipeline's own cleanup.  At this point the outer lock is
+        # no longer held, so reacquiring it is safe.
+        with _active_thread_lock:
+            if _active_run_id == blocking_run_id:
+                _active_run_id = None
+    db.expire_all()
+    refreshed = get_run_by_id(db, blocking_run_id)
+    return refreshed, message
 
 
 def _update_run_phase(

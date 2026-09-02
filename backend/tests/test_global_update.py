@@ -106,6 +106,58 @@ class GlobalUpdateServiceTest(unittest.TestCase):
 
     @patch("backend.src.app.services.global_update.list_enabled_combinations")
     @patch("backend.src.app.services.global_update._execute_global_update")
+    def test_blocking_start_releases_active_lock_before_pipeline(
+        self, mock_execute, mock_combinations
+    ):
+        import backend.src.app.services.global_update as gu
+
+        mock_combinations.return_value = [
+            type("C", (), {"model_version": "v2", "model_name": "logistic_regression"})(),
+        ]
+
+        def complete_run(run_id, *_args, **_kwargs):
+            # The real executor uses a separate session and clears the active
+            # id from its finally block.  Persisting completion here gives the
+            # blocking caller the same observable result.
+            with self.Session() as worker_session:
+                persisted = worker_session.get(GlobalUpdateRun, run_id)
+                assert persisted is not None
+                persisted.status = "completed"
+                persisted.finished_at = datetime.now()
+                worker_session.commit()
+
+        mock_execute.side_effect = complete_run
+
+        class FailOnReentryLock:
+            def __init__(self):
+                self.entered = False
+
+            def __enter__(self):
+                if self.entered:
+                    raise AssertionError("active update lock was reacquired while held")
+                self.entered = True
+                return self
+
+            def __exit__(self, *_args):
+                self.entered = False
+
+        with patch.object(gu, "_active_thread_lock", FailOnReentryLock()):
+            with self.Session() as session:
+                run, _ = start_global_update(
+                    session,
+                    origin="job",
+                    force=True,
+                    blocking=True,
+                )
+
+        self.assertIsNotNone(run)
+        assert run is not None
+        self.assertEqual(run.status, "completed")
+        self.assertIsNone(gu._active_run_id)
+        mock_execute.assert_called_once()
+
+    @patch("backend.src.app.services.global_update.list_enabled_combinations")
+    @patch("backend.src.app.services.global_update._execute_global_update")
     def test_concurrent_run_blocked(self, mock_execute, mock_combinations):
         mock_combinations.return_value = [
             type("C", (), {"model_version": "v2", "model_name": "logistic_regression"})(),

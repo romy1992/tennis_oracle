@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -30,6 +31,15 @@ from backend.src.utility.sensitive_data import sanitize_text
 
 DAILY_JOB_NAME = "daily_global_update"
 WEEKLY_JOB_NAME = "weekly_validation"
+TERMINAL_GLOBAL_UPDATE_STATUSES = {
+    "completed",
+    "completed_with_errors",
+    "failed",
+    "cancelled",
+    "interrupted",
+}
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -228,6 +238,103 @@ def _latest_global_for_date(db: Session, scheduled_date: date) -> GlobalUpdateRu
     )
 
 
+def list_stale_daily_report_dates(
+    db: Session,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+    limit: int = 31,
+) -> list[date]:
+    """Return old daily report slots eligible for a guarded recovery attempt."""
+    current = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    if current.tzinfo is not None:
+        current = current.astimezone(timezone.utc).replace(tzinfo=None)
+    recovery_seconds = max(60, int(settings.scheduled_reports_recovery_seconds))
+    stale_before = current - timedelta(seconds=recovery_seconds)
+    scheduled_values = db.scalars(
+        select(ScheduledReportJob.scheduled_for)
+        .where(
+            ScheduledReportJob.job_name == DAILY_JOB_NAME,
+            ScheduledReportJob.status == "running",
+            ScheduledReportJob.email_status.is_(None),
+            ScheduledReportJob.updated_at <= stale_before,
+        )
+        .order_by(ScheduledReportJob.scheduled_for)
+        .limit(max(1, limit))
+    ).all()
+    local_timezone = ZoneInfo(settings.scheduled_reports_timezone)
+    return [
+        value.replace(tzinfo=timezone.utc).astimezone(local_timezone).date()
+        for value in scheduled_values
+    ]
+
+
+def _reclaim_stale_daily_report(
+    db: Session,
+    settings: Settings,
+    *,
+    job: ScheduledReportJob,
+    scheduled_date: date,
+    source: JobSource,
+) -> GlobalUpdateRun | None:
+    """Reclaim only a stale report whose global update is already terminal.
+
+    This recovers a worker that died after completing the expensive update but
+    before persisting/sending its report.  It deliberately never starts a
+    second update while the first one may still be active.
+    """
+    if job.status != "running" or job.email_status is not None:
+        return None
+
+    recovery_seconds = max(60, int(settings.scheduled_reports_recovery_seconds))
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    stale_before = now - timedelta(seconds=recovery_seconds)
+    if job.updated_at is None or job.updated_at > stale_before:
+        return None
+
+    run = _latest_global_for_date(db, scheduled_date)
+    if run is None or run.status not in TERMINAL_GLOBAL_UPDATE_STATUSES:
+        return None
+
+    result = db.execute(
+        update(ScheduledReportJob)
+        .where(
+            ScheduledReportJob.id == job.id,
+            ScheduledReportJob.status == "running",
+            ScheduledReportJob.email_status.is_(None),
+            ScheduledReportJob.updated_at <= stale_before,
+        )
+        .values(
+            status="pending",
+            source_environment=source.environment,
+            source_name=source.name,
+            source_url=source.url,
+            source_hostname=source.hostname,
+            source_path=source.path,
+            global_update_run_id=run.id,
+            message=None,
+            report_json=None,
+            email_error=None,
+            started_at=None,
+            finished_at=None,
+            updated_at=now,
+        )
+    )
+    db.commit()
+    if result.rowcount == 1:
+        db.refresh(job)
+        logger.warning(
+            "Reclaimed stale scheduled daily report job_id=%s run_id=%s age_seconds>=%s "
+            "source=%s",
+            job.id,
+            run.id,
+            recovery_seconds,
+            source.name,
+        )
+        return run
+    return None
+
+
 def _daily_report_payload(
     *,
     job: ScheduledReportJob,
@@ -272,22 +379,37 @@ def run_daily_scheduled_report(
         scheduled_date=scheduled_date,
         source=source,
     )
+    recovered_run: GlobalUpdateRun | None = None
     if not claimed:
-        return job, False
+        recovered_run = _reclaim_stale_daily_report(
+            db,
+            settings,
+            job=job,
+            scheduled_date=scheduled_date,
+            source=source,
+        )
+        if recovered_run is None:
+            return job, False
+        claimed = True
 
     _mark_running(db, job)
-    run: GlobalUpdateRun | None = None
-    message = ""
+    run: GlobalUpdateRun | None = recovered_run
+    message = (
+        f"Recovered stale scheduled report for terminal run_id={recovered_run.id}."
+        if recovered_run is not None
+        else ""
+    )
     try:
-        run, message = global_update_starter(
-            db,
-            origin="job",
-            force=False,
-            days_forward=10,
-            days_back_fixtures=3,
-            sync_cloud=_env_flag("SYNC_CLOUD", default=False),
-            blocking=True,
-        )
+        if recovered_run is None:
+            run, message = global_update_starter(
+                db,
+                origin="job",
+                force=False,
+                days_forward=10,
+                days_back_fixtures=3,
+                sync_cloud=_env_flag("SYNC_CLOUD", default=False),
+                blocking=True,
+            )
         db.expire_all()
         if run is None:
             run = _latest_global_for_date(db, scheduled_date)

@@ -95,6 +95,7 @@ SCHEDULED_GLOBAL_UPDATE_TIME=08:00
 SCHEDULED_WEEKLY_VALIDATION_DAY=0
 SCHEDULED_WEEKLY_VALIDATION_TIME=10:00
 SCHEDULED_REPORTS_POLL_SECONDS=30
+SCHEDULED_REPORTS_RECOVERY_SECONDS=5400
 
 # DEV Railway attualmente online
 SCHEDULED_JOB_SOURCE_NAME=tennis-oracle-dev
@@ -112,6 +113,14 @@ RESEND_API_BASE=https://api.resend.com
 RESEND_FROM="Tennis Oracle <onboarding@resend.dev>"
 RESEND_TIMEOUT_SECONDS=20
 ```
+
+`SCHEDULED_REPORTS_RECOVERY_SECONDS` abilita il recupero prudente del solo
+report giornaliero rimasto `running`: trascorso il timeout, il worker lo
+riacquisisce soltanto se l'aggiornamento globale della data è già terminato.
+Non viene quindi avviato un secondo `Aggiorna tutto` mentre il primo può essere
+ancora attivo. Il controllo include anche gli slot dei giorni precedenti,
+permettendo al tick successivo di completare un'email persa dopo un riavvio o
+un deploy.
 
 Secret obbligatorio, da impostare nel secret store dell'ambiente e mai nel
 repository:
