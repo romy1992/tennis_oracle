@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from backend.src.app.observability.email_reports import EmailAttachment, send_report_email
 from backend.src.app.services.scheduled_reports import (
     JobSource,
+    list_stale_daily_report_dates,
     run_daily_scheduled_report,
     run_weekly_scheduled_report,
 )
+from backend.src.jobs.run_report_scheduler import run_due
 from backend.src.entity.calibration import CalibrationRun
 from backend.src.entity.global_update_run import GlobalUpdateRun
+from backend.src.entity.scheduled_report_job import ScheduledReportJob
 from backend.src.entity.walk_forward import WalkForwardRun
 from backend.tests.auth_helpers import make_test_settings
 
@@ -161,6 +166,142 @@ def test_daily_job_records_source_and_deduplicates(db_session: Session) -> None:
     assert first.source_environment == "test"
     assert first.source_url == "https://dev.example.test"
     assert first.source_path == "/srv/tennis_oracle"
+
+
+def test_daily_job_recovers_stale_report_after_terminal_global_update(
+    db_session: Session,
+) -> None:
+    completed = _global_run(db_session)
+    stale_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
+    stuck = ScheduledReportJob(
+        schedule_key=f"daily_global_update:{SCHEDULE_DATE.isoformat()}",
+        job_name="daily_global_update",
+        scheduled_for=datetime(2026, 8, 31, 6, 0, 0),
+        status="running",
+        source_environment="test",
+        source_name="dead-worker",
+        source_url=None,
+        source_hostname="dead-host",
+        source_path="/old",
+        started_at=stale_at,
+        created_at=stale_at,
+        updated_at=stale_at,
+    )
+    db_session.add(stuck)
+    db_session.commit()
+    stuck_id = stuck.id
+    starter = MagicMock(return_value=(None, "already completed"))
+
+    recovered, claimed = run_daily_scheduled_report(
+        db_session,
+        _settings(scheduled_reports_recovery_seconds=60),
+        scheduled_date=SCHEDULE_DATE,
+        source=SOURCE,
+        global_update_starter=starter,
+    )
+
+    assert claimed is True
+    assert recovered.id == stuck_id
+    assert recovered.status == "completed"
+    assert recovered.global_update_run_id == completed.id
+    assert recovered.email_status == "disabled"
+    assert recovered.source_name == SOURCE.name
+    assert "recovered stale" in (recovered.message or "").lower()
+    starter.assert_not_called()
+
+
+def test_daily_job_does_not_recover_recent_running_report(db_session: Session) -> None:
+    _global_run(db_session)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    stuck = ScheduledReportJob(
+        schedule_key=f"daily_global_update:{SCHEDULE_DATE.isoformat()}",
+        job_name="daily_global_update",
+        scheduled_for=datetime(2026, 8, 31, 6, 0, 0),
+        status="running",
+        source_environment="test",
+        source_name="active-worker",
+        source_url=None,
+        source_hostname="active-host",
+        source_path="/active",
+        started_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add(stuck)
+    db_session.commit()
+    starter = MagicMock()
+
+    current, claimed = run_daily_scheduled_report(
+        db_session,
+        _settings(scheduled_reports_recovery_seconds=3600),
+        scheduled_date=SCHEDULE_DATE,
+        source=SOURCE,
+        global_update_starter=starter,
+    )
+
+    assert claimed is False
+    assert current.status == "running"
+    starter.assert_not_called()
+
+
+def test_stale_daily_report_dates_include_previous_days(db_session: Session) -> None:
+    stale_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
+    db_session.add(
+        ScheduledReportJob(
+            schedule_key=f"daily_global_update:{SCHEDULE_DATE.isoformat()}",
+            job_name="daily_global_update",
+            scheduled_for=datetime(2026, 8, 31, 6, 0, 0),
+            status="running",
+            source_environment="test",
+            source_name="dead-worker",
+            source_hostname="dead-host",
+            source_path="/old",
+            started_at=stale_at,
+            created_at=stale_at,
+            updated_at=stale_at,
+        )
+    )
+    db_session.commit()
+
+    dates = list_stale_daily_report_dates(
+        db_session,
+        _settings(scheduled_reports_recovery_seconds=60),
+    )
+
+    assert dates == [SCHEDULE_DATE]
+
+
+def test_run_due_checks_existing_daily_slot_for_safe_recovery() -> None:
+    settings = _settings()
+    daily_row = SimpleNamespace(status="completed")
+    session_factory = MagicMock()
+    session_factory.return_value.__enter__.return_value = MagicMock()
+
+    with (
+        patch("backend.src.jobs.run_report_scheduler.get_settings", return_value=settings),
+        patch(
+            "backend.src.jobs.run_report_scheduler.resolve_job_source",
+            return_value=SOURCE,
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.SessionLocal",
+            session_factory,
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.list_stale_daily_report_dates",
+            return_value=[date(2026, 9, 1)],
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.run_daily_scheduled_report",
+            side_effect=[(daily_row, True), (daily_row, False)],
+        ) as daily,
+    ):
+        results = run_due(datetime(2026, 9, 2, 12, 0, tzinfo=ZoneInfo("Europe/Rome")))
+
+    assert results == [("daily_global_update", 0)]
+    assert daily.call_count == 2
+    assert daily.call_args_list[0].kwargs["scheduled_date"] == date(2026, 9, 1)
+    assert daily.call_args_list[1].kwargs["scheduled_date"] == date(2026, 9, 2)
 
 
 def test_weekly_success_links_calibration_to_new_walk_forward(db_session: Session) -> None:

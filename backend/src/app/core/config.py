@@ -132,6 +132,7 @@ class Settings(BaseSettings):
     scheduled_weekly_validation_day: int = 0  # Monday (datetime.weekday)
     scheduled_weekly_validation_time: str = "10:00"
     scheduled_reports_poll_seconds: int = 30
+    scheduled_reports_recovery_seconds: int = 5400
     scheduled_job_source_name: str | None = None
     scheduled_job_source_url: str | None = None
     scheduled_job_source_path: str | None = None
