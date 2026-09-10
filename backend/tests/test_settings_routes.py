@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from cryptography.fernet import Fernet
@@ -17,17 +18,16 @@ from backend.src.entity.runtime_secret import RuntimeSecret
 from backend.src.utility import request_api as request_api_module
 from backend.tests.auth_helpers import make_test_settings, override_settings
 
-TEST_MASTER_KEY = Fernet.generate_key().decode("ascii")
 NEW_API_KEY = "new-api-tennis-key-not-real"
+LEGACY_MASTER_KEY = Fernet.generate_key().decode("ascii")
 
 
-def _secure_settings():
+def _provider_settings():
     return make_test_settings(
         app_env="test",
         api_tennis_key="environment-api-tennis-key-not-real",
         api_tennis_base="https://example.test/tennis/",
         api_tennis_timeout=12.0,
-        runtime_secrets_master_key=TEST_MASTER_KEY,
     )
 
 
@@ -60,17 +60,17 @@ def test_settings_status_never_returns_environment_key(client, auth_headers):
     assert payload["source"] == "environment"
     assert payload["configured"] is True
     assert payload["usable"] is True
-    assert payload["storage_ready"] is False
+    assert payload["storage_ready"] is True
     assert payload["fingerprint"].startswith("sha256:")
     assert "test-api-tennis-key-not-real" not in response.text
 
 
-def test_admin_can_verify_save_and_activate_encrypted_key(
+def test_admin_can_verify_save_and_activate_database_key(
     client,
     auth_headers,
     db_session,
 ):
-    settings = _secure_settings()
+    settings = _provider_settings()
     override_settings(settings)
 
     with patch.object(settings_routes, "request_api", return_value=[]) as provider_call:
@@ -98,7 +98,8 @@ def test_admin_can_verify_save_and_activate_encrypted_key(
     db_session.expire_all()
     row = db_session.get(RuntimeSecret, API_TENNIS_SECRET_KEY)
     assert row is not None
-    assert NEW_API_KEY not in row.encrypted_value
+    assert row.encryption_scheme == "database-v1"
+    assert row.encrypted_value == NEW_API_KEY
     assert (
         resolve_api_tennis_key_from_db(
             db_session,
@@ -132,7 +133,7 @@ def test_failed_verification_does_not_replace_key(
     auth_headers,
     db_session,
 ):
-    settings = _secure_settings()
+    settings = _provider_settings()
     override_settings(settings)
 
     with patch.object(
@@ -160,7 +161,7 @@ def test_admin_can_force_save_without_provider_verification(
     auth_headers,
     db_session,
 ):
-    settings = _secure_settings()
+    settings = _provider_settings()
     override_settings(settings)
 
     with patch.object(settings_routes, "request_api") as provider_call:
@@ -180,12 +181,33 @@ def test_admin_can_force_save_without_provider_verification(
     assert db_session.get(RuntimeSecret, API_TENNIS_SECRET_KEY) is not None
 
 
-def test_update_requires_current_admin_password_and_master_key(
+def test_existing_fernet_value_remains_readable(db_session):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    db_session.add(
+        RuntimeSecret(
+            key=API_TENNIS_SECRET_KEY,
+            encrypted_value=Fernet(LEGACY_MASTER_KEY.encode("ascii"))
+            .encrypt(NEW_API_KEY.encode("utf-8"))
+            .decode("ascii"),
+            encryption_scheme="fernet-v1",
+            fingerprint="sha256:legacy",
+            created_at=now,
+            updated_at=now,
+            updated_by="admin",
+        )
+    )
+    db_session.commit()
+
+    settings = make_test_settings(runtime_secrets_master_key=LEGACY_MASTER_KEY)
+    assert resolve_api_tennis_key_from_db(db_session, settings=settings) == NEW_API_KEY
+
+
+def test_update_requires_current_admin_password_but_no_extra_master_key(
     client,
     auth_headers,
     db_session,
 ):
-    override_settings(_secure_settings())
+    override_settings(_provider_settings())
     wrong_password = client.patch(
         "/api/settings/providers/api-tennis/key",
         headers=auth_headers,
@@ -203,7 +225,7 @@ def test_update_requires_current_admin_password_and_master_key(
             runtime_secrets_master_key=None,
         )
     )
-    missing_master_key = client.patch(
+    no_master_key = client.patch(
         "/api/settings/providers/api-tennis/key",
         headers=auth_headers,
         json={
@@ -212,6 +234,7 @@ def test_update_requires_current_admin_password_and_master_key(
             "verify_before_save": False,
         },
     )
-    assert missing_master_key.status_code == 503
-    assert "RUNTIME_SECRETS_MASTER_KEY" in missing_master_key.json()["detail"]
-    assert db_session.get(RuntimeSecret, API_TENNIS_SECRET_KEY) is None
+    assert no_master_key.status_code == 200
+    row = db_session.get(RuntimeSecret, API_TENNIS_SECRET_KEY)
+    assert row is not None
+    assert row.encryption_scheme == "database-v1"

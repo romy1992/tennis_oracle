@@ -56,7 +56,7 @@ Nel menu laterale trovi:
 | **Utenti beta Telegram** | Solo admin: whitelist utenti del bot (ricerca, invito, attivazione, sospensione, blocco; stato termini, origine invito e preferenze notifiche) |
 | **Feedback Telegram** | Solo admin: inbox dei feedback inviati dal bot (categoria, voto, messaggio; stati new / reviewing / resolved / rejected) |
 | **Report settimanale beta** | Solo admin: snapshot KPI della settimana (utenti, bot, tip live match-winner + breakdown mercati, ROI/drawdown, pipeline, notifiche, feedback) con confronto WoW |
-| **Impostazioni** | Solo admin: stato dell'integrazione API-Tennis, verifica di una nuova chiave e sostituzione cifrata con conferma della password |
+| **Impostazioni** | Solo admin: stato dell'integrazione API-Tennis, verifica di una nuova chiave e salvataggio nel database con conferma della password |
 
 In alto nella sidebar c’è anche il controllo **Aggiornamento globale**: importa partite, genera previsioni per tutti i modelli disponibili e aggiorna le schedine. Se compaiono errori (es. “4 errori”), il conteggio è cliccabile e apre **Report aggiornamento**.
 
@@ -222,7 +222,6 @@ Variabili importanti in `backend/.env` / `backend/properties/config.env`:
 - `DATABASE_URL` — connessione PostgreSQL
 - `API_TENNIS_KEY` / `API_TENNIS_BASE` — API tennis
 - `API_TENNIS_TIMEOUT` — timeout HTTP verso API tennis in secondi (opzionale, default 30)
-- `RUNTIME_SECRETS_MASTER_KEY` — chiave Fernet stabile e diversa per ogni ambiente; abilita la modifica cifrata della chiave API dalla pagina **Impostazioni**
 - `CORS_ORIGINS` — origini frontend consentite
 - `ADMIN_JWT_SECRET` — segreto per i token di accesso della dashboard (obbligatorio per il login)
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` — usati solo alla prima creazione dell’admin se il database non ne ha ancora uno

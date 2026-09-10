@@ -23,7 +23,6 @@ from backend.src.app.services.runtime_secrets import (
     API_TENNIS_SECRET_KEY,
     RuntimeSecretError,
     api_tennis_secret_status,
-    runtime_secret_storage_ready,
     set_runtime_secret,
 )
 from backend.src.app.services.subscription_dashboard import log_admin_action
@@ -146,14 +145,6 @@ def update_api_tennis_key(
         )
 
     api_key = _clean_api_key(payload.api_key.get_secret_value())
-    if not runtime_secret_storage_ready(settings):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "RUNTIME_SECRETS_MASTER_KEY non configurata correttamente "
-                "per questo ambiente."
-            ),
-        )
     verified = False
     if payload.verify_before_save:
         _verify_provider_key(api_key)
