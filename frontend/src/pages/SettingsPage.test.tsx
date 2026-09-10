@@ -113,7 +113,7 @@ describe("SettingsPage", () => {
     expect(
       await screen.findByText("Nuova chiave API-Tennis salvata e attivata.")
     ).toBeInTheDocument();
-    expect(screen.getByText("Override cifrato nel database")).toBeInTheDocument();
+    expect(screen.getByText("Override nel database")).toBeInTheDocument();
     expect(screen.getByLabelText("Nuova chiave API")).toHaveValue("");
   });
 
@@ -147,16 +147,15 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("explains why save is disabled when encrypted storage is not configured", async () => {
+  it("does not require an extra storage key to save", async () => {
     apiMocks.getApiTennisSettings.mockResolvedValue({
       ...environmentSettings,
       storage_ready: false
     });
     render(<SettingsPage />);
 
-    expect(
-      await screen.findByText(/RUNTIME_SECRETS_MASTER_KEY/)
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Salva e attiva" })).toBeDisabled();
+    expect(await screen.findByRole("heading", { name: "Impostazioni" })).toBeInTheDocument();
+    expect(screen.queryByText(/RUNTIME_SECRETS_MASTER_KEY/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Salva e attiva" })).toBeEnabled();
   });
 });

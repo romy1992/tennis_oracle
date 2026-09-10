@@ -1,4 +1,4 @@
-"""Encrypted runtime secrets managed through the admin dashboard."""
+"""Runtime integration settings managed through the admin dashboard."""
 
 from sqlalchemy import Column, DateTime, String, Text
 
@@ -6,13 +6,13 @@ from backend.src.entity.base import Base
 
 
 class RuntimeSecret(Base):
-    """Encrypted, environment-local override for an external integration secret."""
+    """Database override for an external integration credential."""
 
     __tablename__ = "runtime_secret"
 
     key = Column(String(128), primary_key=True)
     encrypted_value = Column(Text, nullable=False)
-    encryption_scheme = Column(String(32), nullable=False, default="fernet-v1")
+    encryption_scheme = Column(String(32), nullable=False, default="database-v1")
     fingerprint = Column(String(32), nullable=False)
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False, index=True)

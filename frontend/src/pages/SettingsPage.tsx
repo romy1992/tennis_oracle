@@ -12,7 +12,7 @@ function errorMessage(error: unknown): string {
 }
 
 function sourceLabel(source: ApiTennisProviderSettings["source"]): string {
-  if (source === "database") return "Override cifrato nel database";
+  if (source === "database") return "Override nel database";
   if (source === "environment") return "Variabile d'ambiente";
   return "Non configurata";
 }
@@ -194,15 +194,6 @@ export function SettingsPage() {
           </div>
         ) : null}
 
-        {!settings.storage_ready ? (
-          <div className="settings-alert warning" role="alert">
-            Per abilitare il salvataggio dalla pagina, configura una chiave Fernet in
-            <code> RUNTIME_SECRETS_MASTER_KEY </code>
-            per questo ambiente e riavvia il servizio. La chiave API presente nelle
-            variabili d&apos;ambiente continua a essere utilizzata nel frattempo.
-          </div>
-        ) : null}
-
         <form className="settings-secret-form" onSubmit={requestSave}>
           <label>
             Nuova chiave API
@@ -243,7 +234,7 @@ export function SettingsPage() {
             <button
               type="submit"
               className="action-button primary"
-              disabled={busy || !settings.storage_ready}
+              disabled={busy}
             >
               Salva e attiva
             </button>
@@ -252,7 +243,7 @@ export function SettingsPage() {
                 type="button"
                 className="action-button danger"
                 onClick={() => setConfirmation("force")}
-                disabled={busy || !settings.storage_ready}
+                disabled={busy}
               >
                 Salva senza verifica
               </button>

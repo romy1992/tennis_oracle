@@ -20,8 +20,7 @@ class Settings(BaseSettings):
     api_tennis_key: SecretStr | None = None
     api_tennis_base: str | None = None
     api_tennis_timeout: float = 30.0
-    # Stable, environment-specific Fernet key used only to wrap runtime secrets.
-    # Generate once per environment and keep it in the deployment secret store.
+    # Optional legacy key for reading values saved by earlier encrypted builds.
     runtime_secrets_master_key: SecretStr | None = None
 
     global_update_cron_enabled: bool = False

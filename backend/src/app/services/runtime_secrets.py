@@ -1,4 +1,4 @@
-"""Encrypted runtime-secret storage and API-Tennis credential resolution."""
+"""Database-backed runtime settings and API-Tennis credential resolution."""
 
 from __future__ import annotations
 
@@ -19,10 +19,11 @@ logger = logging.getLogger(__name__)
 
 API_TENNIS_SECRET_KEY = "provider.api_tennis.key"
 FERNET_SCHEME = "fernet-v1"
+DATABASE_VALUE_SCHEME = "database-v1"
 
 
 class RuntimeSecretError(RuntimeError):
-    """Safe domain error for encrypted runtime-secret operations."""
+    """Safe domain error for runtime-setting operations."""
 
 
 class RuntimeSecretStorageNotConfigured(RuntimeSecretError):
@@ -64,10 +65,14 @@ def _fernet(settings: Settings) -> Fernet:
 
 
 def runtime_secret_storage_ready(settings: Settings) -> bool:
-    try:
-        _fernet(settings)
-    except RuntimeSecretStorageNotConfigured:
-        return False
+    """Return whether the dashboard can save settings.
+
+    New values are stored directly in the protected application database, so
+    saving does not require an additional deployment secret. The settings
+    argument remains for API compatibility with older callers.
+    """
+
+    _ = settings
     return True
 
 
@@ -76,6 +81,8 @@ def get_runtime_secret_row(db: Session, *, key: str) -> RuntimeSecret | None:
 
 
 def decrypt_runtime_secret(row: RuntimeSecret, *, settings: Settings) -> str:
+    if row.encryption_scheme == DATABASE_VALUE_SCHEME:
+        return row.encrypted_value
     if row.encryption_scheme != FERNET_SCHEME:
         raise RuntimeSecretDecryptionError(
             f"Schema di cifratura non supportato: {row.encryption_scheme}."
@@ -102,13 +109,14 @@ def set_runtime_secret(
         raise RuntimeSecretError("La chiave deve contenere tra 8 e 512 caratteri.")
 
     now = _utc_now_naive()
-    encrypted_value = _fernet(settings).encrypt(cleaned.encode("utf-8")).decode("ascii")
+    _ = settings
+    stored_value = cleaned
     row = get_runtime_secret_row(db, key=key)
     if row is None:
         row = RuntimeSecret(
             key=key,
-            encrypted_value=encrypted_value,
-            encryption_scheme=FERNET_SCHEME,
+            encrypted_value=stored_value,
+            encryption_scheme=DATABASE_VALUE_SCHEME,
             fingerprint=secret_fingerprint(cleaned),
             created_at=now,
             updated_at=now,
@@ -116,8 +124,8 @@ def set_runtime_secret(
         )
         db.add(row)
     else:
-        row.encrypted_value = encrypted_value
-        row.encryption_scheme = FERNET_SCHEME
+        row.encrypted_value = stored_value
+        row.encryption_scheme = DATABASE_VALUE_SCHEME
         row.fingerprint = secret_fingerprint(cleaned)
         row.updated_at = now
         row.updated_by = updated_by[:150]
@@ -147,17 +155,13 @@ def resolve_api_tennis_key_from_db(
 def resolve_api_tennis_key(*, environment_fallback: str | None = None) -> str | None:
     """Resolve the active key for workers that do not own a request DB session.
 
-    When encrypted storage is not enabled, the existing environment value stays
-    fully backward compatible. During a migration rollout, a missing table also
-    falls back to the environment key. A present but undecryptable DB override
-    fails closed rather than silently using an older credential.
+    During a migration rollout, a missing table falls back to the environment
+    key. A present but unreadable DB override fails closed rather than silently
+    using an older credential.
     """
 
     settings = get_settings()
     fallback = environment_fallback or environment_api_tennis_key(settings)
-    if not runtime_secret_storage_ready(settings):
-        return fallback
-
     # Import the module rather than SessionLocal directly: tests and local tools
     # can safely rebind the canonical session factory.
     from backend.src.app.db import session as db_session_module
@@ -192,7 +196,7 @@ def api_tennis_secret_status(db: Session, *, settings: Settings) -> dict[str, ob
     updated_at = None
     updated_by = None
 
-    if row is not None and storage_ready:
+    if row is not None:
         source = "database"
         fingerprint = row.fingerprint
         updated_at = row.updated_at
@@ -205,20 +209,6 @@ def api_tennis_secret_status(db: Session, *, settings: Settings) -> dict[str, ob
         source = "environment"
         fingerprint = secret_fingerprint(environment_key)
         usable = True
-        if row is not None:
-            warning = (
-                "Esiste un override cifrato, ma non è attivo perché la master key "
-                "di questo ambiente non è configurata correttamente."
-            )
-    elif row is not None:
-        source = "database"
-        fingerprint = row.fingerprint
-        updated_at = row.updated_at
-        updated_by = row.updated_by
-        warning = (
-            "La chiave cifrata è presente ma non può essere utilizzata finché "
-            "RUNTIME_SECRETS_MASTER_KEY non è configurata correttamente."
-        )
 
     return {
         "configured": source != "missing",
