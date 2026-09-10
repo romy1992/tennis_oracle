@@ -26,6 +26,7 @@ _TEST_ENV = {
     "DATABASE_TARGET_URL": "sqlite://",
     "API_TENNIS_KEY": "test-api-tennis-key-not-real",
     "API_TENNIS_BASE": "https://example.test/tennis/",
+    "RUNTIME_SECRETS_MASTER_KEY": "",
     "TELEGRAM_BOT_TOKEN": "",
     "TELEGRAM_SERVICE_API_KEY": "",
     "SERVICE_API_KEY": "",
@@ -41,15 +42,15 @@ _TEST_ENV = {
 for _key, _value in _TEST_ENV.items():
     os.environ[_key] = _value
 
-from backend.src.app.core.config import set_settings_override  # noqa: E402
-from backend.tests.auth_helpers import (  # noqa: E402
+from backend.src.app.core.config import set_settings_override
+from backend.tests.auth_helpers import (
     auth_header_for_admin,
     clear_settings_override,
     create_admin,
     make_test_settings,
     override_settings,
 )
-from backend.tests.db_helpers import (  # noqa: E402
+from backend.tests.db_helpers import (
     create_session_factory,
     create_test_engine,
     make_api_client,

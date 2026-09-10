@@ -5,6 +5,7 @@
 
 alembic==1.18.4
 bcrypt==5.0.0
+cryptography==50.0.1
 fastapi==0.137.2
 httpx==0.28.1
 lightgbm==4.7.0

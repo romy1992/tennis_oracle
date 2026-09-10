@@ -71,7 +71,10 @@ import type {
   SubscriptionDashboardSummaryResponse,
   SubscriptionDashboardUserListResponse,
   SubscriptionDashboardEventListResponse,
-  SubscriptionDashboardManualActionResponse
+  SubscriptionDashboardManualActionResponse,
+  ApiTennisProviderSettings,
+  ApiTennisConnectionTestResponse,
+  ApiTennisKeyUpdateResponse
 } from "../types/api";
 import { getStoredToken } from "../auth/session";
 
@@ -209,6 +212,22 @@ export const apiClient = {
     }),
   getSession: () => request<AdminSessionResponse>("/api/auth/me"),
   logout: () => post<{ ok: boolean; message: string }>("/api/auth/logout"),
+  getApiTennisSettings: () =>
+    request<ApiTennisProviderSettings>("/api/settings/providers/api-tennis"),
+  testApiTennisConnection: (payload: { api_key?: string } = {}) =>
+    post<ApiTennisConnectionTestResponse>(
+      "/api/settings/providers/api-tennis/test",
+      payload
+    ),
+  updateApiTennisKey: (payload: {
+    api_key: string;
+    admin_password: string;
+    verify_before_save?: boolean;
+  }) =>
+    patch<ApiTennisKeyUpdateResponse>(
+      "/api/settings/providers/api-tennis/key",
+      payload
+    ),
   createPaymentCheckout: (payload: PaymentCheckoutRequest) =>
     post<PaymentCheckoutResponse>("/api/payments/checkout", payload),
   getSubscriptionsDashboardSummary: (params: { months?: number } = {}) =>

@@ -150,7 +150,13 @@ RATE_LIMIT_TELEGRAM_EXPENSIVE=10
 
 All’avvio, se la tabella `admin_user` è vuota e sono impostati `ADMIN_USERNAME` / `ADMIN_PASSWORD`, viene creato il primo admin (password con bcrypt). Non inserire segreti reali nel repo: usa `backend/.env.example` come modello.
 
-Per gli import API tennis: metti `API_TENNIS_KEY` in `backend/.env`; in `backend/properties/config.env` lascia `API_TENNIS_BASE` e opzionalmente `API_TENNIS_TIMEOUT` (secondi, default 30). I log applicativi oscurano automaticamente chiavi e credenziali nelle URL/query.
+Per gli import API tennis, `API_TENNIS_KEY` in `backend/.env` resta il valore iniziale/fallback; `API_TENNIS_BASE` e `API_TENNIS_TIMEOUT` (default 30 secondi) restano configurazione non sensibile. La pagina admin `/settings` può sostituire la chiave a runtime, senza riavviare API o job, dopo aver configurato una master key Fernet diversa per ogni ambiente:
+
+```powershell
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Salva l'output come segreto di deploy `RUNTIME_SECRETS_MASTER_KEY`, mai nel repository. La nuova chiave API viene cifrata nel database, non viene restituita al frontend e prevale sul fallback ambiente. La pagina richiede una nuova verifica della password admin, prova la connessione prima dell'attivazione e registra l'operazione nell'audit log senza contenere la chiave. I log applicativi oscurano automaticamente chiavi e credenziali nelle URL/query.
 
 Bot Telegram (opzionale): segreti in `backend/.env` (con fallback non sensibile da `config.env`):
 
@@ -349,6 +355,9 @@ Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, met
 | POST | `/api/subscriptions/dashboard/subscriptions/{subscription_id}/suspend` | `subscription_dashboard.suspend_dashboard_subscription` | admin | Sospensione manuale con audit log admin |
 | POST | `/api/subscriptions/dashboard/subscriptions/{subscription_id}/resume` | `subscription_dashboard.resume_dashboard_subscription` | admin | Riattivazione manuale con audit log admin |
 | POST | `/api/subscriptions/dashboard/subscriptions/{subscription_id}/cancel` | `subscription_dashboard.cancel_dashboard_subscription` | admin | Cancellazione manuale (immediata o a fine periodo) con audit log admin |
+| GET | `/api/settings/providers/api-tennis` | `settings.read_api_tennis_settings` | admin | Stato provider e fingerprint non reversibile; non restituisce mai la chiave |
+| POST | `/api/settings/providers/api-tennis/test` | `settings.test_api_tennis_connection` | admin | Verifica la chiave attiva o una candidata senza salvarla |
+| PATCH | `/api/settings/providers/api-tennis/key` | `settings.update_api_tennis_key` | admin + password | Verifica, cifra e attiva una nuova chiave; il bypass esplicito viene auditato |
 | GET | `/api/telegram/feedback` | `telegram_feedback.search_telegram_feedback` | admin | Inbox feedback bot |
 | GET | `/api/telegram/feedback/{feedback_id}` | `telegram_feedback.read_telegram_feedback` | admin | Dettaglio feedback |
 | PATCH | `/api/telegram/feedback/{feedback_id}` | `telegram_feedback.patch_telegram_feedback_status` | admin | Aggiorna stato (`new`/`reviewing`/`resolved`/`rejected`) |
@@ -408,7 +417,7 @@ Route definite in `matches.py`, `players.py`, `tournaments.py`, `ml.py` — **no
 
 #### `app/core/config.py` — `Settings`
 
-Campi: `app_env`, `debug`, `database_url`, `api_prefix`, flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`), utenti beta Telegram (`telegram_whitelist_enabled`, `telegram_terms_required`, `telegram_terms_version`), notifiche push utente (`telegram_notifications_enabled`, `telegram_notify_predictions_enabled`, `telegram_notify_results_enabled`, `telegram_notify_empty_day_enabled`, `telegram_notify_min_interval_seconds`, `telegram_notify_max_retries`, `telegram_notify_retry_backoff_seconds`), walk-forward (`walk_forward_in_global_update`, `walk_forward_mode`, `walk_forward_initial_train_days`, `walk_forward_test_days`, `walk_forward_step_days`, `walk_forward_min_train_rows`, `walk_forward_min_test_rows`, `walk_forward_embargo_days`, `walk_forward_edge_threshold`, `walk_forward_random_state`), calibrazione (`calibration_n_bins`, `calibration_min_bin_samples`, `calibration_min_calibrator_train_samples`), pubblicazione live temporanea fino a ML-07 (`live_publication_enabled`, `public_model_version`, `public_model_name`; default pubblicazione disabilitata), observability (`log_format`, `metrics_provider`, `metrics_endpoint_enabled`, `error_tracking_*`, `ops_alerts_*`, `telegram_bot_token`, `telegram_admin_chat_id`, soglie `ops_*`).  
+Campi: `app_env`, `debug`, `database_url`, `api_prefix`, API-Tennis (`api_tennis_key`, `api_tennis_base`, `api_tennis_timeout`) e archivio cifrato (`runtime_secrets_master_key`), flag/cron global update, `cors_origins`, `cors_origin_regex`, auth admin (`admin_jwt_secret`, `admin_jwt_expire_minutes`, `admin_username`, `admin_password`), service token (`service_api_key`, `service_api_key_previous`, `allow_unauthenticated_service_reads`), rate limit (`rate_limit_enabled`, `rate_limit_window_seconds`, `rate_limit_public` / `_admin` / `_internal` / `_expensive` / `_login` / `_telegram` / `_telegram_expensive`), utenti beta Telegram (`telegram_whitelist_enabled`, `telegram_terms_required`, `telegram_terms_version`), notifiche push utente (`telegram_notifications_enabled`, `telegram_notify_predictions_enabled`, `telegram_notify_results_enabled`, `telegram_notify_empty_day_enabled`, `telegram_notify_min_interval_seconds`, `telegram_notify_max_retries`, `telegram_notify_retry_backoff_seconds`), walk-forward (`walk_forward_in_global_update`, `walk_forward_mode`, `walk_forward_initial_train_days`, `walk_forward_test_days`, `walk_forward_step_days`, `walk_forward_min_train_rows`, `walk_forward_min_test_rows`, `walk_forward_embargo_days`, `walk_forward_edge_threshold`, `walk_forward_random_state`), calibrazione (`calibration_n_bins`, `calibration_min_bin_samples`, `calibration_min_calibrator_train_samples`), pubblicazione live temporanea fino a ML-07 (`live_publication_enabled`, `public_model_version`, `public_model_name`; default pubblicazione disabilitata), observability (`log_format`, `metrics_provider`, `metrics_endpoint_enabled`, `error_tracking_*`, `ops_alerts_*`, `telegram_bot_token`, `telegram_admin_chat_id`, soglie `ops_*`).
 `get_settings()` — settings cacheati; `set_settings_override()` per test/middleware.
 
 #### `app/core/security.py`
@@ -1237,7 +1246,7 @@ Tabelle legacy import: `fixture`, `player`, `tournament`, `event`, `standing`, `
 
 Tabelle ML canoniche (migrazioni Alembic): `ml_player`, `ml_tournament`, `ml_match`, `ranking_snapshot`, `odds_snapshot`, `feature_snapshot`.
 
-Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report` → `0021_walk_forward` → `0022_calibration` → `0023_background_job_progress` → `0024_public_model_registry` → `0025_subscriptions_domain` → `0026_payment_checkout_providers` → `0027_admin_audit_log` → `0028_feature_flags` → `0029_betting_slip_pick_market` → `0030_multi_market_columns`.
+Catena migrazioni recente (Alembic): `0010_telegram_bot_events` → `0011_admin_user` → `0012_rate_limit_bucket` → `0013_published_prediction` → `0014_prematch_odds_snapshot` → `0015_pp_live_idempotency` → `0016_pipeline_reliability` → `0017_telegram_user` → `0018_telegram_notifications` → `0019_telegram_feedback` → `0020_weekly_beta_report` → `0021_walk_forward` → `0022_calibration` → `0023_background_job_progress` → `0024_public_model_registry` → `0025_subscriptions_domain` → `0026_payment_checkout_providers` → `0027_admin_audit_log` → `0028_feature_flags` → `0029_betting_slip_pick_market` → `0030_multi_market_columns` → `0031_widen_wf_versions` → `0032_daily_slip_lifecycle` → `0033_slip_strategy_metadata` → `0034_widen_calibration_versions` → `0035_scheduled_report_jobs` → `0036_runtime_secrets`.
 
 ```bash
 cd backend

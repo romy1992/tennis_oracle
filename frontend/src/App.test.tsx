@@ -38,7 +38,8 @@ const apiMocks = vi.hoisted(() => ({
   getPublishedPredictions: vi.fn(),
   getPublishedPredictionVersions: vi.fn(),
   getPublishedLiveStats: vi.fn(),
-  getLiveBetaDashboard: vi.fn()
+  getLiveBetaDashboard: vi.fn(),
+  getApiTennisSettings: vi.fn()
 }));
 
 vi.mock("./services/apiClient", async () => {
@@ -91,5 +92,27 @@ describe("App navigation and auth", () => {
   it("redirects index to predictions when authenticated", async () => {
     renderApp({ initialEntries: ["/"] });
     expect(await screen.findByRole("heading", { name: "Partite" })).toBeInTheDocument();
+  });
+
+  it("opens system settings from the sidebar", async () => {
+    apiMocks.getApiTennisSettings.mockResolvedValue({
+      provider: "api-tennis",
+      environment: "local",
+      configured: true,
+      usable: true,
+      source: "environment",
+      fingerprint: "sha256:0123456789ab",
+      storage_ready: false,
+      database_override_present: false,
+      base_url: "https://example.test/tennis/",
+      timeout_seconds: 30,
+      updated_at: null,
+      updated_by: null,
+      warning: null
+    });
+    renderApp({ initialEntries: ["/settings"] });
+
+    expect(await screen.findByRole("heading", { name: "Impostazioni" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Impostazioni" })).toHaveClass("active");
   });
 });
