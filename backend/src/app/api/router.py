@@ -15,6 +15,7 @@ from backend.src.app.api.routes import (
     public_model_registry,
     published_predictions,
     segment_roi,
+    settings,
     single_match_value,
     subscription_dashboard,
     telegram,
@@ -23,7 +24,6 @@ from backend.src.app.api.routes import (
     walk_forward,
     weekly_beta_reports,
 )
-
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -47,5 +47,6 @@ api_router.include_router(calibration.router)
 api_router.include_router(public_model_registry.router)
 api_router.include_router(probability_bands.router)
 api_router.include_router(segment_roi.router)
+api_router.include_router(settings.router)
 api_router.include_router(ops.router)
 api_router.include_router(subscription_dashboard.router)

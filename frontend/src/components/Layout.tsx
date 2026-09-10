@@ -51,6 +51,10 @@ const navSections: Array<{
       { to: "/probability-bands", label: "Fasce probabilità" },
       { to: "/segment-roi", label: "ROI per segmento" }
     ]
+  },
+  {
+    label: "SISTEMA",
+    items: [{ to: "/settings", label: "Impostazioni" }]
   }
 ];
 

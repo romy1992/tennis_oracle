@@ -106,6 +106,10 @@ def is_expensive_request(request: Request, api_prefix: str) -> bool:
         return True
     if method == "POST" and path.startswith(f"{prefix}/betting-slips"):
         return True
+    if method in {"POST", "PATCH"} and path.startswith(
+        f"{prefix}/settings/providers/api-tennis"
+    ):
+        return True
     if method == "GET" and path.startswith(f"{prefix}/single-match-value"):
         return True
     if method == "GET" and path.startswith(f"{prefix}/betting-slips/daily"):

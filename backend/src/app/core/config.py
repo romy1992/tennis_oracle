@@ -1,9 +1,9 @@
 from functools import lru_cache
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from backend.src.app.core.env_files import BACKEND_CONFIG_ENV_FILE, BACKEND_ENV_FILE
-
 
 # Test / runtime override (middleware and non-DI callers honour this).
 _settings_override: "Settings | None" = None
@@ -14,6 +14,16 @@ class Settings(BaseSettings):
     debug: bool = False
     database_url: str = "postgresql://postgres:postgres@localhost:5432/tennis_db"
     api_prefix: str = "/api"
+
+    # API-Tennis provider. The environment key is the bootstrap/fallback value;
+    # an encrypted DB override can be rotated from the admin settings page.
+    api_tennis_key: SecretStr | None = None
+    api_tennis_base: str | None = None
+    api_tennis_timeout: float = 30.0
+    # Stable, environment-specific Fernet key used only to wrap runtime secrets.
+    # Generate once per environment and keep it in the deployment secret store.
+    runtime_secrets_master_key: SecretStr | None = None
+
     global_update_cron_enabled: bool = False
     global_update_cron_time: str = "02:00"
     global_update_cron_timezone: str = "Europe/Rome"

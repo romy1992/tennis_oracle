@@ -10,6 +10,10 @@ import requests
 from requests import exceptions as requests_exc
 
 from backend.src.app.core.env_files import load_backend_env_files
+from backend.src.app.services.runtime_secrets import (
+    RuntimeSecretError,
+    resolve_api_tennis_key,
+)
 from backend.src.utility.sensitive_data import (
     sanitize_payload,
     sanitize_text,
@@ -65,10 +69,15 @@ def _timeout_seconds() -> float:
     return value
 
 
-def _build_request_params(method: str, params: dict | None) -> dict[str, Any]:
+def _build_request_params(
+    method: str,
+    params: dict | None,
+    *,
+    api_key: str | None = None,
+) -> dict[str, Any]:
     # Never mutate the caller's dict (avoids leaking APIkey into caller logs).
     request_params: dict[str, Any] = dict(params or {})
-    request_params["APIkey"] = API_KEY
+    request_params["APIkey"] = api_key if api_key is not None else API_KEY
     request_params["method"] = method or ""
     return request_params
 
@@ -82,7 +91,12 @@ def _log_outgoing_request(method: str, request_params: dict[str, Any]) -> None:
     )
 
 
-def request_api(method: str, params: dict | None = None):
+def request_api(
+    method: str,
+    params: dict | None = None,
+    *,
+    api_key_override: str | None = None,
+):
     """
     Call API-Tennis and return the `result` payload.
 
@@ -91,10 +105,16 @@ def request_api(method: str, params: dict | None = None):
     """
     if not BASE_URL:
         raise ApiTennisError("API_TENNIS_BASE is not configured")
-    if not API_KEY:
+    try:
+        api_key = api_key_override or resolve_api_tennis_key(
+            environment_fallback=API_KEY
+        )
+    except RuntimeSecretError as exc:
+        raise ApiTennisError(str(exc)) from exc
+    if not api_key:
         raise ApiTennisError("API_TENNIS_KEY is not configured")
 
-    request_params = _build_request_params(method, params)
+    request_params = _build_request_params(method, params, api_key=api_key)
     timeout = _timeout_seconds()
     _log_outgoing_request(method, request_params)
 

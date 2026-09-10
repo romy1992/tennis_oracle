@@ -2149,3 +2149,32 @@ export type FeatureFlagListResponse = {
   items: FeatureFlagRead[];
 };
 
+export type ApiTennisSettingsSource = "database" | "environment" | "missing";
+
+export type ApiTennisProviderSettings = {
+  provider: "api-tennis";
+  environment: string;
+  configured: boolean;
+  usable: boolean;
+  source: ApiTennisSettingsSource;
+  fingerprint: string | null;
+  storage_ready: boolean;
+  database_override_present: boolean;
+  base_url: string | null;
+  timeout_seconds: number;
+  updated_at: string | null;
+  updated_by: string | null;
+  warning: string | null;
+};
+
+export type ApiTennisConnectionTestResponse = {
+  ok: boolean;
+  message: string;
+};
+
+export type ApiTennisKeyUpdateResponse = {
+  message: string;
+  verified: boolean;
+  settings: ApiTennisProviderSettings;
+};
+
