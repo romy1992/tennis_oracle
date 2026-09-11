@@ -208,6 +208,17 @@ function calendarDayLabel(day: BettingSlipCalendarDay) {
   });
 }
 
+function calendarDayOptionLabel(day: BettingSlipCalendarDay) {
+  const name = calendarDayLabel(day);
+  const slips = day.has_slips
+    ? `${day.slip_count} ${day.slip_count === 1 ? "schedina" : "schedine"}`
+    : "nessuna schedina";
+  if (day.is_past) {
+    return `${name} · ${slips}`;
+  }
+  return `${name} · ${day.fixture_count} match · ${slips}`;
+}
+
 function SlipStatsPanel({
   title,
   subtitle,
@@ -982,6 +993,35 @@ export function BettingSlipsPage() {
           </p>
         </div>
         <div className="page-header-actions">
+          {calendar ? (
+            <label className="slip-calendar-field">
+              <span>Calendario schedine</span>
+              <select
+                value={selectedDate}
+                onChange={(event) => setSelectedDate(event.target.value)}
+                disabled={!calendar.days.length}
+              >
+                {pastDays.length ? (
+                  <optgroup label="Storico">
+                    {pastDays.map((day) => (
+                      <option key={day.date} value={day.date}>
+                        {calendarDayOptionLabel(day)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {upcomingDays.length ? (
+                  <optgroup label="Prossime giornate">
+                    {upcomingDays.map((day) => (
+                      <option key={day.date} value={day.date}>
+                        {calendarDayOptionLabel(day)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+              </select>
+            </label>
+          ) : null}
           <label className="min-edge-field">
             <span>Margine sicurezza</span>
             <input
@@ -1039,71 +1079,10 @@ export function BettingSlipsPage() {
 
       <LiveMatchesPanel items={livePanelItems} />
 
-      {calendar ? (
-        <article className="panel">
-          <div className="panel-header">
-            <h3>Calendario schedine</h3>
-            <span className="pill pill-ok">
-              {formatDate(calendar.window_from)} → {formatDate(calendar.window_to)}
-            </span>
-          </div>
-          {pastDays.length ? (
-            <>
-              <p className="calendar-section-label">Storico</p>
-              <div className="slip-day-tabs" aria-label="Giorni storici">
-                {pastDays.map((day) => (
-                  <button
-                    key={day.date}
-                    type="button"
-                    className={`slip-day-tab past ${selectedDate === day.date ? "active" : ""}`}
-                    onClick={() => setSelectedDate(day.date)}
-                  >
-                    {calendarDayLabel(day)}
-                    {day.has_slips ? <span className="slip-day-badge">{day.slip_count}</span> : null}
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : null}
-          <p className="calendar-section-label">Prossime giornate</p>
-          <div className="slip-day-tabs" aria-label="Giorni disponibili">
-            {upcomingDays.map((day) => (
-              <button
-                key={day.date}
-                type="button"
-                className={`slip-day-tab ${day.is_today ? "today" : "upcoming"} ${selectedDate === day.date ? "active" : ""}`}
-                onClick={() => setSelectedDate(day.date)}
-              >
-                {calendarDayLabel(day)}
-                <span className="slip-day-meta">{day.fixture_count} match</span>
-                {day.has_slips ? <span className="slip-day-badge">{day.slip_count}</span> : null}
-              </button>
-            ))}
-          </div>
-        </article>
-      ) : null}
-
       {loadingDay ? <LoadingState title="Caricamento giorno selezionato..." /> : null}
 
       {actionMessage ? <p className="action-success">{actionMessage}</p> : null}
       {error ? <p className="action-error">{error}</p> : null}
-      {selectedDaily && selectedDaily.candidate_pool_size >= 0 ? (
-        <p className="note">Pool PLAY disponibile: {selectedDaily.candidate_pool_size}</p>
-      ) : null}
-
-      {selectedDaily?.market_models.length ? (
-        <p className="note" data-testid="slip-market-models">
-          Modelli del pool: {selectedDaily.market_models.map((model) => (
-            `${model.label} ${model.model_version} / ${model.model_name}`
-          )).join(" · ")}
-        </p>
-      ) : null}
-
-      {selectedDaily?.warnings.map((warning) => (
-        <p key={`${selectedDaily.model_name}-${warning}`} className="note">
-          {warning}
-        </p>
-      ))}
 
       <div className="panel stake-panel">
         <label htmlFor="stake-input">

@@ -72,12 +72,13 @@ describe("BettingSlipsPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Consiglio schedina" })).toBeInTheDocument();
     expect(await screen.findByText("Play facile")).toBeInTheDocument();
+    expect(screen.getByLabelText("Calendario schedine")).toBeInTheDocument();
     expect(screen.queryByLabelText("Versioni modello")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Modelli")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "voting_ensemble" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("slip-market-models")).toHaveTextContent(
-      "Match Winner v4 / voting_ensemble · Primo set first_set_winner_v2 / logistic_regression · Over/Under over_under_games_v1 / random_forest"
-    );
+    expect(screen.queryByTestId("slip-market-models")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Pool PLAY disponibile/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Modelli del pool/)).not.toBeInTheDocument();
   });
 
   it("renders two markets from the same event as distinct picks", async () => {
@@ -214,6 +215,67 @@ describe("BettingSlipsPage", () => {
     expect(within(table).getByText(/Esito reale: Player A/)).toBeInTheDocument();
     expect(within(table).getByText(/Pick vinta/)).toBeInTheDocument();
     expect(within(table).getByText("Presa")).toBeInTheDocument();
+  });
+
+  it("hides pool, model and generation update notes", async () => {
+    apiMocks.getDailyBettingSlips.mockResolvedValue({
+      ...makeDailySlips(),
+      candidate_pool_size: 67,
+      warnings: ["Schedina 'Play · Bilanciata': solo 2/4 pick attive disponibili."]
+    });
+
+    renderWithProviders(<BettingSlipsPage />);
+
+    expect(await screen.findByText("Play facile")).toBeInTheDocument();
+    expect(screen.queryByText(/Pool PLAY disponibile/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Modelli del pool/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/solo 2\/4 pick attive/)).not.toBeInTheDocument();
+  });
+
+  it("lets the user pick a calendar day from the top dropdown", async () => {
+    const pastDate = "2026-07-20";
+    apiMocks.getBettingSlipCalendar.mockResolvedValue({
+      ...makeCalendar(),
+      window_from: pastDate,
+      days: [
+        {
+          date: pastDate,
+          is_today: false,
+          is_past: true,
+          is_upcoming: false,
+          has_slips: true,
+          slip_count: 2,
+          fixture_count: 8,
+          candidate_pool_size: 5
+        },
+        ...makeCalendar().days
+      ]
+    });
+    apiMocks.getDailyBettingSlips.mockImplementation(async (params: { date?: string } = {}) => {
+      if (params.date === pastDate) {
+        return {
+          ...makeDailySlips(pastDate),
+          slips: [makeSlip({ id: "slip-yesterday", slip_key: "yesterday", label: "Schedina ieri" })]
+        };
+      }
+      return makeDailySlips();
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSlipsPage />);
+
+    const calendarSelect = await screen.findByLabelText("Calendario schedine");
+    expect(calendarSelect.tagName).toBe("SELECT");
+    expect(await screen.findByText("Play facile")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Giorni storici")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Giorni disponibili")).not.toBeInTheDocument();
+
+    await user.selectOptions(calendarSelect, pastDate);
+    expect(await screen.findByText("Schedina ieri")).toBeInTheDocument();
+    expect(screen.queryByText("Play facile")).not.toBeInTheDocument();
+    expect(apiMocks.getDailyBettingSlips).toHaveBeenCalledWith(
+      expect.objectContaining({ date: pastDate })
+    );
   });
 
   it("shows empty state when the day has no slips", async () => {
