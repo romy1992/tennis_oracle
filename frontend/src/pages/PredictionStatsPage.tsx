@@ -92,9 +92,9 @@ export function PredictionStatsPage() {
   }, [market, dailyStats]);
 
   const daysNewestFirst = useMemo(() => {
-    return [...(dailyStats?.days ?? [])].sort((left, right) =>
-      right.date.localeCompare(left.date)
-    );
+    return [...(dailyStats?.days ?? [])]
+      .filter((day) => day.predictions_total > 0)
+      .sort((left, right) => right.date.localeCompare(left.date));
   }, [dailyStats]);
 
   const daysTotalPages = Math.max(1, Math.ceil(daysNewestFirst.length / DAYS_PAGE_SIZE));

@@ -75,6 +75,7 @@ const shuffledDays: DailyPredictionStatsDay[] = [
   makeDay("2026-09-01", 1),
   makeDay("2026-09-07", 7),
   makeDay("2026-09-03", 3),
+  makeDay("2026-09-08", 0),
   makeDay("2026-09-05", 5),
   makeDay("2026-09-02", 2),
   makeDay("2026-09-06", 6),
@@ -106,6 +107,7 @@ describe("PredictionStatsPage", () => {
     expect(within(rows[3]).getByText(formatDate("2026-09-04"))).toBeInTheDocument();
     expect(within(rows[4]).getByText(formatDate("2026-09-03"))).toBeInTheDocument();
     expect(screen.queryByText(formatDate("2026-09-02"))).not.toBeInTheDocument();
+    expect(screen.queryByText(formatDate("2026-09-08"))).not.toBeInTheDocument();
     expect(screen.getByText(/1\/2/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Giorni precedenti" }));
