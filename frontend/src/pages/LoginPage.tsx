@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
+import { BrandLogo } from "../components/BrandLogo";
 import { ApiError } from "../services/apiClient";
 
 export function LoginPage() {
@@ -37,7 +38,7 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={onSubmit}>
-        <h1>tennis_oracle</h1>
+        <BrandLogo className="login-brand" />
         <p>Accedi con l&apos;account amministratore.</p>
         <label>
           Username

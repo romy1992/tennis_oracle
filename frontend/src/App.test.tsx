@@ -68,7 +68,8 @@ describe("App navigation and auth", () => {
 
     renderApp({ authenticated: false, initialEntries: ["/predictions"] });
 
-    expect(await screen.findByRole("heading", { name: "tennis_oracle" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Tennis Oracle" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Tennis Oracle" })).toBeInTheDocument();
     expect(screen.getByText(/Accedi con l'account amministratore/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Partite" })).not.toBeInTheDocument();
   });
@@ -78,6 +79,8 @@ describe("App navigation and auth", () => {
     renderApp({ initialEntries: ["/predictions"] });
 
     expect(await screen.findByRole("heading", { name: "Partite" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Tennis Oracle" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Tennis Oracle" })).toBeInTheDocument();
     expect(screen.getByText("admin")).toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: "Consiglio schedina" }));

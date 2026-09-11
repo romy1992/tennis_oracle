@@ -1,4 +1,4 @@
-# Guida operativa dashboard — tennis_oracle
+# Guida operativa dashboard — Tennis Oracle
 
 Manuale **pagina per pagina** per l’amministratore che usa la UI ogni giorno, senza entrare nel codice.
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
+import { BrandLogo } from "./BrandLogo";
 import { GlobalUpdateControls } from "./GlobalUpdateControls";
 
 type NavLeaf = { to: string; label: string };
@@ -105,8 +106,10 @@ export function Layout() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div>
-          <h1>tennis_oracle</h1>
+        <div className="sidebar-header">
+          <div className="sidebar-brand">
+            <BrandLogo />
+          </div>
           <p>Previsioni e risultati tennis aggiornati ogni giorno.</p>
         </div>
         <GlobalUpdateControls />

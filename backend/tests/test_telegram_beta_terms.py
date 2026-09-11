@@ -14,6 +14,8 @@ from backend.src.app.telegram.messages import BETA_TERMS_TEXT
 class BetaTermsTextContentTest(unittest.TestCase):
     def test_mentions_beta_phase_risk_and_no_guarantee(self):
         self.assertIn("BETA", BETA_TERMS_TEXT)
+        self.assertIn("Tennis Oracle", BETA_TERMS_TEXT)
+        self.assertNotIn("tennis_oracle", BETA_TERMS_TEXT)
         self.assertIn("rischio", BETA_TERMS_TEXT.lower())
         self.assertIn("non garantiscono", BETA_TERMS_TEXT.lower())
         self.assertIn("perdere", BETA_TERMS_TEXT.lower())
