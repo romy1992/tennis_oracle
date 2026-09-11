@@ -365,6 +365,7 @@ a {
 .page-header {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   justify-content: space-between;
 }
@@ -1527,66 +1528,19 @@ label.checkbox-field input {
   font-size: 14px;
 }
 
-.calendar-section-label {
-  color: #65738a;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  margin: 12px 0 8px;
-  text-transform: uppercase;
+.slip-calendar-field {
+  min-width: 260px;
 }
 
-.slip-day-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.slip-day-tab {
-  align-items: center;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  color: #334155;
-  cursor: pointer;
-  display: inline-flex;
-  flex-direction: column;
-  font-size: 13px;
-  gap: 2px;
-  min-width: 88px;
-  padding: 8px 12px;
-}
-
-.slip-day-tab.active {
-  background: #dbeafe;
-  border-color: #93c5fd;
-  color: #1d4ed8;
-}
-
-.slip-day-tab.today {
-  font-weight: 700;
-}
-
-.slip-day-tab.past {
-  background: #fff;
-}
-
-.slip-day-meta {
-  color: #64748b;
-  font-size: 11px;
-}
-
-.slip-day-badge {
-  background: #172033;
-  border-radius: 999px;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  min-width: 18px;
-  padding: 2px 6px;
-  text-align: center;
+.slip-calendar-field select {
+  background: #ffffff;
+  border: 1px solid #cfd8e6;
+  border-radius: 10px;
+  color: #172033;
+  font: inherit;
+  max-width: 360px;
+  min-width: 260px;
+  padding: 10px 12px;
 }
 
 .slip-stats-panel + .slip-stats-panel {
