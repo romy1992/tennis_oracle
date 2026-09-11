@@ -15,6 +15,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY index.html tsconfig.json tsconfig.node.json vite.config.ts ./
+COPY public ./public
 COPY src ./src
 
 # Baked at build time (Vite). Override via --build-arg for each environment.

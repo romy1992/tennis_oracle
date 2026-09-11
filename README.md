@@ -1,4 +1,4 @@
-# tennis_oracle — documentazione tecnica
+# Tennis Oracle — documentazione tecnica
 
 [![CI](https://github.com/romy1992/tennis_oracle/actions/workflows/ci.yml/badge.svg)](https://github.com/romy1992/tennis_oracle/actions/workflows/ci.yml)
 
@@ -1093,7 +1093,8 @@ L’albero route è esportato come `appRoutes` (runtime: `createBrowserRouter`; 
 | Modulo | Ruolo |
 |--------|-------|
 | `ProtectedRoute` | Redirect a `/login` se non autenticato |
-| `Layout` | Sidebar, nav, logout, slot `GlobalUpdateControls` |
+| `BrandLogo` | Logo Tennis Oracle (sidebar, login) |
+| `Layout` | Sidebar con logo Tennis Oracle, nav, logout, slot `GlobalUpdateControls` |
 | `GlobalUpdateControls` | Start/cancel/status aggiornamento globale; link a report se ci sono errori |
 | `ModelControls` | Selettore mercato/modello (pagine operative; label senza v*) |
 | `MarketTabs` | Tab mercato condivisi (un mercato alla volta, KPI non misti) |

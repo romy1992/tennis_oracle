@@ -1,4 +1,4 @@
-# Guida utente — tennis_oracle
+# Guida utente — Tennis Oracle
 
 Questa guida spiega **a cosa serve** il progetto e **come usarlo**, senza entrare nei dettagli del codice.
 
@@ -8,9 +8,9 @@ Per lo scheduling giornaliero vedi [SCHEDULING.md](SCHEDULING.md).
 
 ---
 
-## Cos’è tennis_oracle?
+## Cos’è Tennis Oracle?
 
-**tennis_oracle** è un’applicazione che:
+**Tennis Oracle** è un’applicazione che:
 
 1. Scarica partite di tennis da un’API esterna
 2. Salva tutto in un database PostgreSQL

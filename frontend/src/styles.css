@@ -34,9 +34,36 @@ a {
   padding: 28px;
 }
 
-.sidebar h1 {
+.sidebar h1,
+.brand-logo {
   font-size: 24px;
   margin: 0 0 8px;
+}
+
+.brand-logo {
+  line-height: 0;
+}
+
+.brand-logo img {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sidebar-brand {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.sidebar-brand .brand-logo {
+  margin: 0;
 }
 
 .sidebar p {
@@ -172,9 +199,14 @@ a {
   width: 100%;
 }
 
+.login-card .brand-logo,
 .login-card h1 {
   font-size: 28px;
   margin: 0;
+}
+
+.login-brand img {
+  width: min(100%, 340px);
 }
 
 .login-card p {

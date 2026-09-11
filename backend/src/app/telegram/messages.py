@@ -17,7 +17,7 @@ DISCLAIMER = (
 # ai messaggi operativi), qui specifichiamo esplicitamente la fase beta e il rischio,
 # cosi' l'utente non "accetta al buio" senza aver letto nulla.
 BETA_TERMS_TEXT = (
-    "Condizioni d'uso (fase beta) — tennis_oracle\n\n"
+    "Condizioni d'uso (fase beta) — Tennis Oracle\n\n"
     "- Il servizio è in fase BETA: il modello di pronostico è in fase di validazione e il suo "
     "storico di risultati reali è ancora limitato.\n"
     "- I contenuti (pronostici, quote, schedine, statistiche) sono a scopo informativo/"
@@ -26,7 +26,7 @@ BETA_TERMS_TEXT = (
     "- Le scommesse comportano il rischio di perdere il denaro puntato: gioca solo ciò che puoi "
     "permetterti di perdere, nel rispetto delle leggi del tuo paese e dei limiti di gioco "
     "responsabile.\n"
-    "- tennis_oracle non è un bookmaker né un consulente di scommesse abilitato: resti l'unico "
+    "- Tennis Oracle non è un bookmaker né un consulente di scommesse abilitato: resti l'unico "
     "responsabile delle tue decisioni."
 )
 USER_ERROR_FALLBACK = "Si è verificato un problema temporaneo. Riprova tra poco."
@@ -127,7 +127,7 @@ def build_welcome_text(
     include_terms: bool = True,
 ) -> str:
     lines = [
-        "Ciao! Sono il bot di tennis_oracle.",
+        "Ciao! Sono il bot di Tennis Oracle.",
         "",
         "Usa i pulsanti qui sotto oppure i comandi:",
     ]

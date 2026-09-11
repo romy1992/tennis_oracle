@@ -97,7 +97,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="tennis_oracle API",
+    title="Tennis Oracle API",
     version="0.1.0",
     debug=settings.debug,
     lifespan=lifespan,
