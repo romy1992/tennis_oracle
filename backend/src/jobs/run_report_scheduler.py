@@ -31,6 +31,7 @@ from backend.src.app.observability.setup import setup_observability
 from backend.src.app.services.scheduled_reports import (
     DAILY_JOB_NAME,
     WEEKLY_JOB_NAME,
+    get_scheduled_job,
     list_stale_daily_report_dates,
     parse_schedule_time,
     resolve_job_source,

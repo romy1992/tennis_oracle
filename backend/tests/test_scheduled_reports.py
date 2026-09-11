@@ -304,6 +304,122 @@ def test_run_due_checks_existing_daily_slot_for_safe_recovery() -> None:
     assert daily.call_args_list[1].kwargs["scheduled_date"] == date(2026, 9, 2)
 
 
+def test_run_due_starts_weekly_cascade_on_monday_after_cutoff() -> None:
+    settings = _settings()
+    daily_row = SimpleNamespace(status="completed")
+    weekly_row = SimpleNamespace(status="completed")
+    session_factory = MagicMock()
+    session_factory.return_value.__enter__.return_value = MagicMock()
+
+    with (
+        patch("backend.src.jobs.run_report_scheduler.get_settings", return_value=settings),
+        patch(
+            "backend.src.jobs.run_report_scheduler.resolve_job_source",
+            return_value=SOURCE,
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.SessionLocal",
+            session_factory,
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.list_stale_daily_report_dates",
+            return_value=[],
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.run_daily_scheduled_report",
+            return_value=(daily_row, True),
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.get_scheduled_job",
+            return_value=None,
+        ) as existing,
+        patch(
+            "backend.src.jobs.run_report_scheduler.run_weekly_scheduled_report",
+            return_value=(weekly_row, True),
+        ) as weekly,
+    ):
+        results = run_due(datetime(2026, 8, 31, 10, 5, tzinfo=ZoneInfo("Europe/Rome")))
+
+    assert results == [("daily_global_update", 0), ("weekly_validation", 0)]
+    weekly.assert_called_once()
+    assert weekly.call_args.kwargs["scheduled_date"] == date(2026, 8, 31)
+    existing.assert_called_once()
+
+
+def test_run_due_skips_weekly_when_slot_already_claimed() -> None:
+    settings = _settings()
+    daily_row = SimpleNamespace(status="completed")
+    session_factory = MagicMock()
+    session_factory.return_value.__enter__.return_value = MagicMock()
+
+    with (
+        patch("backend.src.jobs.run_report_scheduler.get_settings", return_value=settings),
+        patch(
+            "backend.src.jobs.run_report_scheduler.resolve_job_source",
+            return_value=SOURCE,
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.SessionLocal",
+            session_factory,
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.list_stale_daily_report_dates",
+            return_value=[],
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.run_daily_scheduled_report",
+            return_value=(daily_row, True),
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.get_scheduled_job",
+            return_value=SimpleNamespace(id=9, status="completed"),
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.run_weekly_scheduled_report",
+        ) as weekly,
+    ):
+        results = run_due(datetime(2026, 8, 31, 10, 5, tzinfo=ZoneInfo("Europe/Rome")))
+
+    assert results == [("daily_global_update", 0)]
+    weekly.assert_not_called()
+
+
+def test_run_due_does_not_start_weekly_before_monday_cutoff() -> None:
+    settings = _settings()
+    daily_row = SimpleNamespace(status="completed")
+    session_factory = MagicMock()
+    session_factory.return_value.__enter__.return_value = MagicMock()
+
+    with (
+        patch("backend.src.jobs.run_report_scheduler.get_settings", return_value=settings),
+        patch(
+            "backend.src.jobs.run_report_scheduler.resolve_job_source",
+            return_value=SOURCE,
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.SessionLocal",
+            session_factory,
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.list_stale_daily_report_dates",
+            return_value=[],
+        ),
+        patch(
+            "backend.src.jobs.run_report_scheduler.run_daily_scheduled_report",
+            return_value=(daily_row, True),
+        ),
+        patch("backend.src.jobs.run_report_scheduler.get_scheduled_job") as existing,
+        patch(
+            "backend.src.jobs.run_report_scheduler.run_weekly_scheduled_report",
+        ) as weekly,
+    ):
+        results = run_due(datetime(2026, 8, 31, 9, 59, tzinfo=ZoneInfo("Europe/Rome")))
+
+    assert results == [("daily_global_update", 0)]
+    existing.assert_not_called()
+    weekly.assert_not_called()
+
+
 def test_weekly_success_links_calibration_to_new_walk_forward(db_session: Session) -> None:
     def start_global(db: Session, **_kwargs):
         return _global_run(db), "ok"
