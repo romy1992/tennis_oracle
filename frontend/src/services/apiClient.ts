@@ -74,7 +74,10 @@ import type {
   SubscriptionDashboardManualActionResponse,
   ApiTennisProviderSettings,
   ApiTennisConnectionTestResponse,
-  ApiTennisKeyUpdateResponse
+  ApiTennisKeyUpdateResponse,
+  ScheduledJob,
+  ScheduledJobListResponse,
+  ScheduledJobUpdateRequest
 } from "../types/api";
 import { getStoredToken } from "../auth/session";
 
@@ -226,6 +229,13 @@ export const apiClient = {
   }) =>
     patch<ApiTennisKeyUpdateResponse>(
       "/api/settings/providers/api-tennis/key",
+      payload
+    ),
+  getScheduledJobs: () =>
+    request<ScheduledJobListResponse>("/api/settings/scheduled-jobs"),
+  updateScheduledJob: (jobKey: string, payload: ScheduledJobUpdateRequest) =>
+    patch<ScheduledJob>(
+      `/api/settings/scheduled-jobs/${encodeURIComponent(jobKey)}`,
       payload
     ),
   createPaymentCheckout: (payload: PaymentCheckoutRequest) =>

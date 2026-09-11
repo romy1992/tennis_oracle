@@ -1,16 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ApiError } from "../services/apiClient";
+import { scheduledJobsList } from "../test/fixtures";
 import type { ApiTennisProviderSettings } from "../types/api";
 import { SettingsPage } from "./SettingsPage";
-
 
 const apiMocks = vi.hoisted(() => ({
   getApiTennisSettings: vi.fn(),
   testApiTennisConnection: vi.fn(),
-  updateApiTennisKey: vi.fn()
+  updateApiTennisKey: vi.fn(),
+  getScheduledJobs: vi.fn(),
+  updateScheduledJob: vi.fn()
 }));
 
 vi.mock("../services/apiClient", async () => {
@@ -63,6 +65,18 @@ describe("SettingsPage", () => {
       message: "Nuova chiave API-Tennis salvata e attivata.",
       verified: true,
       settings: databaseSettings
+    });
+    apiMocks.getScheduledJobs.mockResolvedValue(scheduledJobsList);
+    apiMocks.updateScheduledJob.mockImplementation(async (jobKey: string, payload) => {
+      const current = scheduledJobsList.items.find((item) => item.job_key === jobKey);
+      return {
+        ...(current || scheduledJobsList.items[0]),
+        ...payload,
+        job_key: jobKey,
+        source: "database" as const,
+        updated_at: "2026-09-11T08:00:00Z",
+        updated_by: "admin"
+      };
     });
   });
 
@@ -157,5 +171,33 @@ describe("SettingsPage", () => {
     expect(await screen.findByRole("heading", { name: "Impostazioni" })).toBeInTheDocument();
     expect(screen.queryByText(/RUNTIME_SECRETS_MASTER_KEY/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Salva e attiva" })).toBeEnabled();
+  });
+
+  it("lists scheduler jobs and toggles them without a restart", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Job automatici" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Disattiva Aggiorna tutto" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Orario Aggiorna tutto")).toHaveValue("08:00");
+    expect(screen.getByLabelText("Intervallo Polling live schedine")).toHaveValue(3);
+
+    await user.click(screen.getByRole("switch", { name: "Attiva Polling live schedine" }));
+
+    expect(apiMocks.updateScheduledJob).toHaveBeenCalledWith("betting_slip_live_poll", {
+      enabled: true
+    });
+    expect(await screen.findByText("Salvato: Polling live schedine.")).toBeInTheDocument();
+  });
+
+  it("saves a new clock time for a daily job", async () => {
+    render(<SettingsPage />);
+
+    const timeInput = await screen.findByLabelText("Orario Aggiorna tutto");
+    fireEvent.change(timeInput, { target: { value: "07:15" } });
+
+    expect(apiMocks.updateScheduledJob).toHaveBeenCalledWith("daily_global_update", {
+      clock_time: "07:15"
+    });
   });
 });

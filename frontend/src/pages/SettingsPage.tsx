@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 
 import { ErrorState, LoadingState } from "../components/Status";
+import { ScheduledJobsPanel } from "../components/ScheduledJobsPanel";
 import { ApiError, apiClient } from "../services/apiClient";
 import type { ApiTennisProviderSettings } from "../types/api";
 
@@ -138,7 +139,7 @@ export function SettingsPage() {
       <header className="page-header">
         <div>
           <h2>Impostazioni</h2>
-          <p>Gestisci in sicurezza le integrazioni usate dai processi di aggiornamento.</p>
+          <p>Gestisci le integrazioni e i job automatici usati dai processi di aggiornamento.</p>
         </div>
       </header>
 
@@ -262,6 +263,8 @@ export function SettingsPage() {
           </div>
         ) : null}
       </section>
+
+      <ScheduledJobsPanel />
 
       {confirmation ? (
         <div className="global-update-modal-backdrop" role="presentation">

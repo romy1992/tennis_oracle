@@ -39,7 +39,8 @@ const apiMocks = vi.hoisted(() => ({
   getPublishedPredictionVersions: vi.fn(),
   getPublishedLiveStats: vi.fn(),
   getLiveBetaDashboard: vi.fn(),
-  getApiTennisSettings: vi.fn()
+  getApiTennisSettings: vi.fn(),
+  getScheduledJobs: vi.fn()
 }));
 
 vi.mock("./services/apiClient", async () => {

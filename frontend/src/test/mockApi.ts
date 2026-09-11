@@ -27,7 +27,8 @@ import {
   subscriptionDashboardSummary,
   subscriptionDashboardUsers,
   subscriptionDashboardEvents,
-  featureFlagsList
+  featureFlagsList,
+  scheduledJobsList
 } from "./fixtures";
 
 export type ApiMocks = Record<string, Mock>;
@@ -89,6 +90,8 @@ export function stubDefaultApi(apiMocks: {
   resumeDashboardSubscription?: Mock;
   cancelDashboardSubscription?: Mock;
   exportSubscriptionsDashboardCsv?: Mock;
+  getScheduledJobs?: Mock;
+  updateScheduledJob?: Mock;
 }) {
   apiMocks.getSession.mockResolvedValue({
     id: 1,
@@ -198,6 +201,18 @@ export function stubDefaultApi(apiMocks: {
   apiMocks.getSubscriptionsDashboardUsers?.mockResolvedValue(subscriptionDashboardUsers);
   apiMocks.getSubscriptionsDashboardEvents?.mockResolvedValue(subscriptionDashboardEvents);
   apiMocks.getSubscriptionsDashboardFeatureFlags?.mockResolvedValue(featureFlagsList);
+  apiMocks.getScheduledJobs?.mockResolvedValue(scheduledJobsList);
+  apiMocks.updateScheduledJob?.mockImplementation(async (jobKey: string, payload) => {
+    const current = scheduledJobsList.items.find((item) => item.job_key === jobKey);
+    return {
+      ...(current || scheduledJobsList.items[0]),
+      ...payload,
+      job_key: jobKey,
+      source: "database",
+      updated_at: new Date().toISOString(),
+      updated_by: "admin"
+    };
+  });
   apiMocks.updateSubscriptionsDashboardFeatureFlag?.mockImplementation(
     async (featureKey: string, payload: { enabled: boolean }) => {
       const current = featureFlagsList.items.find((item) => item.key === featureKey);
