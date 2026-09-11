@@ -47,6 +47,14 @@ def test_api_tennis_settings_require_admin(client):
         ).status_code
         == 401
     )
+    assert client.get("/api/settings/scheduled-jobs").status_code == 401
+    assert (
+        client.patch(
+            "/api/settings/scheduled-jobs/daily_global_update",
+            json={"enabled": False},
+        ).status_code
+        == 401
+    )
 
 
 def test_settings_status_never_returns_environment_key(client, auth_headers):

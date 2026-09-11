@@ -2178,3 +2178,38 @@ export type ApiTennisKeyUpdateResponse = {
   settings: ApiTennisProviderSettings;
 };
 
+export type ScheduledJobKind = "clock" | "weekly_clock" | "interval";
+export type ScheduledJobSource = "database" | "environment";
+export type ScheduledJobWorker = "report_scheduler" | "api_scheduler";
+
+export type ScheduledJob = {
+  job_key: string;
+  label: string;
+  description: string;
+  badge: string | null;
+  worker: ScheduledJobWorker;
+  schedule_kind: ScheduledJobKind;
+  enabled: boolean;
+  clock_time: string | null;
+  weekday: number | null;
+  interval_seconds: number | null;
+  min_interval_seconds: number | null;
+  source: ScheduledJobSource;
+  last_run_at: string | null;
+  last_run_status: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+};
+
+export type ScheduledJobListResponse = {
+  timezone: string;
+  items: ScheduledJob[];
+};
+
+export type ScheduledJobUpdateRequest = {
+  enabled?: boolean;
+  clock_time?: string;
+  weekday?: number;
+  interval_seconds?: number;
+};
+

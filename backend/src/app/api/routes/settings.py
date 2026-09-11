@@ -18,12 +18,21 @@ from backend.src.app.schemas.settings import (
     ApiTennisKeyUpdateRequest,
     ApiTennisKeyUpdateResponse,
     ApiTennisProviderSettingsRead,
+    ScheduledJobListResponse,
+    ScheduledJobRead,
+    ScheduledJobUpdateRequest,
 )
 from backend.src.app.services.runtime_secrets import (
     API_TENNIS_SECRET_KEY,
     RuntimeSecretError,
     api_tennis_secret_status,
     set_runtime_secret,
+)
+from backend.src.app.services.scheduled_job_settings import (
+    ScheduledJobSettingsError,
+    get_job_definition,
+    list_scheduled_jobs,
+    update_scheduled_job,
 )
 from backend.src.app.services.subscription_dashboard import log_admin_action
 from backend.src.entity.admin_user import AdminUser
@@ -190,3 +199,68 @@ def update_api_tennis_key(
         verified=verified,
         settings=current,
     )
+
+
+@router.get("/scheduled-jobs", response_model=ScheduledJobListResponse)
+def read_scheduled_jobs(
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ScheduledJobListResponse:
+    try:
+        return ScheduledJobListResponse(
+            timezone=settings.scheduled_reports_timezone,
+            items=list_scheduled_jobs(db, settings),
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503, detail="Database non disponibile."
+        ) from exc
+
+
+@router.patch("/scheduled-jobs/{job_key}", response_model=ScheduledJobRead)
+def patch_scheduled_job(
+    job_key: str,
+    payload: ScheduledJobUpdateRequest,
+    admin: Annotated[AdminUser, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ScheduledJobRead:
+    try:
+        definition = get_job_definition(job_key)
+        updated = update_scheduled_job(
+            db,
+            settings,
+            job_key=job_key,
+            enabled=payload.enabled,
+            clock_time=payload.clock_time,
+            weekday=payload.weekday,
+            interval_seconds=payload.interval_seconds,
+            updated_by=admin.username,
+            commit=False,
+        )
+        log_admin_action(
+            db,
+            admin=admin,
+            action="scheduled_job_update",
+            target_type="scheduled_job",
+            target_id=definition.key,
+            description=f"Job automatico aggiornato: {definition.label}.",
+            context={
+                "enabled": updated.enabled,
+                "schedule_kind": updated.schedule_kind,
+                "clock_time": updated.clock_time,
+                "weekday": updated.weekday,
+                "interval_seconds": updated.interval_seconds,
+            },
+            commit=False,
+        )
+        db.commit()
+        return updated
+    except ScheduledJobSettingsError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503, detail="Database non disponibile."
+        ) from exc

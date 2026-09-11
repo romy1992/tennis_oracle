@@ -19,6 +19,7 @@ from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
 from backend.src.entity.published_prediction import PublishedPrediction
 from backend.src.entity.rate_limit_bucket import RateLimitBucket
 from backend.src.entity.runtime_secret import RuntimeSecret
+from backend.src.entity.scheduled_job_setting import ScheduledJobSetting
 from backend.src.entity.scheduled_report_job import ScheduledReportJob
 from backend.src.entity.standing import Standing
 from backend.src.entity.subscription import (
@@ -80,5 +81,6 @@ __all__ = [
     "PublicModelRegistryEntry",
     "RateLimitBucket",
     "RuntimeSecret",
+    "ScheduledJobSetting",
     "ScheduledReportJob",
 ]

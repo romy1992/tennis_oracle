@@ -128,6 +128,7 @@ def _settings(**overrides):
         "scheduled_global_update_time": "08:00",
         "scheduled_weekly_validation_day": 0,
         "scheduled_weekly_validation_time": "10:00",
+        "scheduled_reports_enabled": True,
         "report_email_enabled": False,
     }
     values.update(overrides)

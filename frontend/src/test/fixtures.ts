@@ -19,6 +19,7 @@ import type {
   PublishedSettledTip,
   WeeklyBetaReport,
   FeatureFlagListResponse,
+  ScheduledJobListResponse,
   SubscriptionDashboardSummaryResponse,
   SubscriptionDashboardUserListResponse,
   SubscriptionDashboardEventListResponse
@@ -1555,6 +1556,66 @@ export const featureFlagsList: FeatureFlagListResponse = {
       description: "Mostra il comando /feedback nel bot Telegram.",
       updated_at: `${TODAY}T12:00:00Z`,
       updated_by: "admin"
+    }
+  ]
+};
+
+export const scheduledJobsList: ScheduledJobListResponse = {
+  timezone: "Europe/Rome",
+  items: [
+    {
+      job_key: "daily_global_update",
+      label: "Aggiorna tutto",
+      description: "Esegue la pipeline giornaliera e invia il report email.",
+      badge: "Pipeline",
+      worker: "report_scheduler",
+      schedule_kind: "clock",
+      enabled: true,
+      clock_time: "08:00",
+      weekday: null,
+      interval_seconds: null,
+      min_interval_seconds: null,
+      source: "environment",
+      last_run_at: null,
+      last_run_status: null,
+      updated_at: null,
+      updated_by: null
+    },
+    {
+      job_key: "weekly_validation",
+      label: "Walk-forward + Calibrazione",
+      description: "Avvia walk-forward e calibrazione dopo l'aggiornamento del lunedì.",
+      badge: "ML",
+      worker: "report_scheduler",
+      schedule_kind: "weekly_clock",
+      enabled: true,
+      clock_time: "10:00",
+      weekday: 0,
+      interval_seconds: null,
+      min_interval_seconds: null,
+      source: "environment",
+      last_run_at: null,
+      last_run_status: null,
+      updated_at: null,
+      updated_by: null
+    },
+    {
+      job_key: "betting_slip_live_poll",
+      label: "Polling live schedine",
+      description: "Aggiorna i punteggi live delle schedine del giorno.",
+      badge: "API",
+      worker: "api_scheduler",
+      schedule_kind: "interval",
+      enabled: false,
+      clock_time: null,
+      weekday: null,
+      interval_seconds: 180,
+      min_interval_seconds: 30,
+      source: "environment",
+      last_run_at: null,
+      last_run_status: null,
+      updated_at: null,
+      updated_by: null
     }
   ]
 };
