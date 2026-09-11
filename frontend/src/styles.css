@@ -953,9 +953,13 @@ label.checkbox-field input {
   padding: 8px 10px;
 }
 
-.settings-job-interval,
+.settings-job-interval {
+  width: 72px;
+}
+
 .settings-job-time {
-  width: 88px;
+  min-width: 10.5rem;
+  width: 10.5rem;
 }
 
 .settings-job-weekday {

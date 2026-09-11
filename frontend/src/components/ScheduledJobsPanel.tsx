@@ -129,6 +129,7 @@ function JobScheduleControl({
         aria-label={`Orario ${job.label}`}
         className="settings-job-time"
         disabled={disabled}
+        lang="it-IT"
         type="time"
         value={job.clock_time ?? "08:00"}
         onChange={(event) => {
