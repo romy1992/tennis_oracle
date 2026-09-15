@@ -507,6 +507,29 @@ def _weekly_payload(
     }
 
 
+def calibration_model_error_lines(summary: Any) -> list[str]:
+    """Human-readable extra-market/model failures stored on a calibration run."""
+    if not isinstance(summary, dict):
+        return []
+    lines: list[str] = []
+    details = summary.get("models_detail")
+    if not isinstance(details, list):
+        details = []
+    for item in details:
+        if not isinstance(item, dict):
+            continue
+        flags = item.get("leakage_flags") or []
+        comparison = item.get("comparison") if isinstance(item.get("comparison"), dict) else {}
+        error = comparison.get("error")
+        if not flags and not error:
+            continue
+        detail = error or flags[0]
+        version = item.get("model_version") or "?"
+        model_name = item.get("model_name") or "?"
+        lines.append(f"- {version}/{model_name}: {detail}")
+    return lines
+
+
 def _calibration_request_for_walk_forward(
     run: WalkForwardRun,
     settings: Settings,
@@ -627,23 +650,26 @@ def run_weekly_scheduled_report(
     )
     _persist_job_report(db, job, status=final_status, message=message, report=report)
 
-    body = "\n".join(
-        [
-            "Report pianificato: doppietta Walk-forward + Calibrazione",
-            f"Data pianificata: {scheduled_date.isoformat()}",
-            f"Esito cascata: {final_status}",
-            f"Aggiorna tutto run ID/status: {global_run.id if global_run else '-'} / "
-            f"{global_run.status if global_run else '-'}",
-            f"Walk-forward run ID/status: {walk_forward_run.id if walk_forward_run else '-'} / "
-            f"{walk_forward_run.status if walk_forward_run else 'non avviato'}",
-            f"Calibrazione run ID/status: {calibration_run.id if calibration_run else '-'} / "
-            f"{calibration_run.status if calibration_run else 'non avviata'}",
-            f"Messaggio: {message}",
-            "",
-            "Provenienza del job:",
-            *_source_lines(source),
-        ]
+    calibration_error_lines = calibration_model_error_lines(
+        _json_loads(calibration_run.summary_json) if calibration_run else None
     )
+    body_lines = [
+        "Report pianificato: doppietta Walk-forward + Calibrazione",
+        f"Data pianificata: {scheduled_date.isoformat()}",
+        f"Esito cascata: {final_status}",
+        f"Aggiorna tutto run ID/status: {global_run.id if global_run else '-'} / "
+        f"{global_run.status if global_run else '-'}",
+        f"Walk-forward run ID/status: {walk_forward_run.id if walk_forward_run else '-'} / "
+        f"{walk_forward_run.status if walk_forward_run else 'non avviato'}",
+        f"Calibrazione run ID/status: {calibration_run.id if calibration_run else '-'} / "
+        f"{calibration_run.status if calibration_run else 'non avviata'}",
+        f"Messaggio: {message}",
+    ]
+    if calibration_error_lines:
+        body_lines.append("Errori modelli calibrazione:")
+        body_lines.extend(calibration_error_lines)
+    body_lines.extend(["", "Provenienza del job:", *_source_lines(source)])
+    body = "\n".join(body_lines)
     attachments: list[EmailAttachment] = [
         _json_attachment(
             f"weekly_validation_{scheduled_date.isoformat()}_{source.environment}.json",
