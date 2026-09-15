@@ -14,7 +14,8 @@ import type {
 import {
   DEFAULT_LIVE_MARKET,
   isArchivedMatchWinnerVersion,
-  marketFromInternalVersion
+  marketFromInternalVersion,
+  uiVersionOrMarketLabel
 } from "../utils/markets";
 
 function formatPct(value: number | null | undefined) {
@@ -35,6 +36,16 @@ function formatDateTime(value: string | null | undefined) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString("it-IT");
+}
+
+function resultError(result: CalibrationResult): string | null {
+  const comparison = result.comparison as { error?: unknown } | null | undefined;
+  if (typeof comparison?.error === "string" && comparison.error.trim()) {
+    return comparison.error;
+  }
+  if (result.skip_reason) return result.skip_reason;
+  if (result.leakage_flags?.length) return result.leakage_flags.join("; ");
+  return null;
 }
 
 function statusLabel(status: string) {
@@ -349,6 +360,10 @@ export function CalibrationPage() {
   }, [run, selectedMarket, includeArchived, modelFilter]);
 
   const selectedResult = filteredResults[0];
+  const failedResults = useMemo(() => {
+    if (!run?.results) return [];
+    return run.results.filter((item) => resultError(item) !== null);
+  }, [run]);
 
   const methodBins = useMemo(() => {
     const aggregate = selectedResult?.aggregate as Record<string, MethodMetrics> | undefined;
@@ -430,6 +445,19 @@ export function CalibrationPage() {
 
       {actionError ? <div className="alert error">{actionError}</div> : null}
       {run?.error_message ? <div className="alert error">{run.error_message}</div> : null}
+      {failedResults.length > 0 ? (
+        <div className="alert error" role="alert">
+          <strong>Alcuni modelli non sono stati calibrati.</strong>
+          <ul>
+            {failedResults.map((item) => (
+              <li key={`${item.model_version}-${item.model_name}-${item.id}`}>
+                {uiVersionOrMarketLabel(item.model_version)} · {item.model_name}:{" "}
+                {resultError(item)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {list.length === 0 ? (
         <EmptyState

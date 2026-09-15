@@ -140,6 +140,30 @@ class CalibrationMethodsTest(unittest.TestCase):
         self.assertIn("calibration/artifacts", str(path).replace("\\", "/"))
         self.assertIn("calibration_run_7_v2_logistic_regression_platt.pkl", path.name)
 
+    def test_calibrator_artifact_path_accepts_extra_markets(self):
+        for version, model_name in (
+            ("first_set_winner_v2", "logistic_regression"),
+            ("over_under_games_v1", "random_forest"),
+            ("v4", "voting_ensemble"),
+        ):
+            path = calibrator_artifact_path(
+                model_version=version,
+                model_name=model_name,
+                method="isotonic",
+                run_id=24,
+            )
+            self.assertIn(version, path.name)
+            self.assertIn(model_name, path.name)
+
+    def test_calibrator_artifact_path_rejects_path_traversal(self):
+        with self.assertRaises(ValueError):
+            calibrator_artifact_path(
+                model_version="../v2",
+                model_name="logistic_regression",
+                method="platt",
+                run_id=1,
+            )
+
     def test_platt_and_isotonic_produce_valid_probabilities(self):
         rng = np.random.default_rng(42)
         y_true = rng.integers(0, 2, size=200)
@@ -377,6 +401,83 @@ class CalibrationIntegrationTest(unittest.TestCase):
             )
             self.assertTrue(all(model.oos_samples_total > 0 for model in result.models))
 
+    def test_extra_markets_keep_metrics_when_persisting_artifacts(self):
+        from backend.src.app.ml.training.walk_forward_markets import (
+            EXTRA_MARKET_SPECS,
+            WalkForwardMarketSpec,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            processed = Path(tmp) / "processed"
+            reports = Path(tmp) / "reports"
+            processed.mkdir()
+            reports.mkdir()
+            base = _synthetic_dataset(n_days=200, matches_per_day=2)
+            first_set = base.assign(
+                target_first_set_winner=base["target_player_1_win"],
+            )
+            over_under = base.assign(
+                target_over_under_games=1 - base["target_player_1_win"],
+            )
+
+            def load_first_set(_db, _processed_dir):
+                return first_set.copy(), processed / "first_set.csv"
+
+            def load_over_under(_db, _processed_dir):
+                return over_under.copy(), processed / "over_under.csv"
+
+            specs = {
+                "first_set_winner_v2": WalkForwardMarketSpec(
+                    version_label="first_set_winner_v2",
+                    target_column="target_first_set_winner",
+                    feature_columns_extra=(),
+                    load_dataframe=load_first_set,
+                    evaluate_fold=lambda *args, **kwargs: [],
+                ),
+                "over_under_games_v1": WalkForwardMarketSpec(
+                    version_label="over_under_games_v1",
+                    target_column="target_over_under_games",
+                    feature_columns_extra=(),
+                    load_dataframe=load_over_under,
+                    evaluate_fold=lambda *args, **kwargs: [],
+                ),
+            }
+            wf = WalkForwardConfig(
+                mode="expanding",
+                initial_train_days=70,
+                test_days=20,
+                step_days=20,
+                min_train_rows=15,
+                min_test_rows=5,
+                random_state=42,
+            )
+            config = CalibrationConfig(
+                n_bins=5,
+                min_bin_samples=2,
+                min_calibrator_train_samples=8,
+                walk_forward=wf,
+            )
+
+            with unittest.mock.patch.dict(EXTRA_MARKET_SPECS, specs):
+                result = run_calibration_validation(
+                    config,
+                    versions=("first_set_winner_v2", "over_under_games_v1"),
+                    model_names=("logistic_regression",),
+                    processed_dir=processed,
+                    reports_dir=reports,
+                    db=object(),  # type: ignore[arg-type]
+                    run_id=24,
+                    persist_artifacts=True,
+                )
+
+            self.assertEqual(result.summary["leakage_flags_total"], 0)
+            self.assertTrue(all(model.oos_samples_total > 0 for model in result.models))
+            self.assertTrue(all(not model.leakage_flags for model in result.models))
+            self.assertTrue(all("error" not in (model.comparison or {}) for model in result.models))
+            self.assertTrue(
+                any(model.artifacts.get("platt") or model.artifacts.get("isotonic") for model in result.models)
+            )
+
 
 class CalibrationArtifactResilienceTest(unittest.TestCase):
     def test_metrics_kept_when_artifact_save_raises_read_only(self):
@@ -432,6 +533,80 @@ class CalibrationArtifactResilienceTest(unittest.TestCase):
                 run_id=1,
             )
         self.assertIsNone(path)
+
+    def test_save_calibrator_artifact_swallows_unknown_version_path_errors(self):
+        path = save_calibrator_artifact(
+            object(),
+            model_version="../not-a-version",
+            model_name="logistic_regression",
+            method="platt",
+            run_id=1,
+        )
+        self.assertIsNone(path)
+
+    def test_metrics_kept_when_artifact_path_rejects_extra_market_version(self):
+        from backend.src.app.ml.training.walk_forward_markets import (
+            EXTRA_MARKET_SPECS,
+            WalkForwardMarketSpec,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            processed = Path(tmp) / "processed"
+            processed.mkdir()
+            base = _synthetic_dataset(n_days=200, matches_per_day=2)
+            first_set = base.assign(
+                target_first_set_winner=base["target_player_1_win"],
+            )
+
+            def load_first_set(_db, _processed_dir):
+                return first_set.copy(), processed / "first_set.csv"
+
+            specs = {
+                "first_set_winner_v2": WalkForwardMarketSpec(
+                    version_label="first_set_winner_v2",
+                    target_column="target_first_set_winner",
+                    feature_columns_extra=(),
+                    load_dataframe=load_first_set,
+                    evaluate_fold=lambda *args, **kwargs: [],
+                ),
+            }
+            wf = WalkForwardConfig(
+                mode="expanding",
+                initial_train_days=70,
+                test_days=20,
+                step_days=20,
+                min_train_rows=15,
+                min_test_rows=5,
+                random_state=42,
+            )
+            config = CalibrationConfig(
+                n_bins=5,
+                min_bin_samples=2,
+                min_calibrator_train_samples=8,
+                walk_forward=wf,
+            )
+            with (
+                unittest.mock.patch.dict(EXTRA_MARKET_SPECS, specs),
+                unittest.mock.patch(
+                    "backend.src.app.ml.training.calibration.calibrator_artifact_path",
+                    side_effect=ValueError("Versione modello sconosciuta: first_set_winner_v2"),
+                ),
+            ):
+                result = run_calibration_validation(
+                    config,
+                    versions=("first_set_winner_v2",),
+                    model_names=("logistic_regression",),
+                    processed_dir=processed,
+                    db=object(),  # type: ignore[arg-type]
+                    run_id=24,
+                    persist_artifacts=True,
+                )
+            model = result.models[0]
+            self.assertGreater(model.oos_samples_total, 0)
+            self.assertEqual(model.leakage_flags, [])
+            self.assertEqual(result.summary["leakage_flags_total"], 0)
+            self.assertNotIn("error", model.comparison)
+            self.assertTrue(model.comparison.get("artifact_warnings"))
 
 
 class ResolveVersionsDefaultTests(unittest.TestCase):

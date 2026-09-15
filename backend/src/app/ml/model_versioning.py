@@ -1,8 +1,12 @@
 """Central paths and metadata for versioned ML artifacts."""
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+# Match-winner tags (v1-v4) and extra-market labels such as first_set_winner_v2.
+_SAFE_ARTIFACT_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 ModelVersion = Literal["v1", "v2", "v3", "v4"]
 
@@ -121,6 +125,13 @@ MODEL_VERSIONS: dict[ModelVersion, ModelVersionPaths] = {
 }
 
 
+def _require_safe_artifact_token(value: str, *, label: str) -> str:
+    text = str(value).strip()
+    if not _SAFE_ARTIFACT_TOKEN.fullmatch(text):
+        raise ValueError(f"{label} non valido per artefatto calibrazione: {value}")
+    return text
+
+
 def calibrator_artifact_path(
     *,
     model_version: str,
@@ -129,12 +140,18 @@ def calibrator_artifact_path(
     run_id: int,
     reports_dir: str | Path = REPORTS_DIR,
 ) -> Path:
-    """Versioned calibrator pickle under reports (writable in Docker via REPORTS_HOST_PATH)."""
-    if model_version not in MODEL_VERSIONS:
-        raise ValueError(f"Versione modello sconosciuta: {model_version}")
+    """Versioned calibrator pickle under reports (writable in Docker via REPORTS_HOST_PATH).
+
+    Accepts match-winner tags and extra-market walk-forward labels. Tokens are
+    restricted to filesystem-safe characters so a version string cannot escape
+    the artifacts directory.
+    """
+    safe_version = _require_safe_artifact_token(model_version, label="Versione modello")
+    safe_model = _require_safe_artifact_token(model_name, label="Nome modello")
+    safe_method = _require_safe_artifact_token(method, label="Metodo calibrazione")
     artifacts_dir = Path(reports_dir) / "calibration" / "artifacts"
     return artifacts_dir / (
-        f"calibration_run_{run_id}_{model_version}_{model_name}_{method}.pkl"
+        f"calibration_run_{run_id}_{safe_version}_{safe_model}_{safe_method}.pkl"
     )
 
 
