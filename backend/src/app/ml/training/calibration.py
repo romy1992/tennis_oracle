@@ -42,6 +42,17 @@ from backend.src.app.services.background_job import BackgroundJobCancelled
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_rollback_session(db: Session | None) -> None:
+    """Undo a failed extra-market query so later models can still persist."""
+    if db is None:
+        return
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("Calibration session rollback failed")
+
+
 PrepareProgressCallback = Callable[[str], None]
 ProgressCallback = Callable[[str, int, int], None]
 ShouldCancel = Callable[[], bool]
@@ -753,26 +764,35 @@ def run_calibration_for_model(
     comparison = _build_method_comparison(aggregate)
     artifacts: dict[str, str] = {}
     artifact_warnings: list[str] = []
-    if persist_artifacts and run_id is not None and len(y_all) >= config.min_calibrator_train_samples:
-        y_train_all, prob_train_all, _ = _concat_batches(batches)
-        for method in ("platt", "isotonic"):
-            if method not in config.methods:
-                continue
-            calibrator = fit_calibrator(method, y_train_all, prob_train_all)
-            if calibrator is None:
-                continue
-            path = save_calibrator_artifact(
-                calibrator,
-                model_version=model_version,
-                model_name=model_name,
-                method=method,
-                run_id=run_id,
-                reports_dir=reports_dir,
-            )
-            if path is not None:
-                artifacts[method] = str(path)
-            else:
-                artifact_warnings.append(f"artifact_save_failed:{method}")
+    try:
+        if persist_artifacts and run_id is not None and len(y_all) >= config.min_calibrator_train_samples:
+            y_train_all, prob_train_all, _ = _concat_batches(batches)
+            for method in ("platt", "isotonic"):
+                if method not in config.methods:
+                    continue
+                calibrator = fit_calibrator(method, y_train_all, prob_train_all)
+                if calibrator is None:
+                    continue
+                path = save_calibrator_artifact(
+                    calibrator,
+                    model_version=model_version,
+                    model_name=model_name,
+                    method=method,
+                    run_id=run_id,
+                    reports_dir=reports_dir,
+                )
+                if path is not None:
+                    artifacts[method] = str(path)
+                else:
+                    artifact_warnings.append(f"artifact_save_failed:{method}")
+    except Exception as exc:  # noqa: BLE001 — never discard OOS metrics for pickle I/O
+        logger.exception(
+            "Calibration artifact persistence failed version=%s model=%s: %s",
+            model_version,
+            model_name,
+            exc,
+        )
+        artifact_warnings.append(f"artifact_save_failed:{exc}")
     if artifact_warnings:
         comparison = {**comparison, "artifact_warnings": artifact_warnings}
 
@@ -919,6 +939,7 @@ def run_calibration_validation(
                 raise
             except Exception as exc:  # noqa: BLE001 — version isolation
                 logger.exception("Calibration failed version=%s model=%s: %s", version, model_name, exc)
+                _safe_rollback_session(db)
                 models.append(
                     ModelCalibrationResult(
                         model_version=version,
@@ -970,14 +991,14 @@ def save_calibrator_artifact(
     reports_dir: str | Path = CALIBRATION_REPORTS_DIR.parent,
 ) -> Path | None:
     """Persist calibrator pickle; returns None on I/O failure (metrics still kept elsewhere)."""
-    path = calibrator_artifact_path(
-        model_version=model_version,
-        model_name=model_name,
-        method=method,
-        run_id=run_id,
-        reports_dir=reports_dir,
-    )
     try:
+        path = calibrator_artifact_path(
+            model_version=model_version,
+            model_name=model_name,
+            method=method,
+            run_id=run_id,
+            reports_dir=reports_dir,
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "calibrator": calibrator,
@@ -990,7 +1011,7 @@ def save_calibrator_artifact(
         with path.open("wb") as handle:
             pickle.dump(payload, handle)
         return path
-    except OSError as exc:
+    except (OSError, ValueError, pickle.PickleError) as exc:
         logger.warning(
             "Calibrator artifact not saved run_id=%s version=%s model=%s method=%s: %s",
             run_id,
