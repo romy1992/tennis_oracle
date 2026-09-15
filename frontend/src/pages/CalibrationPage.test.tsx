@@ -147,4 +147,42 @@ describe("CalibrationPage", () => {
     expect(screen.getByLabelText("Modello")).toHaveValue("random_forest");
     expect(screen.getByText("234")).toBeInTheDocument();
   });
+
+  it("lists extra-market calibration errors while match-winner metrics stay visible", async () => {
+    const baseResult = calibrationRun.results[0];
+    apiMocks.getCalibrationRun.mockResolvedValue({
+      ...calibrationRun,
+      status: "completed_with_errors",
+      versions_requested: "first_set_winner_v2,over_under_games_v1,v4",
+      results: [
+        {
+          ...baseResult,
+          id: 32,
+          model_version: "v4",
+          model_name: "voting_ensemble",
+          oos_samples_total: 99728
+        },
+        {
+          ...baseResult,
+          id: 33,
+          model_version: "over_under_games_v1",
+          model_name: "random_forest",
+          oos_samples_total: 0,
+          aggregate: {},
+          comparison: {
+            error: "Versione modello sconosciuta: over_under_games_v1"
+          },
+          leakage_flags: ["error:Versione modello sconosciuta: over_under_games_v1"],
+          skip_reason: "error:Versione modello sconosciuta: over_under_games_v1"
+        }
+      ]
+    });
+
+    renderWithProviders(<CalibrationPage />);
+    expect(await screen.findByText(/Alcuni modelli non sono stati calibrati/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Over\/Under games · random_forest/i)
+    ).toBeInTheDocument();
+    expect(screen.getByText("99728")).toBeInTheDocument();
+  });
 });

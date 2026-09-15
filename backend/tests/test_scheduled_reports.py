@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from backend.src.app.observability.email_reports import EmailAttachment, send_report_email
 from backend.src.app.services.scheduled_reports import (
     JobSource,
+    calibration_model_error_lines,
     list_stale_daily_report_dates,
     run_daily_scheduled_report,
     run_weekly_scheduled_report,
@@ -462,6 +463,93 @@ def test_weekly_success_links_calibration_to_new_walk_forward(db_session: Sessio
     assert weekly.global_update_run_id == daily.global_update_run_id
     assert weekly.walk_forward_run_id == seen_walk_forward_id[0]
     assert weekly.calibration_run_id is not None
+
+
+def test_calibration_model_error_lines_extracts_extra_market_failures() -> None:
+    lines = calibration_model_error_lines(
+        {
+            "models_detail": [
+                {
+                    "model_version": "v4",
+                    "model_name": "voting_ensemble",
+                    "leakage_flags": [],
+                    "comparison": {"raw": {"ece": 0.0047}},
+                },
+                {
+                    "model_version": "first_set_winner_v2",
+                    "model_name": "logistic_regression",
+                    "leakage_flags": [
+                        "error:Versione modello sconosciuta: first_set_winner_v2"
+                    ],
+                    "comparison": {
+                        "error": "Versione modello sconosciuta: first_set_winner_v2"
+                    },
+                },
+            ]
+        }
+    )
+    assert lines == [
+        "- first_set_winner_v2/logistic_regression: "
+        "Versione modello sconosciuta: first_set_winner_v2"
+    ]
+
+
+def test_weekly_email_lists_calibration_model_errors(
+    db_session: Session, monkeypatch
+) -> None:
+    def start_global(db: Session, **_kwargs):
+        return _global_run(db), "ok"
+
+    run_daily_scheduled_report(
+        db_session,
+        _settings(),
+        scheduled_date=SCHEDULE_DATE,
+        source=SOURCE,
+        global_update_starter=start_global,
+    )
+
+    def start_wf(db: Session, **_kwargs):
+        return _walk_forward_run(db), True, "ok"
+
+    def start_calibration(db: Session, *, request, **_kwargs):
+        run = _calibration_run(
+            db,
+            walk_forward_run_id=request.walk_forward_run_id,
+            status="completed_with_errors",
+        )
+        run.summary_json = (
+            '{"models_detail":[{"model_version":"over_under_games_v1",'
+            '"model_name":"random_forest","leakage_flags":'
+            '["error:Versione modello sconosciuta: over_under_games_v1"],'
+            '"comparison":{"error":"Versione modello sconosciuta: over_under_games_v1"}}]}'
+        )
+        db.commit()
+        return run, True, "Calibrazione completata."
+
+    captured: dict[str, str] = {}
+
+    def fake_send(_settings, *, subject, body, attachments):
+        captured["body"] = body
+        captured["subject"] = subject
+        return {"status": "disabled"}
+
+    monkeypatch.setattr(
+        "backend.src.app.services.scheduled_reports.send_report_email",
+        fake_send,
+    )
+
+    weekly, _ = run_weekly_scheduled_report(
+        db_session,
+        _settings(),
+        scheduled_date=SCHEDULE_DATE,
+        source=SOURCE,
+        walk_forward_starter=start_wf,
+        calibration_starter=start_calibration,
+    )
+
+    assert weekly.status == "failed"
+    assert "Errori modelli calibrazione:" in captured["body"]
+    assert "over_under_games_v1/random_forest" in captured["body"]
 
 
 def test_weekly_skips_calibration_when_walk_forward_fails(db_session: Session) -> None:

@@ -902,7 +902,7 @@ export const walkForwardRun = {
   embargo_days: 0,
   edge_threshold: 0.03,
   random_state: 42,
-  versions_requested: "v2,v3",
+  versions_requested: "v4",
   origin: "manual",
   started_at: `${TODAY}T08:00:00`,
   finished_at: `${TODAY}T08:20:00`,
@@ -927,7 +927,7 @@ export const walkForwardRun = {
     official_sample_mismatch_folds: 1,
     versions_detail: [
       {
-        model_version: "v2",
+        model_version: "v4",
         aggregate_metrics: {
           logistic_regression: {
             folds_completed: 1,
@@ -970,7 +970,7 @@ export const walkForwardRun = {
       id: 101,
       run_id: 11,
       fold_index: 0,
-      model_version: "v2",
+      model_version: "v4",
       model_name: "logistic_regression",
       dataset_path: "backend/data/processed/tennis_winner_dataset_v2.csv",
       status: "completed",
@@ -1015,7 +1015,7 @@ export const walkForwardRun = {
       id: 103,
       run_id: 11,
       fold_index: 0,
-      model_version: "v2",
+      model_version: "v4",
       model_name: "market_no_vig",
       dataset_path: "backend/data/processed/tennis_winner_dataset_v2.csv",
       status: "completed",
@@ -1056,7 +1056,7 @@ export const walkForwardRun = {
       id: 104,
       run_id: 11,
       fold_index: 1,
-      model_version: "v3",
+      model_version: "v4",
       model_name: "elo",
       dataset_path: "backend/data/processed/tennis_winner_dataset_v3.csv",
       status: "completed",
@@ -1097,7 +1097,7 @@ export const walkForwardRun = {
       id: 102,
       run_id: 11,
       fold_index: 1,
-      model_version: "v2",
+      model_version: "v4",
       model_name: "random_forest",
       dataset_path: "backend/data/processed/tennis_winner_dataset_v2.csv",
       status: "skipped_insufficient_data",
