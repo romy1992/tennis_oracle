@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -20,7 +20,8 @@ from backend.src.entity.subscription import PaymentEvent
 
 
 def _seed_dashboard_data(db_session):
-    base_time = datetime(2026, 8, 2, 9, 0, 0)
+    # Keep windows relative to "now" so 30-day payment/churn counters stay valid.
+    base_time = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
     seed_default_plans(db_session)
 
     free_user = get_or_create_user(

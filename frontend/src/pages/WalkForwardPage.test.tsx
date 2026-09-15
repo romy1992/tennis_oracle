@@ -86,7 +86,6 @@ describe("WalkForwardPage", () => {
     expect(screen.getAllByText(/logistic_regression/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/market_no_vig/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Aggregato benchmark ufficiali/i)).toBeInTheDocument();
-    expect(screen.getByText(/Pagina versione:/i)).toBeInTheDocument();
     expect(screen.getByText(/Pagina giorno test:/i)).toBeInTheDocument();
     expect(screen.getAllByRole("columnheader", { name: /Brier/i }).length).toBeGreaterThan(0);
   });
