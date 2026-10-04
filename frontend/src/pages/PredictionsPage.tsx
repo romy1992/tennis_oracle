@@ -28,6 +28,7 @@ import { formatLiveScore, isLiveMatch } from "../utils/liveScore";
 type FixtureStatusFilter = "upcoming" | "played" | "all";
 type OutcomeFilter = "all" | "won" | "lost";
 type MarketTab = "match_winner" | "first_set_winner" | "over_under_games";
+type TournamentTypeFilter = "all" | "atp" | "wta" | "challenger" | "itf";
 
 const PAGE_SIZE = 50;
 const LIVE_UI_REFRESH_MS = 60_000;
@@ -48,6 +49,14 @@ const marketTabs: Array<{ value: MarketTab; label: string }> = [
   { value: "match_winner", label: "Vincitore partita" },
   { value: "first_set_winner", label: "Vincitore 1° set" },
   { value: "over_under_games", label: "Over/Under Games" }
+];
+
+const tournamentTypeTabs: Array<{ value: TournamentTypeFilter; label: string }> = [
+  { value: "all", label: "Tutti i tipi" },
+  { value: "atp", label: "ATP" },
+  { value: "wta", label: "WTA" },
+  { value: "challenger", label: "Challenger" },
+  { value: "itf", label: "ITF" }
 ];
 
 function formatProb(value: number | null | undefined) {
@@ -258,6 +267,7 @@ export function PredictionsPage() {
   const [singleValueByModel, setSingleValueByModel] = useState<Record<string, SingleMatchValueResponse>>({});
   const [importStatus, setImportStatus] = useState<ImportStatusResponse | null>(null);
   const [statusFilter, setStatusFilter] = useState<FixtureStatusFilter>("upcoming");
+  const [tournamentTypeFilter, setTournamentTypeFilter] = useState<TournamentTypeFilter>("all");
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
   const [marketTab, setMarketTab] = useState<MarketTab>("match_winner");
   const [page, setPage] = useState(1);
@@ -294,7 +304,7 @@ export function PredictionsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, outcomeFilter, playerQuery, activeVersion, marketTab]);
+  }, [statusFilter, outcomeFilter, playerQuery, activeVersion, marketTab, tournamentTypeFilter]);
 
   const activeModels = useMemo(
     () =>
@@ -307,6 +317,7 @@ export function PredictionsPage() {
     const offset = (page - 1) * PAGE_SIZE;
     const trimmedPlayer = playerQuery.trim();
     const models = activeModels.length ? activeModels : ["logistic_regression"];
+    const eventType = tournamentTypeFilter === "all" ? undefined : tournamentTypeFilter;
 
     const fixtureResponses = await Promise.all(
       models.map((modelName) =>
@@ -320,7 +331,8 @@ export function PredictionsPage() {
               : undefined,
           limit: PAGE_SIZE,
           offset,
-          player: trimmedPlayer || undefined
+          player: trimmedPlayer || undefined,
+          event_type: eventType
         })
       )
     );
@@ -339,6 +351,7 @@ export function PredictionsPage() {
           limit: 200,
           offset: 0,
           player: trimmedPlayer || undefined,
+          event_type: eventType,
           min_edge_percent: 0
         })
       )
@@ -365,7 +378,16 @@ export function PredictionsPage() {
     setTotalFixtures(base?.total ?? 0);
     setSingleValueByModel(values);
     setImportStatus(statusData);
-  }, [statusFilter, outcomeFilter, page, playerQuery, activeVersion, activeModels, marketTab]);
+  }, [
+    statusFilter,
+    outcomeFilter,
+    page,
+    playerQuery,
+    activeVersion,
+    activeModels,
+    marketTab,
+    tournamentTypeFilter
+  ]);
 
   const decisionCounts = useMemo(() => {
     const counts = { PLAY: 0, BORDERLINE: 0, "NO BET": 0, missing: 0 };
@@ -628,6 +650,19 @@ export function PredictionsPage() {
           ))}
         </div>
 
+        <div className="tab-list tournament-type-tabs" aria-label="Filtro tipo torneo">
+          {tournamentTypeTabs.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              className={tournamentTypeFilter === tab.value ? "active" : undefined}
+              onClick={() => setTournamentTypeFilter(tab.value)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         {statusFilter === "played" && marketTab === "match_winner" ? (
           <div className="tab-list outcome-tabs" aria-label="Filtro esito previsione">
             {outcomeTabs.map((tab) => (
@@ -766,7 +801,11 @@ export function PredictionsPage() {
         {fixtures.length === 0 ? (
           <EmptyState
             title="Nessuna partita"
-            message="Usa Aggiorna per importare il calendario e generare le previsioni."
+            message={
+              tournamentTypeFilter === "all"
+                ? "Usa Aggiorna per importare il calendario e generare le previsioni."
+                : "Nessuna partita di questo tipo nel periodo selezionato."
+            }
           />
         ) : (
           <>

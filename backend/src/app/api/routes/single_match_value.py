@@ -8,7 +8,11 @@ from backend.src.app.api.deps import require_admin_or_service
 from backend.src.app.db.session import get_db
 from backend.src.app.ml.model_versioning import ModelVersion
 from backend.src.app.schemas.single_match_value import SingleMatchValueResponse
-from backend.src.app.services.predictions import FixturePredictionStatus, PredictionOutcome
+from backend.src.app.services.predictions import (
+    FixturePredictionStatus,
+    PredictionOutcome,
+    TournamentTypeFilter,
+)
 from backend.src.app.services.single_match_value import get_single_match_value_analysis
 
 router = APIRouter(prefix="/single-match-value", tags=["single-match-value"])
@@ -25,6 +29,7 @@ def read_single_match_value_analysis(
     status: FixturePredictionStatus = Query(default="upcoming"),
     outcome: PredictionOutcome = Query(default="all"),
     player: str | None = Query(default=None, min_length=1, max_length=100),
+    event_type: TournamentTypeFilter | None = Query(default=None),
     min_edge_percent: float = Query(
         default=2.0,
         ge=0.0,
@@ -45,6 +50,7 @@ def read_single_match_value_analysis(
             status=status,
             outcome=outcome,
             player_name=player,
+            event_type=event_type,
             min_edge_percent=min_edge_percent,
         )
     except SQLAlchemyError as exc:

@@ -789,6 +789,10 @@ label.checkbox-field input {
   margin-top: -8px;
 }
 
+.tab-list.tournament-type-tabs {
+  flex-wrap: wrap;
+}
+
 .tab-list.outcome-tabs button {
   display: inline-flex;
   align-items: center;
