@@ -190,6 +190,7 @@ export type PredictionQueryParams = {
   status?: "upcoming" | "played" | "all";
   outcome?: "all" | "won" | "lost";
   player?: string;
+  event_type?: "atp" | "wta" | "challenger" | "itf";
 };
 
 export type SingleMatchValueDecision = "PLAY" | "NO BET" | "BORDERLINE";
