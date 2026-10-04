@@ -412,6 +412,94 @@ class PredictionRoutesTest(unittest.TestCase):
         self.assertEqual(lost.json()["total"], 1)
         self.assertEqual(lost.json()["items"][0]["event_key"], 502)
 
+    def test_next_fixtures_predictions_route_filters_by_event_type(self):
+        today = date.today()
+        with self.Session() as session:
+            session.add_all(
+                [
+                    NextFixture(
+                        event_key=100,
+                        event_date=today,
+                        event_first_player="A",
+                        event_second_player="B",
+                        event_type_type="Atp Singles",
+                        is_completed=False,
+                    ),
+                    NextFixture(
+                        event_key=101,
+                        event_date=today,
+                        event_first_player="C",
+                        event_second_player="D",
+                        event_type_type="Wta Singles",
+                        is_completed=False,
+                    ),
+                    NextFixture(
+                        event_key=102,
+                        event_date=today,
+                        event_first_player="E",
+                        event_second_player="F",
+                        event_type_type="Challenger Men Singles",
+                        is_completed=False,
+                    ),
+                    NextFixture(
+                        event_key=103,
+                        event_date=today,
+                        event_first_player="G",
+                        event_second_player="H",
+                        event_type_type="Itf Women Singles",
+                        is_completed=False,
+                    ),
+                    Fixture(
+                        id_fixture=200,
+                        event_key=200,
+                        event_date=today,
+                        event_first_player="I",
+                        event_second_player="J",
+                        event_winner="First Player",
+                        event_type_type="ATP Singles",
+                    ),
+                    Fixture(
+                        id_fixture=201,
+                        event_key=201,
+                        event_date=today,
+                        event_first_player="K",
+                        event_second_player="L",
+                        event_winner="Second Player",
+                        event_type_type="Challenger Women Singles",
+                    ),
+                ]
+            )
+            session.commit()
+
+        def event_keys(params: dict) -> list[int]:
+            response = self.client.get("/api/next-fixtures/predictions", params=params)
+            self.assertEqual(response.status_code, 200, response.text)
+            return [item["event_key"] for item in response.json()["items"]]
+
+        base = {"model_version": "v2", "model_name": "random_forest"}
+        self.assertEqual(event_keys({**base, "event_type": "atp"}), [100])
+        self.assertEqual(event_keys({**base, "event_type": "wta"}), [101])
+        self.assertEqual(event_keys({**base, "event_type": "challenger"}), [102])
+        self.assertEqual(event_keys({**base, "event_type": "itf"}), [103])
+        self.assertEqual(
+            event_keys({**base, "status": "played", "event_type": "atp"}),
+            [200],
+        )
+        self.assertEqual(
+            event_keys({**base, "status": "played", "event_type": "challenger"}),
+            [201],
+        )
+        self.assertCountEqual(
+            event_keys({**base, "status": "all", "event_type": "atp"}),
+            [100, 200],
+        )
+
+        invalid = self.client.get(
+            "/api/next-fixtures/predictions",
+            params={**base, "event_type": "exhibition"},
+        )
+        self.assertEqual(invalid.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

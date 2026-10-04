@@ -252,4 +252,34 @@ describe("PredictionsPage", () => {
       );
     });
   });
+
+  it("filters matches by tournament type", async () => {
+    const user = userEvent.setup();
+    apiMocks.getUpcomingPredictions.mockResolvedValue(makeFixturesPage([]));
+
+    renderWithProviders(<PredictionsPage />);
+    const tabs = await screen.findByLabelText("Filtro tipo torneo");
+    expect(within(tabs).getByRole("button", { name: "Tutti i tipi" })).toHaveClass("active");
+    expect(within(tabs).getByRole("button", { name: "ATP" })).toBeInTheDocument();
+    expect(within(tabs).getByRole("button", { name: "WTA" })).toBeInTheDocument();
+    expect(within(tabs).getByRole("button", { name: "ITF" })).toBeInTheDocument();
+
+    await user.click(within(tabs).getByRole("button", { name: "Challenger" }));
+    await waitFor(() => {
+      expect(apiMocks.getUpcomingPredictions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ event_type: "challenger", status: "upcoming" })
+      );
+      expect(apiMocks.getSingleMatchValueAnalysis).toHaveBeenLastCalledWith(
+        expect.objectContaining({ event_type: "challenger", status: "upcoming" })
+      );
+    });
+    expect(await screen.findByText("Nessuna partita di questo tipo nel periodo selezionato.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Tutti i tipi" }));
+    await waitFor(() => {
+      expect(apiMocks.getUpcomingPredictions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ event_type: undefined })
+      );
+    });
+  });
 });

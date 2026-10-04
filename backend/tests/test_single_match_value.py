@@ -174,6 +174,69 @@ class SingleMatchValueTest(unittest.TestCase):
         self.assertAlmostEqual(simulation["roi_pct"], 52.0)
         self.assertAlmostEqual(simulation["hit_rate_pct"], 100.0)
 
+    def test_route_filters_by_event_type(self):
+        today = date.today()
+        odds = {
+            "Home/Away": {
+                "Home": {"Book A": "1.52"},
+                "Away": {"Book A": "2.80"},
+            }
+        }
+        with self.Session() as session:
+            session.add_all(
+                [
+                    NextFixture(
+                        event_key=100,
+                        event_date=today,
+                        event_first_player="Sinner",
+                        event_second_player="Alcaraz",
+                        event_type_type="Atp Singles",
+                        odds={"100": odds},
+                        is_completed=False,
+                    ),
+                    NextFixture(
+                        event_key=101,
+                        event_date=today,
+                        event_first_player="Swiatek",
+                        event_second_player="Sabalenka",
+                        event_type_type="Wta Singles",
+                        odds={"101": odds},
+                        is_completed=False,
+                    ),
+                    MatchPrediction(
+                        event_key=100,
+                        model_version="v2",
+                        model_name="random_forest",
+                        predicted_at=datetime(2026, 6, 20, 10, 0, 0),
+                        prob_player_1_win=0.72,
+                        predicted_winner="First Player",
+                    ),
+                    MatchPrediction(
+                        event_key=101,
+                        model_version="v2",
+                        model_name="random_forest",
+                        predicted_at=datetime(2026, 6, 20, 10, 0, 0),
+                        prob_player_1_win=0.72,
+                        predicted_winner="First Player",
+                    ),
+                ]
+            )
+            session.commit()
+
+        response = self.client.get(
+            "/api/single-match-value",
+            params={
+                "model_version": "v2",
+                "model_name": "random_forest",
+                "event_type": "wta",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["items"][0]["match_id"], 101)
+
 
 if __name__ == "__main__":
     unittest.main()

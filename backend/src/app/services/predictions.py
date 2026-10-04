@@ -47,8 +47,18 @@ from backend.src.app.services.published_predictions import (
 
 FixturePredictionStatus = Literal["upcoming", "played", "all"]
 PredictionOutcome = Literal["all", "won", "lost"]
+TournamentTypeFilter = Literal["atp", "wta", "challenger", "itf"]
 UPCOMING_DAYS_FORWARD = 10
 PLAYED_DAYS_BACK = 30
+
+# Case-insensitive prefixes of api-tennis `event_type_type`.
+# ATP/WTA keep a trailing space so "Atp Singles" matches and "Challenger" does not.
+_TOURNAMENT_TYPE_PATTERNS: dict[TournamentTypeFilter, str] = {
+    "atp": "atp %",
+    "wta": "wta %",
+    "challenger": "challenger%",
+    "itf": "itf%",
+}
 
 # Extra-market versions (see extra_markets_predictor.py): published only in
 # the generic PublishedPrediction ledger, never in MatchPrediction. Listed
@@ -118,6 +128,12 @@ def _player_name_filter(
     ]
 
 
+def _event_type_filters(column, event_type: TournamentTypeFilter | None):
+    if event_type is None:
+        return []
+    return [column.ilike(_TOURNAMENT_TYPE_PATTERNS[event_type])]
+
+
 @dataclass(frozen=True)
 class PredictionOddsStats:
     predictions_with_odds: int
@@ -132,6 +148,7 @@ def _next_fixture_filters(
     to_date: date | None,
     player_name: str | None = None,
     odds_required: bool = False,
+    event_type: TournamentTypeFilter | None = None,
 ):
     filters = [NextFixture.is_completed.is_(False)]
     if from_date is not None:
@@ -145,6 +162,7 @@ def _next_fixture_filters(
             NextFixture.event_second_player,
         )
     )
+    filters.extend(_event_type_filters(NextFixture.event_type_type, event_type))
     if odds_required:
         filters.append(has_real_odds(NextFixture.odds))
     return filters
@@ -156,9 +174,12 @@ def count_next_fixtures(
     to_date: date | None = None,
     player_name: str | None = None,
     odds_required: bool = False,
+    event_type: TournamentTypeFilter | None = None,
 ) -> int:
     stmt = select(func.count()).select_from(NextFixture).where(
-        *_next_fixture_filters(from_date, to_date, player_name, odds_required)
+        *_next_fixture_filters(
+            from_date, to_date, player_name, odds_required, event_type
+        )
     )
     return int(db.scalar(stmt) or 0)
 
@@ -171,10 +192,15 @@ def list_next_fixtures(
     offset: int = 0,
     player_name: str | None = None,
     odds_required: bool = False,
+    event_type: TournamentTypeFilter | None = None,
 ) -> list[NextFixture]:
     stmt = (
         select(NextFixture)
-        .where(*_next_fixture_filters(from_date, to_date, player_name, odds_required))
+        .where(
+            *_next_fixture_filters(
+                from_date, to_date, player_name, odds_required, event_type
+            )
+        )
         .order_by(
             NextFixture.event_date.asc().nullslast(),
             NextFixture.event_time.asc().nullslast(),
@@ -333,6 +359,7 @@ def _played_fixture_filters(
     to_date: date | None,
     player_name: str | None = None,
     odds_required: bool = False,
+    event_type: TournamentTypeFilter | None = None,
 ):
     filters = [Fixture.event_winner.in_(COMPLETED_WINNERS)]
     filters.extend(_played_date_filters(from_date, to_date))
@@ -343,6 +370,7 @@ def _played_fixture_filters(
             Fixture.event_second_player,
         )
     )
+    filters.extend(_event_type_filters(Fixture.event_type_type, event_type))
     if odds_required:
         filters.append(has_real_odds(Fixture.odds))
     return filters
@@ -398,9 +426,12 @@ def _played_base_filters(
     outcome: PredictionOutcome,
     player_name: str | None = None,
     odds_required: bool = False,
+    event_type: TournamentTypeFilter | None = None,
 ):
     filters = [
-        *_played_fixture_filters(from_date, to_date, player_name, odds_required),
+        *_played_fixture_filters(
+            from_date, to_date, player_name, odds_required, event_type
+        ),
     ]
     outcome_exists = _played_prediction_exists_filter(
         model_version,
@@ -422,6 +453,7 @@ def count_played_fixtures(
     outcome: PredictionOutcome = "all",
     player_name: str | None = None,
     odds_required: bool = False,
+    event_type: TournamentTypeFilter | None = None,
 ) -> int:
     stmt = select(func.count()).select_from(Fixture).where(
         *_played_base_filters(
@@ -432,6 +464,7 @@ def count_played_fixtures(
             outcome,
             player_name,
             odds_required,
+            event_type,
         )
     )
     return int(db.scalar(stmt) or 0)
@@ -463,6 +496,7 @@ def list_played_fixtures(
     offset: int = 0,
     player_name: str | None = None,
     odds_required: bool = False,
+    event_type: TournamentTypeFilter | None = None,
 ) -> list[Fixture]:
     has_prediction = _played_has_prediction_expr(model_version, explicit_model_name)
     stmt = (
@@ -476,6 +510,7 @@ def list_played_fixtures(
                 outcome,
                 player_name,
                 odds_required,
+                event_type,
             )
         )
         .order_by(
@@ -503,6 +538,7 @@ def list_played_fixtures_with_predictions(
     offset: int = 0,
     player_name: str | None = None,
     odds_required: bool = False,
+    event_type: TournamentTypeFilter | None = None,
 ) -> list[tuple[Fixture, MatchPrediction | None]]:
     fixtures = list_played_fixtures(
         db,
@@ -515,6 +551,7 @@ def list_played_fixtures_with_predictions(
         offset=offset,
         player_name=player_name,
         odds_required=odds_required,
+        event_type=event_type,
     )
     if not fixtures:
         return []
@@ -700,6 +737,7 @@ def get_next_fixtures_with_predictions(
     status: FixturePredictionStatus = "upcoming",
     outcome: PredictionOutcome = "all",
     player_name: str | None = None,
+    event_type: TournamentTypeFilter | None = None,
 ) -> FixturesWithPredictionsPage:
     today = date.today()
     odds_required = model_version in ODDS_REQUIRED_VERSIONS
@@ -717,6 +755,7 @@ def get_next_fixtures_with_predictions(
             to_date=upcoming_to,
             player_name=player_name,
             odds_required=odds_required,
+            event_type=event_type,
         )
         fixtures = list_next_fixtures(
             db=db,
@@ -726,6 +765,7 @@ def get_next_fixtures_with_predictions(
             offset=offset,
             player_name=player_name,
             odds_required=odds_required,
+            event_type=event_type,
         )
         prediction_by_key = _predictions_by_event_key_with_fallback(
             db,
@@ -754,6 +794,7 @@ def get_next_fixtures_with_predictions(
             outcome=outcome,
             player_name=player_name,
             odds_required=odds_required,
+            event_type=event_type,
         )
         played_rows = list_played_fixtures_with_predictions(
             db,
@@ -766,6 +807,7 @@ def get_next_fixtures_with_predictions(
             offset=offset,
             player_name=player_name,
             odds_required=odds_required,
+            event_type=event_type,
         )
         extra_by_key = _extra_markets_by_event_key(
             db, [fixture.event_key for fixture, _ in played_rows]
@@ -785,6 +827,7 @@ def get_next_fixtures_with_predictions(
             to_date=upcoming_to,
             player_name=player_name,
             odds_required=odds_required,
+            event_type=event_type,
         )
         played_total = count_played_fixtures(
             db,
@@ -795,6 +838,7 @@ def get_next_fixtures_with_predictions(
             outcome=outcome if outcome != "all" else "all",
             player_name=player_name,
             odds_required=odds_required,
+            event_type=event_type,
         )
         total = upcoming_total + played_total
 
@@ -808,6 +852,7 @@ def get_next_fixtures_with_predictions(
                 offset=offset,
                 player_name=player_name,
                 odds_required=odds_required,
+                event_type=event_type,
             )
             prediction_by_key = _predictions_by_event_key_with_fallback(
                 db,
@@ -839,6 +884,7 @@ def get_next_fixtures_with_predictions(
                     offset=0,
                     player_name=player_name,
                     odds_required=odds_required,
+                    event_type=event_type,
                 )
                 extra_by_key_played = _extra_markets_by_event_key(
                     db, [fixture.event_key for fixture, _ in played_rows]
@@ -863,6 +909,7 @@ def get_next_fixtures_with_predictions(
                 offset=offset - upcoming_total,
                 player_name=player_name,
                 odds_required=odds_required,
+                event_type=event_type,
             )
             extra_by_key = _extra_markets_by_event_key(
                 db, [fixture.event_key for fixture, _ in played_rows]

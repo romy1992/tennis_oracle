@@ -28,6 +28,7 @@ from backend.src.app.services.predictions import (
     UPCOMING_DAYS_FORWARD,
     FixturePredictionStatus,
     PredictionOutcome,
+    TournamentTypeFilter,
     _predictions_by_event_key_with_fallback,
     _resolve_model_name,
     list_next_fixtures,
@@ -178,6 +179,7 @@ def get_single_match_value_analysis(
     status: FixturePredictionStatus = "upcoming",
     outcome: PredictionOutcome = "all",
     player_name: str | None = None,
+    event_type: TournamentTypeFilter | None = None,
     min_edge_percent: float | None = DEFAULT_MIN_EDGE_PERCENT,
     min_edge_overrides: dict[int, float] | None = None,
 ) -> SingleMatchValueResponse:
@@ -194,6 +196,7 @@ def get_single_match_value_analysis(
         status=status,
         outcome=outcome,
         player_name=player_name,
+        event_type=event_type,
     )
     overrides = min_edge_overrides or {}
     items = [
@@ -236,6 +239,7 @@ def _single_match_contexts(
     status: FixturePredictionStatus,
     outcome: PredictionOutcome,
     player_name: str | None,
+    event_type: TournamentTypeFilter | None = None,
 ) -> list[SingleMatchContext]:
     today = date.today()
     contexts: list[SingleMatchContext] = []
@@ -251,6 +255,7 @@ def _single_match_contexts(
             offset=0,
             player_name=player_name,
             odds_required=True,
+            event_type=event_type,
         )
         predictions = _predictions_by_event_key_with_fallback(
             db,
@@ -281,6 +286,7 @@ def _single_match_contexts(
             offset=0,
             player_name=player_name,
             odds_required=True,
+            event_type=event_type,
         )
         contexts.extend(
             SingleMatchContext(
