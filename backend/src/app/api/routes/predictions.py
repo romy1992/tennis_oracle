@@ -16,6 +16,7 @@ from backend.src.app.schemas.prediction import (
 from backend.src.app.services.predictions import (
     FixturePredictionStatus,
     PredictionOutcome,
+    TournamentTypeFilter,
     compute_daily_prediction_stats,
     compute_prediction_summary,
     get_next_fixtures_with_predictions,
@@ -63,6 +64,7 @@ def read_next_fixtures_predictions(
     status: FixturePredictionStatus = Query(default="upcoming"),
     outcome: PredictionOutcome = Query(default="all"),
     player: str | None = Query(default=None, min_length=1, max_length=100),
+    event_type: TournamentTypeFilter | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> FixturesWithPredictionsPage:
     try:
@@ -77,6 +79,7 @@ def read_next_fixtures_predictions(
             status=status,
             outcome=outcome,
             player_name=player,
+            event_type=event_type,
         )
     except SQLAlchemyError as exc:
         raise HTTPException(
