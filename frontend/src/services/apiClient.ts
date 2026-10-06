@@ -60,6 +60,7 @@ import type {
   ProbabilityBandAnalysisParams,
   SegmentRoiAnalysis,
   SegmentRoiAnalysisParams,
+  SlipShapeTrial,
   PublicModelRegistryListResponse,
   PublicModelRegistryCandidateCreate,
   PublicModelRegistryActionResponse,
@@ -456,6 +457,7 @@ export const apiClient = {
     request<ProbabilityBandAnalysis>(withQuery("/api/probability-bands", params)),
   getSegmentRoiAnalysis: (params: SegmentRoiAnalysisParams) =>
     request<SegmentRoiAnalysis>(withQuery("/api/segment-roi", params)),
+  getSlipShapeTrial: () => request<SlipShapeTrial>("/api/slip-shape-trial"),
   getPublicModelRegistry: (params: { status?: PublicModelRegistryStatus; limit?: number; offset?: number } = {}) =>
     request<PublicModelRegistryListResponse>(withQuery("/api/public-model-registry", params)),
   createPublicModelCandidate: (payload: PublicModelRegistryCandidateCreate) =>
