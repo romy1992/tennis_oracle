@@ -50,7 +50,8 @@ const navSections: Array<{
       { to: "/walk-forward", label: "Walk-forward" },
       { to: "/calibration", label: "Calibrazione" },
       { to: "/probability-bands", label: "Fasce probabilità" },
-      { to: "/segment-roi", label: "ROI per segmento" }
+      { to: "/segment-roi", label: "ROI per segmento" },
+      { to: "/slip-shape-trial", label: "Prova schedine" }
     ]
   },
   {
