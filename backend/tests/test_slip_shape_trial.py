@@ -1,8 +1,12 @@
 """Slip-shape trial: selection gate and short coupon, without a database."""
 
-from datetime import date
+from datetime import date, timedelta
 
-from backend.src.app.services.slip_shape_trial import TrialPick, evaluate_slip_shape_trial
+from backend.src.app.services.slip_shape_trial import (
+    TrialPick,
+    evaluate_forward_trial,
+    evaluate_slip_shape_trial,
+)
 
 
 def _pick(
@@ -119,6 +123,46 @@ def test_short_slip_pays_the_product_of_the_two_odds():
     # stake 10 at combined 2.10 → profit 11
     assert report["short_slips"]["profit_units"] == 11.0
     assert report["short_slips"]["roi_pct"] == 110.0
+
+
+def test_forward_trial_ignores_the_band_that_did_not_pass_and_waits_for_thirty_slips():
+    picks = [
+        _pick(slip_id=1, slip_date=date(2026, 10, 6), event_key=1, odds=1.6, outcome="won"),
+        _pick(slip_id=2, slip_date=date(2026, 10, 7), event_key=2, odds=1.2, model_prob=0.99, outcome="lost"),
+        _pick(slip_id=3, slip_date=date(2026, 10, 4), event_key=3, odds=1.6, outcome="won"),
+    ]
+    report = evaluate_forward_trial(
+        picks,
+        passed_odds_bands={"1.50-1.80"},
+        min_samples=30,
+        as_of=date(2026, 10, 10),
+    )
+    assert report["ready"] is False
+    assert report["settled_slips"] == 1
+    assert report["short_slips"]["slips_lost"] == 0
+    assert "30" in report["note"]
+
+
+def test_forward_trial_is_ready_after_thirty_closed_slips():
+    start = date(2026, 10, 6)
+    picks = [
+        _pick(
+            slip_id=index,
+            slip_date=start + timedelta(days=index),
+            event_key=index,
+            odds=1.6,
+            outcome="won",
+        )
+        for index in range(30)
+    ]
+    report = evaluate_forward_trial(
+        picks,
+        passed_odds_bands={"1.50-1.80"},
+        min_samples=30,
+        as_of=start + timedelta(days=40),
+    )
+    assert report["ready"] is True
+    assert report["settled_slips"] == 30
 
 
 def test_pending_leg_stays_out_of_roi():

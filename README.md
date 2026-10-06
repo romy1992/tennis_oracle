@@ -383,7 +383,7 @@ Provider-agnostic (`app/observability/`): log `text`/`json`, correlation ID, met
 | POST | `/api/public-model-registry/rollback` | `public_model_registry.rollback_active` | admin | Ripristina il modello precedente |
 | GET | `/api/probability-bands` | `probability_bands.read_probability_band_analysis` | admin | Fasce probabilità/edge: live (param `market`, un mercato alla volta), walk-forward OOS, backtest |
 | GET | `/api/segment-roi` | `segment_roi.read_segment_roi_analysis` | admin | ROI per segmento; live con `market` (Match / 1° set / O/U non misti) |
-| GET | `/api/slip-shape-trial` | `slip_shape_trial.read_slip_shape_trial` | admin | Prova congelata 7 ago–5 ott 2026: gate di selezione e forma corta, senza scrivere schedine |
+| GET | `/api/slip-shape-trial` | `slip_shape_trial.read_slip_shape_trial` | admin | Prova congelata 7 ago–5 ott 2026 più conferma dal 6 ott (30 schedine); protocollo in `docs/PROVA_SCHEDINE.md` |
 | GET | `/api/ops/checks` | `ops.get_ops_checks` | admin | Controlli operativi (import, pronostici, durata); `?alert=true` notifica admin |
 | POST | `/api/prematch-odds-snapshots` | `prematch_odds_snapshots.create_prematch_odds_snapshot` | admin | Append singolo rilevamento quote |
 | POST | `/api/prematch-odds-snapshots/from-payload` | `prematch_odds_snapshots.create_prematch_odds_snapshots_from_payload` | admin | Ingest matrice Home/Away |

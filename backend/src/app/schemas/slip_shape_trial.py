@@ -41,6 +41,17 @@ class SelectionCheckRead(BaseModel):
     passed: bool
 
 
+class ForwardTrialRead(BaseModel):
+    window_from: date
+    window_to: date
+    ready: bool
+    settled_slips: int
+    slips_needed: int
+    rule: str
+    note: str
+    short_slips: SlipSliceRead
+
+
 class SlipShapeTrialRead(BaseModel):
     window_from: date
     window_to: date
@@ -59,3 +70,4 @@ class SlipShapeTrialRead(BaseModel):
     first_set_singles: SingleSliceRead
     over_under_singles: SingleSliceRead
     checks: list[SelectionCheckRead]
+    forward: ForwardTrialRead
