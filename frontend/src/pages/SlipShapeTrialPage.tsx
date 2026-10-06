@@ -123,6 +123,19 @@ export function SlipShapeTrialPage() {
       </article>
 
       <article className="panel">
+        <h3>{trial.forward.ready ? "Prova dal 6 ottobre, campione raggiunto" : "Prova dal 6 ottobre"}</h3>
+        <p>{trial.forward.note}</p>
+        <div className="metric-grid">
+          <MetricCard
+            label="Schedine chiuse"
+            value={`${trial.forward.settled_slips} / ${trial.forward.slips_needed}`}
+            hint={trial.forward.rule || "Nessuna regola"}
+          />
+          <MetricCard label="ROI forma corta" value={formatPct(trial.forward.short_slips.roi_pct)} hint="Stessa regola del periodo congelato" />
+        </div>
+      </article>
+
+      <article className="panel">
         <h3>Generiche</h3>
         <p className="muted">Schedine già salvate, stessa chiusura sulle partite finite. La pagina Consiglio non cambia.</p>
         <SlipCards slip={trial.official_slips} />

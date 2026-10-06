@@ -795,6 +795,17 @@ export type SlipShapeSelectionCheck = {
   passed: boolean;
 };
 
+export type SlipShapeForward = {
+  window_from: string;
+  window_to: string;
+  ready: boolean;
+  settled_slips: number;
+  slips_needed: number;
+  rule: string;
+  note: string;
+  short_slips: SlipShapeSlice;
+};
+
 export type SlipShapeTrial = {
   window_from: string;
   window_to: string;
@@ -813,6 +824,7 @@ export type SlipShapeTrial = {
   first_set_singles: SlipShapeSingleSlice;
   over_under_singles: SlipShapeSingleSlice;
   checks: SlipShapeSelectionCheck[];
+  forward: SlipShapeForward;
 };
 
 export type BettingSlipsQueryParams = {

@@ -74,6 +74,28 @@ const trial: SlipShapeTrial = {
     stake_units: 200,
     roi_pct: -15
   },
+  forward: {
+    window_from: "2026-10-06",
+    window_to: "2026-10-06",
+    ready: false,
+    settled_slips: 0,
+    slips_needed: 30,
+    rule: "quota 1.50-1.80",
+    note: "Schedine corte chiuse 0 su 30.",
+    short_slips: {
+      label: "Forma corta",
+      slips_won: 0,
+      slips_lost: 0,
+      slips_pending: 0,
+      slip_win_rate_pct: null,
+      picks_won: 0,
+      picks_lost: 0,
+      pick_hit_rate_pct: null,
+      profit_units: 0,
+      stake_units: 0,
+      roi_pct: null
+    }
+  },
   checks: [
     {
       method: "raw",
@@ -171,6 +193,8 @@ describe("SlipShapeTrialPage", () => {
     expect(await screen.findByRole("heading", { name: "Prova schedine" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Selezione invariata" })).toBeInTheDocument();
     expect(screen.getByText(/Nessuna fascia di quota/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Prova dal 6 ottobre" })).toBeInTheDocument();
+    expect(screen.getByText(/0 su 30/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Forma corta" })).toBeInTheDocument();
     expect(screen.getByText("Quota 1.50-1.80")).toBeInTheDocument();
     expect(screen.getByText("No")).toBeInTheDocument();

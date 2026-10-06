@@ -33,6 +33,9 @@ from backend.src.entity.fixture import Fixture
 WINDOW_FROM = date(2026, 8, 7)
 WINDOW_TO = date(2026, 10, 5)
 SPLIT_DATE = date(2026, 9, 1)
+# Days from this date on are the confirmation sample. The odds band is not refit here.
+# Handoff for the next session: docs/PROVA_SCHEDINE.md
+FORWARD_FROM = date(2026, 10, 6)
 MODEL_VERSION = "v4"
 MODEL_NAME = "voting_ensemble"
 STAKE = 10.0
@@ -478,6 +481,70 @@ def _short_slip_rule(passing: list[str]) -> str:
     )
 
 
+def evaluate_forward_trial(
+    picks: list[TrialPick],
+    *,
+    passed_odds_bands: set[str],
+    min_samples: int = MIN_SAMPLES,
+    as_of: date | None = None,
+) -> dict:
+    """Apply the frozen odds bands to slips on or after ``FORWARD_FROM``.
+
+    The band is an input from the selection window. This function does not
+    look for a new one.
+    """
+    window_to = as_of or date.today()
+    if window_to < FORWARD_FROM:
+        window_to = FORWARD_FROM
+    in_window = [pick for pick in picks if FORWARD_FROM <= pick.slip_date <= window_to]
+    if not passed_odds_bands:
+        short = _short_slips(in_window, allowed=set())
+        settled = 0
+        return {
+            "window_from": FORWARD_FROM,
+            "window_to": window_to,
+            "ready": False,
+            "settled_slips": settled,
+            "slips_needed": min_samples,
+            "rule": "",
+            "note": (
+                "Nel periodo congelato non è passata nessuna fascia di quota. "
+                "Non c'è una regola da misurare sui giorni nuovi."
+            ),
+            "short_slips": short,
+        }
+    allowed = {
+        (pick.slip_date, pick.event_key)
+        for pick in in_window
+        if pick.market == "match_winner" and pick.odds is not None and odds_band(pick.odds) in passed_odds_bands
+    }
+    short = _short_slips(in_window, allowed=allowed)
+    settled = int(short["slips_won"]) + int(short["slips_lost"])
+    ready = settled >= min_samples
+    rule = "quota " + ", ".join(sorted(passed_odds_bands))
+    if ready:
+        note = (
+            f"Ci sono {settled} schedine corte chiuse dal {FORWARD_FROM.isoformat()}. "
+            "Si legge questo ROI. La fascia non si ricalcola e il consiglio ufficiale non si tocca "
+            "finché questa lettura non è stata discussa."
+        )
+    else:
+        note = (
+            f"Regola ferma: {rule}. Schedine corte chiuse {settled} su {min_samples}. "
+            "Prima di quel numero non si cambia soglia, profilo o modello."
+        )
+    return {
+        "window_from": FORWARD_FROM,
+        "window_to": window_to,
+        "ready": ready,
+        "settled_slips": settled,
+        "slips_needed": min_samples,
+        "rule": rule,
+        "note": note,
+        "short_slips": short,
+    }
+
+
 def evaluate_slip_shape_trial(picks: list[TrialPick], *, min_samples: int = MIN_SAMPLES) -> dict:
     sample = _match_winner_sample(picks)
     checks = _selection_checks(sample, min_samples=min_samples)
@@ -587,7 +654,7 @@ def settle_stored_pick(
     return settlement.outcome
 
 
-def load_trial_picks(db: Session) -> list[TrialPick]:
+def load_trial_picks(db: Session, *, date_from: date, date_to: date) -> list[TrialPick]:
     rows = db.execute(
         select(
             BettingSlip.id,
@@ -612,8 +679,8 @@ def load_trial_picks(db: Session) -> list[TrialPick]:
             BettingSlip.model_version == MODEL_VERSION,
             BettingSlip.model_name == MODEL_NAME,
             BettingSlip.strategy_family == "generic",
-            BettingSlip.slip_date >= WINDOW_FROM,
-            BettingSlip.slip_date <= WINDOW_TO,
+            BettingSlip.slip_date >= date_from,
+            BettingSlip.slip_date <= date_to,
         )
     ).all()
     picks: list[TrialPick] = []
@@ -665,5 +732,21 @@ def load_trial_picks(db: Session) -> list[TrialPick]:
     return picks
 
 
-def build_slip_shape_trial(db: Session) -> dict:
-    return evaluate_slip_shape_trial(load_trial_picks(db))
+def build_slip_shape_trial(db: Session, *, as_of: date | None = None) -> dict:
+    as_of = as_of or date.today()
+    report = evaluate_slip_shape_trial(load_trial_picks(db, date_from=WINDOW_FROM, date_to=WINDOW_TO))
+    passed_odds_bands = {
+        check["band"]
+        for check in report["checks"]
+        if check["passed"] and check["dimension"] == "odds"
+    }
+    forward_picks = (
+        load_trial_picks(db, date_from=FORWARD_FROM, date_to=as_of) if as_of >= FORWARD_FROM else []
+    )
+    report["forward"] = evaluate_forward_trial(
+        forward_picks,
+        passed_odds_bands=passed_odds_bands,
+        min_samples=MIN_SAMPLES,
+        as_of=as_of,
+    )
+    return report

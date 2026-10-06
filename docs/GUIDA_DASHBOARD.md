@@ -872,7 +872,7 @@ Hit rate delle **pick per mercato** (Match / 1° set / O/U) e esito complessivo 
 
 ### A cosa serve
 
-Confronto congelato, dal 7 agosto al 5 ottobre 2026, tra le schedine **Generiche** già salvate e una **forma corta** (due match winner al giorno, i più probabili, senza over/under e senza primo set nella stessa multipla). Sopra il confronto c'è l'esito della selezione: una fascia di quota o di edge entra solo se il ROI resta positivo sia ad agosto sia a settembre, anche dopo una ricalibrazione Platt o isotonica.
+Confronto congelato, dal 7 agosto al 5 ottobre 2026, tra le schedine **Generiche** già salvate e una **forma corta** (al massimo due match winner al giorno, senza over/under e senza primo set nella stessa multipla). Sopra il confronto c'è l'esito della selezione: una fascia di quota o di edge entra solo se il ROI resta positivo sia ad agosto sia a settembre, anche dopo una ricalibrazione Platt o isotonica. Il blocco **Prova dal 6 ottobre** applica la fascia già scelta ai giorni nuovi e diventa leggibile a 30 schedine chiuse. Il protocollo per la sessione successiva è in [PROVA_SCHEDINE.md](PROVA_SCHEDINE.md).
 
 ### Quando aprirla
 
