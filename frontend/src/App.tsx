@@ -26,6 +26,7 @@ import { WalkForwardPage } from "./pages/WalkForwardPage";
 import { CalibrationPage } from "./pages/CalibrationPage";
 import { ProbabilityBandsPage } from "./pages/ProbabilityBandsPage";
 import { SegmentRoiPage } from "./pages/SegmentRoiPage";
+import { SlipShapeTrialPage } from "./pages/SlipShapeTrialPage";
 import { SubscriptionsDashboardPage } from "./pages/SubscriptionsDashboardPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -64,6 +65,7 @@ export const appRoutes: RouteObject[] = [
           { path: "calibration", element: <CalibrationPage /> },
           { path: "probability-bands", element: <ProbabilityBandsPage /> },
           { path: "segment-roi", element: <SegmentRoiPage /> },
+          { path: "slip-shape-trial", element: <SlipShapeTrialPage /> },
           { path: "subscriptions-dashboard", element: <SubscriptionsDashboardPage /> },
           { path: "settings", element: <SettingsPage /> }
         ]

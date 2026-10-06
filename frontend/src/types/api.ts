@@ -759,6 +759,74 @@ export type BettingSlipModelStatsResponse = {
   by_strategy?: BettingSlipStatsStrategy[];
 };
 
+export type SlipShapeSlice = {
+  label: string;
+  slips_won: number;
+  slips_lost: number;
+  slips_pending: number;
+  slip_win_rate_pct: number | null;
+  picks_won: number;
+  picks_lost: number;
+  pick_hit_rate_pct: number | null;
+  profit_units: number;
+  stake_units: number;
+  roi_pct: number | null;
+};
+
+export type SlipShapeSingleSlice = {
+  label: string;
+  won: number;
+  lost: number;
+  pending: number;
+  hit_rate_pct: number | null;
+  profit_units: number;
+  stake_units: number;
+  roi_pct: number | null;
+};
+
+export type SlipShapeSelectionCheck = {
+  method: string;
+  dimension: string;
+  band: string;
+  august_settled: number;
+  august_roi_pct: number | null;
+  september_settled: number;
+  september_roi_pct: number | null;
+  passed: boolean;
+};
+
+export type SlipShapeForward = {
+  window_from: string;
+  window_to: string;
+  ready: boolean;
+  settled_slips: number;
+  slips_needed: number;
+  rule: string;
+  note: string;
+  short_slips: SlipShapeSlice;
+};
+
+export type SlipShapeTrial = {
+  window_from: string;
+  window_to: string;
+  split_date: string;
+  model_version: string;
+  model_name: string;
+  stake: number;
+  min_samples: number;
+  selection_passed: boolean;
+  passing_rules: string[];
+  conclusion: string;
+  short_slip_rule: string;
+  official_slips: SlipShapeSlice;
+  short_slips: SlipShapeSlice;
+  match_winner_singles: SlipShapeSingleSlice;
+  first_set_singles: SlipShapeSingleSlice;
+  over_under_singles: SlipShapeSingleSlice;
+  checks: SlipShapeSelectionCheck[];
+  forward: SlipShapeForward;
+};
+
 export type BettingSlipsQueryParams = {
   date?: string;
   model_version?: MLModelVersion;

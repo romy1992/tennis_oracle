@@ -868,6 +868,36 @@ Hit rate delle **pick per mercato** (Match / 1° set / O/U) e esito complessivo 
 
 ---
 
+## Prova schedine — `/slip-shape-trial`
+
+### A cosa serve
+
+Confronto congelato, dal 7 agosto al 5 ottobre 2026, tra le schedine **Generiche** già salvate e una **forma corta** (al massimo due match winner al giorno, senza over/under e senza primo set nella stessa multipla). Sopra il confronto c'è l'esito della selezione: una fascia di quota o di edge entra solo se il ROI resta positivo sia ad agosto sia a settembre, anche dopo una ricalibrazione Platt o isotonica. Il blocco **Prova dal 6 ottobre** applica la fascia già scelta ai giorni nuovi e diventa leggibile a 30 schedine chiuse. Il protocollo per la sessione successiva è in [PROVA_SCHEDINE.md](PROVA_SCHEDINE.md).
+
+### Quando aprirla
+
+- Prima di cambiare soglie o profili del consiglio.  
+- Per vedere se accorciare la schedina avvicina il ROI a quello delle singole.
+
+### Cosa NON fa / con cosa non confonderla
+
+- **Non** pubblica un consiglio e **non** modifica **Consiglio schedina**.  
+- **Non** è una versione nuova del modello (resta v4 / voting ensemble).  
+- **Non** è la dashboard live né il report beta Telegram.
+
+### Come leggerla
+
+| Blocco | Significato |
+|--------|-------------|
+| Selezione invariata | Nessuna regola ha retto sulle due metà: non si cambia come si scelgono i pick |
+| Selezione possibile | Le regole elencate sono le uniche candidate |
+| Generiche | Coupon già salvati, stake 10 |
+| Forma corta | Replay strutturale, non un filtro di valore |
+| Singole | Ogni partita una volta, fuori dalla multipla |
+| Controllo a metà campione | Agosto contro settembre; «Regge» solo se entrambe le metà sono positive e hanno almeno 30 casi |
+
+---
+
 ## Walk-forward — `/walk-forward`
 
 ### A cosa serve

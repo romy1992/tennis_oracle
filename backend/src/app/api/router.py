@@ -16,6 +16,7 @@ from backend.src.app.api.routes import (
     published_predictions,
     segment_roi,
     settings,
+    slip_shape_trial,
     single_match_value,
     subscription_dashboard,
     telegram,
@@ -47,6 +48,7 @@ api_router.include_router(calibration.router)
 api_router.include_router(public_model_registry.router)
 api_router.include_router(probability_bands.router)
 api_router.include_router(segment_roi.router)
+api_router.include_router(slip_shape_trial.router)
 api_router.include_router(settings.router)
 api_router.include_router(ops.router)
 api_router.include_router(subscription_dashboard.router)
