@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
+import logoUrl from "../assets/logo.png";
 import { BrandLogo } from "./BrandLogo";
 import { GlobalUpdateControls } from "./GlobalUpdateControls";
 
@@ -103,10 +104,31 @@ function NavGroupItem({ group, currentPath }: { group: NavGroup; currentPath: st
 export function Layout() {
   const { username, logout } = useAuth();
   const { pathname } = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className={`app-shell${menuOpen ? " menu-open" : ""}`}>
+      <header className="mobile-bar">
+        <div className="mobile-bar-brand" aria-hidden="true">
+          <img src={logoUrl} alt="" />
+        </div>
+        <button
+          type="button"
+          className="mobile-bar-toggle"
+          aria-label={menuOpen ? "Chiudi menu" : "Apri menu"}
+          aria-expanded={menuOpen}
+          aria-controls="app-sidebar"
+          onClick={() => setMenuOpen((value) => !value)}
+        >
+          <span aria-hidden="true" />
+        </button>
+      </header>
+      <div className="sidebar-scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />
+      <aside className="sidebar" id="app-sidebar">
         <div className="sidebar-header">
           <div className="sidebar-brand">
             <BrandLogo />
