@@ -2477,3 +2477,38 @@ td {
     grid-template-columns: 232px 1fr;
   }
 }
+
+/* Sidebar: testi sempre bianchi (niente grigio-azzurro/blu) */
+.sidebar,
+.sidebar p,
+.sidebar nav a,
+.sidebar nav a:visited,
+.nav-section-label,
+.nav-group-toggle,
+.nav-group-caret,
+.sidebar-user,
+.global-update-markets-note,
+.global-update-version-filters,
+.global-update-meta small {
+  color: #ffffff;
+}
+
+.nav-section-label {
+  opacity: 0.7;
+}
+
+.sidebar .action-button:not(.primary),
+.sidebar .action-button:not(.primary):hover:not(:disabled),
+.sidebar-auth .action-button:hover:not(:disabled) {
+  color: #ffffff;
+}
+
+.sidebar .action-button:not(.primary) {
+  background: transparent;
+  border-color: rgb(255 255 255 / 35%);
+}
+
+.sidebar .action-button:not(.primary):hover:not(:disabled) {
+  background: var(--nav-hover);
+  border-color: #ffffff;
+}
