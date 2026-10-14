@@ -19,12 +19,15 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 export function GlobalUpdateControls() {
-  const { status, isRunning, triggerUpdate, cancelUpdate, lastCompletedAt, lastOrigin } =
+  const { status, isRunning, triggerUpdate, forceSlips, cancelUpdate, lastCompletedAt, lastOrigin } =
     useGlobalUpdate();
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [outsideHoursWarning, setOutsideHoursWarning] = useState<string | null>(null);
   const [forcing, setForcing] = useState(false);
+  // Conferma di forzare le schedine data mentre l'aggiornamento e' ancora in corso: si esegue a fine run.
+  const [forceAfterRun, setForceAfterRun] = useState(false);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -37,43 +40,64 @@ export function GlobalUpdateControls() {
     return () => window.removeEventListener("keydown", handleEscape);
   }, [forcing, outsideHoursWarning]);
 
-  async function handleClick() {
-    try {
-      setActionError(null);
-      await triggerUpdate(true);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 423) {
-        setOutsideHoursWarning(err.message);
-        return;
-      }
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Errore durante l'aggiornamento globale.";
-      setActionError(message);
-    }
+  function errorText(err: unknown, fallback: string) {
+    return err instanceof ApiError ? err.message : err instanceof Error ? err.message : fallback;
   }
 
-  async function handleForceOutsideHours() {
+  async function runForceSlips() {
     try {
       setActionError(null);
       setForcing(true);
-      await triggerUpdate(true, undefined, true);
-      setOutsideHoursWarning(null);
+      const result = await forceSlips();
+      setActionInfo(result.message);
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Errore durante l'aggiornamento globale forzato.";
-      setActionError(message);
-      setOutsideHoursWarning(null);
+      setActionError(errorText(err, "Errore durante la forzatura delle schedine."));
     } finally {
       setForcing(false);
     }
+  }
+
+  useEffect(() => {
+    if (forceAfterRun && !isRunning) {
+      setForceAfterRun(false);
+      void runForceSlips();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceAfterRun, isRunning]);
+
+  async function handleClick() {
+    try {
+      setActionError(null);
+      setActionInfo(null);
+      // L'aggiornamento parte sempre; dopo la chiusura del pool le schedine restano ferme
+      // e il pop-up chiede se forzarle.
+      const started = await triggerUpdate(true);
+      if (started.slips_closed) {
+        setOutsideHoursWarning(
+          `Aggiornamento partite avviato. Il pool schedine di oggi è chiuso dalle ${
+            started.slips_close_time ?? "10:00"
+          }: le schedine non sono state modificate.`
+        );
+      }
+    } catch (err) {
+      setActionError(errorText(err, "Errore durante l'aggiornamento globale."));
+    }
+  }
+
+  function handleOpenForceSlips() {
+    setActionError(null);
+    setActionInfo(null);
+    setOutsideHoursWarning("Le schedine di oggi sono chiuse dopo la scadenza del pool.");
+  }
+
+  async function handleForceOutsideHours() {
+    setOutsideHoursWarning(null);
+    if (isRunning) {
+      setForceAfterRun(true);
+      setActionInfo("Le schedine verranno forzate al termine dell'aggiornamento in corso.");
+      return;
+    }
+    await runForceSlips();
   }
 
   async function handleCancel() {
@@ -110,6 +134,14 @@ export function GlobalUpdateControls() {
         >
           {isRunning ? "Aggiornamento globale..." : "Aggiorna tutto"}
         </button>
+        <button
+          type="button"
+          className="action-button secondary"
+          onClick={handleOpenForceSlips}
+          disabled={forcing || forceAfterRun}
+        >
+          {forcing ? "Forzo le schedine..." : "Forza schedine"}
+        </button>
 
         {isRunning && status ? (
           <button
@@ -143,6 +175,7 @@ export function GlobalUpdateControls() {
               {status.errors.length} errori
             </Link>
           ) : null}
+          {actionInfo ? <small>{actionInfo}</small> : null}
           {actionError ? <small className="action-error">{actionError}</small> : null}
         </div>
       ) : null}
@@ -162,7 +195,7 @@ export function GlobalUpdateControls() {
                 Se scegli <strong>Forza</strong>:
               </p>
               <ul>
-                <li>la pipeline globale viene avviata comunque;</li>
+                <li>solo le schedine vengono rigenerate (l'aggiornamento delle partite non cambia);</li>
                 <li>il pool schedine di oggi può ricevere nuove pick anche dopo la chiusura;</li>
                 <li>il risultato giornaliero può differire da quello congelato all'orario limite.</li>
               </ul>
@@ -176,7 +209,7 @@ export function GlobalUpdateControls() {
                 onClick={() => setOutsideHoursWarning(null)}
                 disabled={forcing}
               >
-                Annulla
+                Non forzare
               </button>
               <button
                 type="button"
@@ -184,7 +217,7 @@ export function GlobalUpdateControls() {
                 onClick={() => void handleForceOutsideHours()}
                 disabled={forcing}
               >
-                {forcing ? "Avvio..." : "Forza"}
+                Forza
               </button>
             </div>
           </div>

@@ -14,6 +14,7 @@ const apiMocks = vi.hoisted(() => ({
   logout: vi.fn(),
   getGlobalUpdateStatus: vi.fn(),
   startGlobalUpdate: vi.fn(),
+  forceSlips: vi.fn(),
   cancelGlobalUpdate: vi.fn(),
   getGlobalUpdateLatest: vi.fn(),
   getGlobalUpdateRun: vi.fn(),
@@ -114,14 +115,14 @@ describe("GlobalUpdateControls", () => {
     expect(await screen.findByText("Run già attiva")).toBeInTheDocument();
   });
 
-  it("shows the outside-hours warning and lets the admin cancel", async () => {
+  it("after the cutoff the update starts anyway and the pop-up offers to force the slips", async () => {
     apiMocks.getGlobalUpdateStatus.mockResolvedValue(idleGlobalUpdate);
-    apiMocks.startGlobalUpdate.mockRejectedValue(
-      new ApiError(
-        "La finestra del pool schedine di oggi è chiusa dalle 10:00 (Europe/Rome).",
-        423
-      )
-    );
+    apiMocks.startGlobalUpdate.mockResolvedValue({
+      run_id: 11,
+      status: "pending",
+      slips_closed: true,
+      slips_close_time: "10:00"
+    });
     const user = userEvent.setup();
 
     renderWithProviders(<GlobalUpdateControls />);
@@ -130,44 +131,58 @@ describe("GlobalUpdateControls", () => {
 
     expect(await screen.findByRole("dialog", { name: "Aggiornamento fuori orario" }))
       .toBeInTheDocument();
-    expect(screen.getByText(/può ricevere nuove pick/)).toBeInTheDocument();
+    expect(screen.getByText(/chiuso dalle 10:00/)).toBeInTheDocument();
+    expect(apiMocks.startGlobalUpdate).toHaveBeenCalledWith({ force: true });
 
-    await user.click(screen.getByRole("button", { name: "Annulla" }));
+    await user.click(screen.getByRole("button", { name: "Non forzare" }));
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(apiMocks.startGlobalUpdate).toHaveBeenCalledTimes(1);
+    expect(apiMocks.forceSlips).not.toHaveBeenCalled();
   });
 
-  it("forces the update after an explicit outside-hours confirmation", async () => {
+  it("forces only the slips after an explicit confirmation", async () => {
     apiMocks.getGlobalUpdateStatus.mockResolvedValue(idleGlobalUpdate);
-    apiMocks.startGlobalUpdate
-      .mockRejectedValueOnce(
-        new ApiError(
-          "La finestra del pool schedine di oggi è chiusa dalle 10:00 (Europe/Rome).",
-          423
-        )
-      )
-      .mockResolvedValueOnce({ run_id: 10, status: "pending" });
+    apiMocks.startGlobalUpdate.mockResolvedValue({
+      run_id: 12,
+      status: "pending",
+      slips_closed: true,
+      slips_close_time: "10:00"
+    });
+    apiMocks.forceSlips.mockResolvedValue({
+      slips_generated: 5,
+      warnings: [],
+      message: "Schedine forzate fuori orario: 5 generate."
+    });
     const user = userEvent.setup();
 
     renderWithProviders(<GlobalUpdateControls />);
     await screen.findByRole("button", { name: "Aggiorna tutto" });
     await user.click(screen.getByRole("button", { name: "Aggiorna tutto" }));
     await screen.findByRole("dialog", { name: "Aggiornamento fuori orario" });
-
-    apiMocks.getGlobalUpdateStatus.mockResolvedValue(runningGlobalUpdate);
     await user.click(screen.getByRole("button", { name: "Forza" }));
 
     await waitFor(() => {
-      expect(apiMocks.startGlobalUpdate).toHaveBeenNthCalledWith(2, {
-        force: true,
-        force_outside_hours: true,
-        versions: undefined
-      });
+      expect(apiMocks.forceSlips).toHaveBeenCalledTimes(1);
     });
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Aggiornamento globale..." }))
-      .toBeDisabled();
+    expect(apiMocks.startGlobalUpdate).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Schedine forzate fuori orario: 5 generate."))
+      .toBeInTheDocument();
+  });
+
+  it("the separate 'Forza schedine' button opens the same confirmation", async () => {
+    apiMocks.getGlobalUpdateStatus.mockResolvedValue(idleGlobalUpdate);
+    apiMocks.forceSlips.mockResolvedValue({ slips_generated: 3, warnings: [], message: "ok forzate" });
+    const user = userEvent.setup();
+
+    renderWithProviders(<GlobalUpdateControls />);
+    await user.click(await screen.findByRole("button", { name: "Forza schedine" }));
+    expect(await screen.findByRole("dialog", { name: "Aggiornamento fuori orario" }))
+      .toBeInTheDocument();
+    expect(apiMocks.startGlobalUpdate).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Forza" }));
+    await waitFor(() => expect(apiMocks.forceSlips).toHaveBeenCalledTimes(1));
   });
 
   it("can cancel a running update", async () => {

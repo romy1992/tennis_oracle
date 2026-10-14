@@ -12,6 +12,7 @@ import type {
   FixturesWithPredictionsPage,
   GlobalUpdateReportRead,
   GlobalUpdateRunRead,
+  ForceSlipsResponse,
   GlobalUpdateStartResponse,
   ImportFixturesResponse,
   ImportStatusResponse,
@@ -374,6 +375,7 @@ export const apiClient = {
       versions?: string[];
     } = {}
   ) => post<GlobalUpdateStartResponse>("/api/global-update", params),
+  forceSlips: () => post<ForceSlipsResponse>("/api/global-update/force-slips", {}),
   getGlobalUpdateStatus: () => request<GlobalUpdateRunRead | null>("/api/global-update/status"),
   getGlobalUpdateLatest: () => request<GlobalUpdateRunRead | null>("/api/global-update/latest"),
   cancelGlobalUpdate: (runId: number) =>

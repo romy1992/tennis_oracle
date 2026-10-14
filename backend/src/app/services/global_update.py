@@ -1601,3 +1601,31 @@ def get_models_versions_results(db: Session, *, target_date: date | None = None)
             for version, models in sorted(version_map.items())
         ],
     }
+
+
+def force_slips_outside_hours(db: Session) -> tuple[int, list[str]]:
+    """Rebuild today's slips for every enabled combination even if the pool is closed.
+
+    Only the slips are touched (predictions already in the DB are used): this is the explicit
+    override behind the "Forza schedine" action, separate from the global update itself.
+    """
+    settings = get_settings()
+    today = datetime.now(ZoneInfo(settings.betting_slip_timezone)).date()
+    total = 0
+    warnings: list[str] = []
+    for combo in list_enabled_combinations():
+        try:
+            daily = get_daily_betting_slips(
+                db=db,
+                slip_date=today,
+                model_version=combo.model_version,
+                model_name=combo.model_name,
+                regenerate=False,
+                force_outside_hours=True,
+            )
+            total += len(daily.slips)
+            warnings.extend(daily.warnings)
+        except Exception as exc:
+            db.rollback()
+            warnings.append(f"betting_slips:{combo.model_version}/{combo.model_name}:{exc}")
+    return total, warnings
