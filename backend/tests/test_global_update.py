@@ -214,13 +214,18 @@ class GlobalUpdateServiceTest(unittest.TestCase):
 
     @patch("backend.src.app.api.routes.global_update.start_global_update")
     @patch("backend.src.app.api.routes.global_update.get_betting_slip_pool_window")
-    def test_post_global_update_requires_confirmation_outside_hours(
+    def test_post_global_update_runs_outside_hours_without_touching_slips(
         self, mock_window, mock_start
     ):
+        """The update is not blocked after the slip cutoff: only slips stay frozen."""
         mock_window.return_value = SimpleNamespace(
             is_closed=True,
             close_time="10:00",
             timezone="Europe/Rome",
+        )
+        mock_start.return_value = (
+            SimpleNamespace(id=43, status="pending"),
+            "Global update started.",
         )
 
         response = self.client.post(
@@ -229,9 +234,12 @@ class GlobalUpdateServiceTest(unittest.TestCase):
             headers=self.auth_headers,
         )
 
-        self.assertEqual(response.status_code, 423)
-        self.assertIn("10:00", response.json()["detail"])
-        mock_start.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["run_id"], 43)
+        self.assertIn("10:00", body["message"])
+        self.assertIn("schedine non vengono modificate", body["message"])
+        self.assertFalse(mock_start.call_args.kwargs["force_outside_hours"])
 
     @patch("backend.src.app.api.routes.global_update.start_global_update")
     @patch("backend.src.app.api.routes.global_update.get_betting_slip_pool_window")

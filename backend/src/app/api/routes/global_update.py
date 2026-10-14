@@ -43,15 +43,16 @@ def trigger_global_update(
     db: Session = Depends(get_db),
 ) -> GlobalUpdateStartResponse:
     payload = body or GlobalUpdateStartRequest()
+    # The update itself (fixtures, predictions, results) runs at any hour. Only the slip pool has a
+    # daily cutoff, and the pipeline already respects it: after the cutoff persisted slips are left
+    # untouched unless `force_outside_hours` is set explicitly (it applies to slips only).
     pool_window = get_betting_slip_pool_window()
-    if pool_window.is_closed and not payload.force_outside_hours:
-        raise HTTPException(
-            status_code=423,
-            detail=(
-                "La finestra del pool schedine di oggi è chiusa dalle "
-                f"{pool_window.close_time} ({pool_window.timezone})."
-            ),
-        )
+    slips_note = (
+        f" Finestra schedine chiusa dalle {pool_window.close_time} ({pool_window.timezone}): "
+        "partite e predizioni vengono aggiornate, le schedine non vengono modificate."
+        if pool_window.is_closed and not payload.force_outside_hours
+        else ""
+    )
     try:
         run, message = start_global_update(
             db,
@@ -81,7 +82,7 @@ def trigger_global_update(
     return GlobalUpdateStartResponse(
         run_id=run.id,
         status=run.status,  # type: ignore[arg-type]
-        message=message,
+        message=message + slips_note,
     )
 
 
