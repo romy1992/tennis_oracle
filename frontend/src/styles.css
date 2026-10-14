@@ -336,6 +336,13 @@ a {
   padding-left: 22px;
 }
 
+/* Il modal vive in document.body (portal): gli stili della sidebar non devono toccarlo. */
+.global-update-modal .action-button.secondary {
+  background: #ffffff;
+  border-color: #cfd8e6;
+  color: #172033;
+}
+
 .global-update-modal-actions {
   display: flex;
   gap: 10px;

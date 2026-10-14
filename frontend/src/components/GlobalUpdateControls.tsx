@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 
 import { useGlobalUpdate } from "../hooks/useGlobalUpdate";
@@ -14,17 +15,26 @@ function formatDateTime(value: string | null | undefined) {
     month: "2-digit",
     year: "numeric",
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
   });
 }
 
 export function GlobalUpdateControls() {
-  const { status, isRunning, triggerUpdate, forceSlips, cancelUpdate, lastCompletedAt, lastOrigin } =
-    useGlobalUpdate();
+  const {
+    status,
+    isRunning,
+    triggerUpdate,
+    forceSlips,
+    cancelUpdate,
+    lastCompletedAt,
+    lastOrigin,
+  } = useGlobalUpdate();
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
-  const [outsideHoursWarning, setOutsideHoursWarning] = useState<string | null>(null);
+  const [outsideHoursWarning, setOutsideHoursWarning] = useState<string | null>(
+    null,
+  );
   const [forcing, setForcing] = useState(false);
   // Conferma di forzare le schedine data mentre l'aggiornamento e' ancora in corso: si esegue a fine run.
   const [forceAfterRun, setForceAfterRun] = useState(false);
@@ -41,7 +51,11 @@ export function GlobalUpdateControls() {
   }, [forcing, outsideHoursWarning]);
 
   function errorText(err: unknown, fallback: string) {
-    return err instanceof ApiError ? err.message : err instanceof Error ? err.message : fallback;
+    return err instanceof ApiError
+      ? err.message
+      : err instanceof Error
+        ? err.message
+        : fallback;
   }
 
   async function runForceSlips() {
@@ -51,7 +65,9 @@ export function GlobalUpdateControls() {
       const result = await forceSlips();
       setActionInfo(result.message);
     } catch (err) {
-      setActionError(errorText(err, "Errore durante la forzatura delle schedine."));
+      setActionError(
+        errorText(err, "Errore durante la forzatura delle schedine."),
+      );
     } finally {
       setForcing(false);
     }
@@ -76,7 +92,7 @@ export function GlobalUpdateControls() {
         setOutsideHoursWarning(
           `Aggiornamento partite avviato. Il pool schedine di oggi è chiuso dalle ${
             started.slips_close_time ?? "10:00"
-          }: le schedine non sono state modificate.`
+          }: le schedine non sono state modificate.`,
         );
       }
     } catch (err) {
@@ -87,14 +103,18 @@ export function GlobalUpdateControls() {
   function handleOpenForceSlips() {
     setActionError(null);
     setActionInfo(null);
-    setOutsideHoursWarning("Le schedine di oggi sono chiuse dopo la scadenza del pool.");
+    setOutsideHoursWarning(
+      "Le schedine di oggi sono chiuse dopo la scadenza del pool.",
+    );
   }
 
   async function handleForceOutsideHours() {
     setOutsideHoursWarning(null);
     if (isRunning) {
       setForceAfterRun(true);
-      setActionInfo("Le schedine verranno forzate al termine dell'aggiornamento in corso.");
+      setActionInfo(
+        "Le schedine verranno forzate al termine dell'aggiornamento in corso.",
+      );
       return;
     }
     await runForceSlips();
@@ -120,9 +140,13 @@ export function GlobalUpdateControls() {
 
   return (
     <div className="global-update-controls">
-      <div className="global-update-version-filters" aria-label="Mercati coperti">
+      <div
+        className="global-update-version-filters"
+        aria-label="Mercati coperti"
+      >
         <small className="global-update-markets-note">
-          Copre sempre tutti i mercati: {ACTIVE_MARKETS.map((option) => option.label).join(", ")}.
+          Copre sempre tutti i mercati:{" "}
+          {ACTIVE_MARKETS.map((option) => option.label).join(", ")}.
         </small>
       </div>
       <div className="global-update-actions">
@@ -176,53 +200,72 @@ export function GlobalUpdateControls() {
             </Link>
           ) : null}
           {actionInfo ? <small>{actionInfo}</small> : null}
-          {actionError ? <small className="action-error">{actionError}</small> : null}
+          {actionError ? (
+            <small className="action-error">{actionError}</small>
+          ) : null}
         </div>
       ) : null}
-      {outsideHoursWarning ? (
-        <div className="global-update-modal-backdrop" role="presentation">
-          <div
-            className="global-update-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="global-update-outside-hours-title"
-            aria-describedby="global-update-outside-hours-description"
-          >
-            <h2 id="global-update-outside-hours-title">Aggiornamento fuori orario</h2>
-            <div id="global-update-outside-hours-description">
-              <p>{outsideHoursWarning}</p>
-              <p>
-                Se scegli <strong>Forza</strong>:
-              </p>
-              <ul>
-                <li>solo le schedine vengono rigenerate (l'aggiornamento delle partite non cambia);</li>
-                <li>il pool schedine di oggi può ricevere nuove pick anche dopo la chiusura;</li>
-                <li>il risultato giornaliero può differire da quello congelato all'orario limite.</li>
-              </ul>
-              <p>Le giornate storiche e le partite già iniziate restano protette.</p>
-            </div>
-            <div className="global-update-modal-actions">
-              <button
-                ref={cancelButtonRef}
-                type="button"
-                className="action-button secondary"
-                onClick={() => setOutsideHoursWarning(null)}
-                disabled={forcing}
+      {outsideHoursWarning
+        ? createPortal(
+            <div className="global-update-modal-backdrop" role="presentation">
+              <div
+                className="global-update-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="global-update-outside-hours-title"
+                aria-describedby="global-update-outside-hours-description"
               >
-                Non forzare
-              </button>
-              <button
-                type="button"
-                className="action-button primary"
-                onClick={() => void handleForceOutsideHours()}
-                disabled={forcing}
-              >
-                Forza
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+                <h2 id="global-update-outside-hours-title">
+                  Aggiornamento fuori orario
+                </h2>
+                <div id="global-update-outside-hours-description">
+                  <p>{outsideHoursWarning}</p>
+                  <p>
+                    Se scegli <strong>Forza</strong>:
+                  </p>
+                  <ul>
+                    <li>
+                      solo le schedine vengono rigenerate (l'aggiornamento delle
+                      partite non cambia);
+                    </li>
+                    <li>
+                      il pool schedine di oggi può ricevere nuove pick anche
+                      dopo la chiusura;
+                    </li>
+                    <li>
+                      il risultato giornaliero può differire da quello congelato
+                      all'orario limite.
+                    </li>
+                  </ul>
+                  <p>
+                    Le giornate storiche e le partite già iniziate restano
+                    protette.
+                  </p>
+                </div>
+                <div className="global-update-modal-actions">
+                  <button
+                    ref={cancelButtonRef}
+                    type="button"
+                    className="action-button secondary"
+                    onClick={() => setOutsideHoursWarning(null)}
+                    disabled={forcing}
+                  >
+                    Non forzare
+                  </button>
+                  <button
+                    type="button"
+                    className="action-button primary"
+                    onClick={() => void handleForceOutsideHours()}
+                    disabled={forcing}
+                  >
+                    Forza
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
