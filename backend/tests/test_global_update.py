@@ -240,6 +240,32 @@ class GlobalUpdateServiceTest(unittest.TestCase):
         self.assertIn("10:00", body["message"])
         self.assertIn("schedine non vengono modificate", body["message"])
         self.assertFalse(mock_start.call_args.kwargs["force_outside_hours"])
+        self.assertTrue(body["slips_closed"])
+        self.assertEqual(body["slips_close_time"], "10:00")
+
+    @patch("backend.src.app.api.routes.global_update.force_slips_outside_hours")
+    def test_force_slips_endpoint_only_forces_slips(self, mock_force):
+        mock_force.return_value = (7, ["w"])
+        response = self.client.post("/api/global-update/force-slips", headers=self.auth_headers)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["slips_generated"], 7)
+        self.assertEqual(body["warnings"], ["w"])
+
+    @patch("backend.src.app.services.global_update.get_daily_betting_slips")
+    @patch("backend.src.app.services.global_update.list_enabled_combinations")
+    def test_force_slips_outside_hours_passes_override(self, mock_combos, mock_slips):
+        from backend.src.app.services.global_update import force_slips_outside_hours
+
+        mock_combos.return_value = [SimpleNamespace(model_version="v2", model_name="m")]
+        mock_slips.return_value = SimpleNamespace(slips=[1, 2], warnings=[])
+        with self.Session() as session:
+            total, warnings = force_slips_outside_hours(session)
+        self.assertEqual(total, 2)
+        self.assertEqual(warnings, [])
+        kwargs = mock_slips.call_args.kwargs
+        self.assertTrue(kwargs["force_outside_hours"])
+        self.assertFalse(kwargs["regenerate"])
 
     @patch("backend.src.app.api.routes.global_update.start_global_update")
     @patch("backend.src.app.api.routes.global_update.get_betting_slip_pool_window")
