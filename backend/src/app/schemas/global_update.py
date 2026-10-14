@@ -31,6 +31,16 @@ class GlobalUpdateStartResponse(BaseModel):
     run_id: int
     status: GlobalUpdateStatus
     message: str
+    # True when the slip pool is already closed: the run started anyway but leaves slips untouched,
+    # the client may then offer to force them (POST /global-update/force-slips).
+    slips_closed: bool = False
+    slips_close_time: str | None = None
+
+
+class ForceSlipsResponse(BaseModel):
+    slips_generated: int
+    warnings: list[str] = Field(default_factory=list)
+    message: str
 
 
 class GlobalUpdateRunItemRead(BaseModel):

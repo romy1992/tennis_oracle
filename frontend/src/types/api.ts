@@ -922,6 +922,14 @@ export type GlobalUpdateStartResponse = {
   run_id: number;
   status: GlobalUpdateStatus;
   message: string;
+  slips_closed?: boolean;
+  slips_close_time?: string | null;
+};
+
+export type ForceSlipsResponse = {
+  slips_generated: number;
+  warnings: string[];
+  message: string;
 };
 
 export type GlobalUpdateReportPhase = {
