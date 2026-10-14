@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { apiClient } from "../services/apiClient";
-import type { GlobalUpdateRunRead } from "../types/api";
+import type { ForceSlipsResponse, GlobalUpdateRunRead, GlobalUpdateStartResponse } from "../types/api";
 
 type GlobalUpdateContextValue = {
   status: GlobalUpdateRunRead | null;
@@ -11,7 +11,8 @@ type GlobalUpdateContextValue = {
     force?: boolean,
     versions?: string[],
     forceOutsideHours?: boolean
-  ) => Promise<GlobalUpdateRunRead | null>;
+  ) => Promise<GlobalUpdateStartResponse>;
+  forceSlips: () => Promise<ForceSlipsResponse>;
   cancelUpdate: () => Promise<GlobalUpdateRunRead | null>;
   lastCompletedAt: string | null;
   lastOrigin: string | null;
@@ -32,16 +33,22 @@ export function GlobalUpdateProvider({ children }: { children: React.ReactNode }
 
   const triggerUpdate = useCallback(
     async (force = false, versions?: string[], forceOutsideHours = false) => {
-      await apiClient.startGlobalUpdate({
+      const started = await apiClient.startGlobalUpdate({
         force,
         versions,
         ...(forceOutsideHours ? { force_outside_hours: true } : {})
       });
-      const next = await refreshStatus();
-      return next;
+      await refreshStatus();
+      return started;
     },
     [refreshStatus]
   );
+
+  const forceSlips = useCallback(async () => {
+    const result = await apiClient.forceSlips();
+    await refreshStatus();
+    return result;
+  }, [refreshStatus]);
 
   const cancelUpdate = useCallback(async () => {
     if (!status?.id) {
@@ -77,11 +84,12 @@ export function GlobalUpdateProvider({ children }: { children: React.ReactNode }
       isRunning,
       refreshStatus,
       triggerUpdate,
+      forceSlips,
       cancelUpdate,
       lastCompletedAt,
       lastOrigin
     }),
-    [status, isRunning, refreshStatus, triggerUpdate, cancelUpdate, lastCompletedAt, lastOrigin]
+    [status, isRunning, refreshStatus, triggerUpdate, forceSlips, cancelUpdate, lastCompletedAt, lastOrigin]
   );
 
   return (

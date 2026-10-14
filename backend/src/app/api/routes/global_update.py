@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from backend.src.app.api.deps import require_admin, require_admin_or_service
 from backend.src.app.db.session import get_db
 from backend.src.app.schemas.global_update import (
+    ForceSlipsResponse,
     GlobalUpdateReportRead,
     GlobalUpdateRunRead,
     GlobalUpdateStartRequest,
@@ -15,6 +16,7 @@ from backend.src.app.services.betting_slips import get_betting_slip_pool_window
 from backend.src.app.services.global_update import (
     build_run_report,
     cancel_global_update,
+    force_slips_outside_hours,
     get_active_run,
     get_latest_run,
     get_models_versions_results,
@@ -47,10 +49,11 @@ def trigger_global_update(
     # daily cutoff, and the pipeline already respects it: after the cutoff persisted slips are left
     # untouched unless `force_outside_hours` is set explicitly (it applies to slips only).
     pool_window = get_betting_slip_pool_window()
+    slips_closed = pool_window.is_closed and not payload.force_outside_hours
     slips_note = (
         f" Finestra schedine chiusa dalle {pool_window.close_time} ({pool_window.timezone}): "
         "partite e predizioni vengono aggiornate, le schedine non vengono modificate."
-        if pool_window.is_closed and not payload.force_outside_hours
+        if slips_closed
         else ""
     )
     try:
@@ -76,6 +79,8 @@ def trigger_global_update(
                 run_id=active.id,
                 status=active.status,  # type: ignore[arg-type]
                 message=message,
+                slips_closed=slips_closed,
+                slips_close_time=pool_window.close_time if slips_closed else None,
             )
         raise HTTPException(status_code=409, detail=message)
 
@@ -83,6 +88,22 @@ def trigger_global_update(
         run_id=run.id,
         status=run.status,  # type: ignore[arg-type]
         message=message + slips_note,
+        slips_closed=slips_closed,
+        slips_close_time=pool_window.close_time if slips_closed else None,
+    )
+
+
+@router.post("/force-slips", response_model=ForceSlipsResponse)
+def force_slips(db: Session = Depends(get_db)) -> ForceSlipsResponse:
+    """Rigenera le schedine di oggi anche a pool chiuso (override esplicito, solo schedine)."""
+    try:
+        total, warnings = force_slips_outside_hours(db)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database not available.") from exc
+    return ForceSlipsResponse(
+        slips_generated=total,
+        warnings=warnings,
+        message=f"Schedine forzate fuori orario: {total} generate.",
     )
 
 
