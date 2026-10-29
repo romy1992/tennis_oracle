@@ -23,6 +23,11 @@ type AuthState = {
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateCredentials: (
+    currentPassword: string,
+    newUsername?: string,
+    newPassword?: string
+  ) => Promise<void>;
   isAuthenticated: boolean;
 };
 
@@ -112,6 +117,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsername(session.username);
   }, []);
 
+  const updateCredentials = useCallback(
+    async (currentPassword: string, newUsername?: string, newPassword?: string) => {
+      const result = await apiClient.updateCredentials({
+        current_password: currentPassword,
+        ...(newUsername ? { new_username: newUsername } : {}),
+        ...(newPassword ? { new_password: newPassword } : {})
+      });
+      storeSession(result.access_token, result.expires_at);
+      setToken(result.access_token);
+      const session = await apiClient.getSession();
+      setUsername(session.username);
+    },
+    []
+  );
+
   const value = useMemo<AuthState>(
     () => ({
       token,
@@ -119,9 +139,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       login,
       logout,
+      updateCredentials,
       isAuthenticated: Boolean(token)
     }),
-    [token, username, loading, login, logout]
+    [token, username, loading, login, logout, updateCredentials]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
