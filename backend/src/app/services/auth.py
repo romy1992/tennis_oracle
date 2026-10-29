@@ -77,3 +77,38 @@ def ensure_bootstrap_admin(db: Session, settings: Settings) -> AdminUser | None:
     db.refresh(admin)
     logger.info("Bootstrapped initial admin user username=%s", admin.username)
     return admin
+
+
+class CurrentPasswordError(Exception):
+    """The supplied current password does not match."""
+
+
+class UsernameTakenError(Exception):
+    """Another admin already uses the requested username."""
+
+
+def change_admin_credentials(
+    db: Session,
+    admin: AdminUser,
+    *,
+    current_password: str,
+    new_username: str | None = None,
+    new_password: str | None = None,
+) -> AdminUser:
+    """Update username and/or password after re-checking the current password.
+
+    Never logs password material.
+    """
+    if not verify_password(current_password, admin.password_hash):
+        raise CurrentPasswordError()
+    if new_username is not None and new_username != admin.username:
+        if get_admin_by_username(db, new_username) is not None:
+            raise UsernameTakenError()
+        admin.username = new_username
+    if new_password is not None:
+        admin.password_hash = hash_password(new_password)
+    admin.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.commit()
+    db.refresh(admin)
+    logger.info("Admin credentials updated admin_id=%s", admin.id)
+    return admin

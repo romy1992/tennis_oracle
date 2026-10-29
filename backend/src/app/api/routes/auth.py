@@ -12,11 +12,18 @@ from backend.src.app.core.config import Settings, get_settings
 from backend.src.app.db.session import get_db
 from backend.src.app.schemas.auth import (
     AdminSessionResponse,
+    ChangeCredentialsRequest,
     LoginRequest,
     LogoutResponse,
     TokenResponse,
 )
-from backend.src.app.services.auth import authenticate_admin, issue_access_token
+from backend.src.app.services.auth import (
+    CurrentPasswordError,
+    UsernameTakenError,
+    authenticate_admin,
+    change_admin_credentials,
+    issue_access_token,
+)
 from backend.src.entity.admin_user import AdminUser
 from backend.src.utility.sensitive_data import sanitize_payload
 
@@ -73,3 +80,35 @@ def logout(
 ) -> LogoutResponse:
     """Stateless JWT logout: client must discard the token."""
     return LogoutResponse(ok=True, message="Logged out")
+
+
+@router.put("/credentials", response_model=TokenResponse)
+def update_credentials(
+    body: ChangeCredentialsRequest,
+    admin: AdminUser = Depends(require_admin),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> TokenResponse:
+    """Change username and/or password. Returns a fresh token because the JWT
+    subject is the username. Wrong current password is 403 (not 401) so the
+    client does not treat it as an expired session."""
+    try:
+        admin = change_admin_credentials(
+            db,
+            admin,
+            current_password=body.current_password,
+            new_username=body.new_username,
+            new_password=body.new_password,
+        )
+    except CurrentPasswordError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Current password is incorrect",
+        )
+    except UsernameTakenError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username already in use",
+        )
+    token, expires_at = issue_access_token(admin, settings)
+    return TokenResponse(access_token=token, expires_at=expires_at)

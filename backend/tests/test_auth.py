@@ -55,6 +55,73 @@ class AuthRoutesTest(unittest.TestCase):
         self.assertEqual(payload["token_type"], "bearer")
         self.assertIn("expires_at", payload)
 
+    def _login_headers(self, username="admin", password="correct-horse"):
+        token = self.client.post(
+            "/api/auth/login", json={"username": username, "password": password}
+        ).json()["access_token"]
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_change_password_then_login_with_new_one(self):
+        response = self.client.put(
+            "/api/auth/credentials",
+            headers=self._login_headers(),
+            json={"current_password": "correct-horse", "new_password": "new-password-1"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access_token", response.json())
+        old = self.client.post("/api/auth/login", json={"username": "admin", "password": "correct-horse"})
+        self.assertEqual(old.status_code, 401)
+        new = self.client.post("/api/auth/login", json={"username": "admin", "password": "new-password-1"})
+        self.assertEqual(new.status_code, 200)
+
+    def test_change_username_returns_working_token(self):
+        response = self.client.put(
+            "/api/auth/credentials",
+            headers=self._login_headers(),
+            json={"current_password": "correct-horse", "new_username": "capo"},
+        )
+        self.assertEqual(response.status_code, 200)
+        headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+        me = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(me.json()["username"], "capo")
+
+    def test_change_credentials_wrong_current_password_is_403(self):
+        response = self.client.put(
+            "/api/auth/credentials",
+            headers=self._login_headers(),
+            json={"current_password": "sbagliata", "new_password": "new-password-1"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_change_credentials_requires_auth_and_a_change(self):
+        no_auth = self.client.put(
+            "/api/auth/credentials",
+            json={"current_password": "correct-horse", "new_password": "new-password-1"},
+        )
+        self.assertIn(no_auth.status_code, (401, 403))
+        empty = self.client.put(
+            "/api/auth/credentials",
+            headers=self._login_headers(),
+            json={"current_password": "correct-horse"},
+        )
+        self.assertEqual(empty.status_code, 422)
+        short = self.client.put(
+            "/api/auth/credentials",
+            headers=self._login_headers(),
+            json={"current_password": "correct-horse", "new_password": "corta"},
+        )
+        self.assertEqual(short.status_code, 422)
+
+    def test_change_username_already_taken_is_409(self):
+        with self.Session() as session:
+            create_admin(session, username="altro", password="x-password-1")
+        response = self.client.put(
+            "/api/auth/credentials",
+            headers=self._login_headers(),
+            json={"current_password": "correct-horse", "new_username": "altro"},
+        )
+        self.assertEqual(response.status_code, 409)
+
     def test_login_rejects_wrong_password(self):
         response = self.client.post(
             "/api/auth/login",

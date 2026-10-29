@@ -15,6 +15,10 @@ const apiMocks = vi.hoisted(() => ({
   updateScheduledJob: vi.fn()
 }));
 
+vi.mock("../auth/AuthContext", () => ({
+  useAuth: () => ({ username: "admin", updateCredentials: vi.fn() })
+}));
+
 vi.mock("../services/apiClient", async () => {
   const actual = await vi.importActual<typeof import("../services/apiClient")>(
     "../services/apiClient"
@@ -178,7 +182,7 @@ describe("SettingsPage", () => {
     render(<SettingsPage />);
 
     expect(await screen.findByRole("heading", { name: "Job automatici" })).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Disattiva Aggiorna tutto" })).toBeInTheDocument();
+    expect(await screen.findByRole("switch", { name: "Disattiva Aggiorna tutto" })).toBeInTheDocument();
     expect(screen.getByLabelText("Orario Aggiorna tutto")).toHaveValue("08:00");
     expect(screen.getByLabelText("Intervallo Polling live schedine")).toHaveValue(3);
 

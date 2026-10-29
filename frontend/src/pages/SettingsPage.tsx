@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 
 import { ErrorState, LoadingState } from "../components/Status";
+import { AccountCredentialsPanel } from "../components/AccountCredentialsPanel";
 import { ScheduledJobsPanel } from "../components/ScheduledJobsPanel";
 import { ApiError, apiClient } from "../services/apiClient";
 import type { ApiTennisProviderSettings } from "../types/api";
@@ -263,6 +264,8 @@ export function SettingsPage() {
           </div>
         ) : null}
       </section>
+
+      <AccountCredentialsPanel />
 
       <ScheduledJobsPanel />
 

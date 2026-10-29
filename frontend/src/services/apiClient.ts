@@ -216,6 +216,16 @@ export const apiClient = {
       body: JSON.stringify({ username, password })
     }),
   getSession: () => request<AdminSessionResponse>("/api/auth/me"),
+  updateCredentials: (payload: {
+    current_password: string;
+    new_username?: string;
+    new_password?: string;
+  }) =>
+    request<LoginResponse>("/api/auth/credentials", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }),
   logout: () => post<{ ok: boolean; message: string }>("/api/auth/logout"),
   getApiTennisSettings: () =>
     request<ApiTennisProviderSettings>("/api/settings/providers/api-tennis"),
