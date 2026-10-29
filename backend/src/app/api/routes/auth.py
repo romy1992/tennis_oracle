@@ -23,6 +23,7 @@ from backend.src.app.services.auth import (
     authenticate_admin,
     change_admin_credentials,
     issue_access_token,
+    reveal_admin_password,
 )
 from backend.src.entity.admin_user import AdminUser
 from backend.src.utility.sensitive_data import sanitize_payload
@@ -99,6 +100,7 @@ def update_credentials(
             current_password=body.current_password,
             new_username=body.new_username,
             new_password=body.new_password,
+            settings=settings,
         )
     except CurrentPasswordError:
         raise HTTPException(
@@ -112,3 +114,13 @@ def update_credentials(
         )
     token, expires_at = issue_access_token(admin, settings)
     return TokenResponse(access_token=token, expires_at=expires_at)
+
+
+@router.get("/credentials/reveal")
+def reveal_credentials(
+    admin: AdminUser = Depends(require_admin),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Username e password in chiaro per l'occhio (richiede il login). La
+    password e' null se non salvata: si popola al primo cambio password."""
+    return {"username": admin.username, "password": reveal_admin_password(admin, settings)}

@@ -1,6 +1,8 @@
 import { type FormEvent, useState } from "react";
 
 import { useAuth } from "../auth/AuthContext";
+import { apiClient } from "../services/apiClient";
+import { SecretField } from "./SecretField";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -58,6 +60,11 @@ export function AccountCredentialsPanel() {
       <p>
         Account attuale: <strong>{username ?? "-"}</strong>. Lascia vuoto ciò che non vuoi cambiare.
       </p>
+      <SecretField
+        label="Password salvata"
+        key={message ?? "initial"}
+        onReveal={async () => (await apiClient.revealCredentials()).password}
+      />
       <form className="settings-form" onSubmit={(event) => void submit(event)}>
         <label>
           Nuovo username
@@ -69,38 +76,9 @@ export function AccountCredentialsPanel() {
             disabled={busy}
           />
         </label>
-        <label>
-          Nuova password
-          <input
-            type="password"
-            value={newPassword}
-            onChange={(event) => setNewPassword(event.target.value)}
-            autoComplete="new-password"
-            disabled={busy}
-          />
-        </label>
-        <label>
-          Conferma nuova password
-          <input
-            type="password"
-            value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.target.value)}
-            autoComplete="new-password"
-            disabled={busy}
-          />
-        </label>
-        <label>
-          Password attuale
-          <input
-            type="password"
-            value={currentPassword}
-            onChange={(event) => setCurrentPassword(event.target.value)}
-            autoComplete="current-password"
-            placeholder="Conferma la tua identità"
-            required
-            disabled={busy}
-          />
-        </label>
+        <SecretField label="Nuova password" value={newPassword} onChange={setNewPassword} autoComplete="new-password" disabled={busy} />
+        <SecretField label="Conferma nuova password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" disabled={busy} />
+        <SecretField label="Password attuale" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" required disabled={busy} />
         <div className="settings-form-actions">
           <button type="submit" className="action-button primary" disabled={busy}>
             Aggiorna credenziali

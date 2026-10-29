@@ -1,6 +1,6 @@
 """Administrative users for dashboard and privileged API access."""
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from backend.src.entity.base import Base
@@ -14,6 +14,8 @@ class AdminUser(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String(150), nullable=False, unique=True, index=True)
     password_hash = Column(String(255), nullable=False)
+    # Copia cifrata della password in chiaro, per l'"occhio" nelle Impostazioni.
+    password_enc = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)

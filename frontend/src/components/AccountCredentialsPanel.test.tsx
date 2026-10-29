@@ -12,7 +12,7 @@ vi.mock("../auth/AuthContext", () => ({
 describe("AccountCredentialsPanel", () => {
   it("rejects mismatching passwords without calling the API", async () => {
     render(<AccountCredentialsPanel />);
-    fireEvent.change(screen.getByLabelText("Nuova password"), { target: { value: "nuova-password" } });
+    fireEvent.change(screen.getAllByLabelText("Nuova password")[0], { target: { value: "nuova-password" } });
     fireEvent.change(screen.getByLabelText("Conferma nuova password"), { target: { value: "diversa-123" } });
     fireEvent.change(screen.getByLabelText("Password attuale"), { target: { value: "vecchia" } });
     fireEvent.click(screen.getByRole("button", { name: "Aggiorna credenziali" }));

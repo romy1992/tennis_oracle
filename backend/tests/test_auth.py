@@ -74,6 +74,22 @@ class AuthRoutesTest(unittest.TestCase):
         new = self.client.post("/api/auth/login", json={"username": "admin", "password": "new-password-1"})
         self.assertEqual(new.status_code, 200)
 
+    def test_reveal_returns_password_only_after_it_is_saved(self):
+        headers = self._login_headers()
+        before = self.client.get("/api/auth/credentials/reveal", headers=headers)
+        self.assertEqual(before.status_code, 200)
+        self.assertEqual(before.json()["username"], "admin")
+        self.assertIsNone(before.json()["password"])
+        self.client.put(
+            "/api/auth/credentials",
+            headers=headers,
+            json={"current_password": "correct-horse", "new_password": "new-password-1"},
+        )
+        headers = self._login_headers(password="new-password-1")
+        after = self.client.get("/api/auth/credentials/reveal", headers=headers)
+        self.assertEqual(after.json()["password"], "new-password-1")
+        self.assertEqual(self.client.get("/api/auth/credentials/reveal").status_code in (401, 403), True)
+
     def test_change_username_returns_working_token(self):
         response = self.client.put(
             "/api/auth/credentials",

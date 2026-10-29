@@ -216,6 +216,8 @@ export const apiClient = {
       body: JSON.stringify({ username, password })
     }),
   getSession: () => request<AdminSessionResponse>("/api/auth/me"),
+  revealCredentials: () =>
+    request<{ username: string; password: string | null }>("/api/auth/credentials/reveal"),
   updateCredentials: (payload: {
     current_password: string;
     new_username?: string;
