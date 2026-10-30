@@ -56,25 +56,40 @@ export function AccountCredentialsPanel() {
 
   return (
     <section className="panel settings-provider-panel" aria-labelledby="account-credentials-title">
-      <h2 id="account-credentials-title">Credenziali di accesso</h2>
-      <p>
-        Account attuale: <strong>{username ?? "-"}</strong>. Lascia vuoto ciò che non vuoi cambiare.
-      </p>
-      <SecretField
-        label="Password salvata"
-        key={message ?? "initial"}
-        onReveal={async () => (await apiClient.revealCredentials()).password}
-      />
-      <form className="settings-form" onSubmit={(event) => void submit(event)}>
+      <div className="settings-provider-header">
+        <div>
+          <span className="settings-eyebrow">Accesso al portale</span>
+          <h3 id="account-credentials-title">Credenziali di accesso</h3>
+        </div>
+      </div>
+      <div className="settings-secret-form">
+        <label>
+          Username attuale
+          <span className="cred-field-row cred-field-pad">
+            <input type="text" value={username ?? ""} readOnly />
+          </span>
+        </label>
+        <SecretField
+          label="Password salvata"
+          key={message ?? "initial"}
+          onReveal={async () => (await apiClient.revealCredentials()).password}
+        />
+      </div>
+      <form className="settings-secret-form" onSubmit={(event) => void submit(event)}>
+        <p className="note" style={{ gridColumn: "1 / -1", margin: 0 }}>
+          Lascia vuoto ciò che non vuoi cambiare.
+        </p>
         <label>
           Nuovo username
-          <input
-            type="text"
-            value={newUsername}
-            onChange={(event) => setNewUsername(event.target.value)}
-            autoComplete="username"
-            disabled={busy}
-          />
+          <span className="cred-field-row cred-field-pad">
+            <input
+              type="text"
+              value={newUsername}
+              onChange={(event) => setNewUsername(event.target.value)}
+              autoComplete="username"
+              disabled={busy}
+            />
+          </span>
         </label>
         <SecretField label="Nuova password" value={newPassword} onChange={setNewPassword} autoComplete="new-password" disabled={busy} />
         <SecretField label="Conferma nuova password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" disabled={busy} />

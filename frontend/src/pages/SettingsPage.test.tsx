@@ -181,6 +181,7 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
 
+    await user.click(await screen.findByRole("tab", { name: "Job automatici" }));
     expect(await screen.findByRole("heading", { name: "Job automatici" })).toBeInTheDocument();
     expect(await screen.findByRole("switch", { name: "Disattiva Aggiorna tutto" })).toBeInTheDocument();
     expect(screen.getByLabelText("Orario Aggiorna tutto")).toHaveValue("08:00");
@@ -196,6 +197,7 @@ describe("SettingsPage", () => {
 
   it("saves a new clock time for a daily job", async () => {
     render(<SettingsPage />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Job automatici" }));
 
     const timeInput = await screen.findByLabelText("Orario Aggiorna tutto");
     fireEvent.change(timeInput, { target: { value: "07:15" } });
