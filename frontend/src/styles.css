@@ -2519,3 +2519,9 @@ td {
   background: var(--nav-hover);
   border-color: #ffffff;
 }
+
+/* Credenziali: campo con occhio */
+.cred-field-row { align-items: stretch; display: flex; gap: 8px; }
+.cred-field-row input { flex: 1; min-width: 0; width: 100%; box-sizing: border-box; }
+.cred-eye { flex: 0 0 44px; padding: 0; }
+.cred-field-pad::after { content: ""; flex: 0 0 44px; }

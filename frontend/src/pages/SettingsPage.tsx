@@ -31,6 +31,7 @@ function formatDateTime(value: string | null): string {
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<ApiTennisProviderSettings | null>(null);
+  const [tab, setTab] = useState<"credenziali" | "job">("credenziali");
   const [apiKey, setApiKey] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [loading, setLoading] = useState(true);
@@ -144,6 +145,17 @@ export function SettingsPage() {
         </div>
       </header>
 
+      <div className="tab-list" role="tablist">
+        <button type="button" role="tab" aria-selected={tab === "credenziali"} className={tab === "credenziali" ? "active" : ""} onClick={() => setTab("credenziali")}>
+          Credenziali e chiavi
+        </button>
+        <button type="button" role="tab" aria-selected={tab === "job"} className={tab === "job" ? "active" : ""} onClick={() => setTab("job")}>
+          Job automatici
+        </button>
+      </div>
+
+      {tab === "credenziali" ? (
+      <>
       <section className="panel settings-provider-panel">
         <div className="settings-provider-header">
           <div>
@@ -266,8 +278,10 @@ export function SettingsPage() {
       </section>
 
       <AccountCredentialsPanel />
-
-      <ScheduledJobsPanel />
+      </>
+      ) : (
+        <ScheduledJobsPanel />
+      )}
 
       {confirmation ? (
         <div className="global-update-modal-backdrop" role="presentation">

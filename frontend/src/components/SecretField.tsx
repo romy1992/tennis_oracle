@@ -58,7 +58,7 @@ export function SecretField({
   return (
     <label>
       {label}
-      <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <span className="cred-field-row">
         <input
           type={onReveal || visible ? "text" : "password"}
           value={shown}
@@ -68,11 +68,10 @@ export function SecretField({
           disabled={disabled}
           required={required}
           placeholder={placeholder}
-          style={{ flex: 1 }}
         />
         <button
           type="button"
-          className="action-button"
+          className="action-button cred-eye"
           onClick={() => void toggle()}
           disabled={loading}
           aria-label={visible ? `Nascondi ${label}` : `Mostra ${label}`}
