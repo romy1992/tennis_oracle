@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.src.app.services.single_match_value import blend_with_market
+
 # Display / expansion order for /partite multi-market rows.
 MARKET_ROW_ORDER = ("match_winner", "first_set_winner", "over_under_games")
 
@@ -58,12 +60,21 @@ def enrich_fixture_value(
         )
         market_odds = prediction.get("predicted_winner_odds")
         if model_prob is not None and model_prob > 0 and market_odds is not None:
-            void_odds = 1.0 / float(model_prob)
-            decision = classify_single_bet_value(
-                float(market_odds),
-                void_odds,
-                min_edge_percent,
+            # Stessa riduzione verso il mercato dell'analisi singola (SMVA):
+            # senza probabilita' di mercato non si valuta nessun valore.
+            fair = prediction.get("predicted_winner_market_probability")
+            adjusted = blend_with_market(
+                float(model_prob),
+                float(fair) if fair is not None else None,
+                market="match_winner",
             )
+            if adjusted is not None and adjusted > 0:
+                void_odds = 1.0 / adjusted
+                decision = classify_single_bet_value(
+                    float(market_odds),
+                    void_odds,
+                    min_edge_percent,
+                )
 
     if void_odds is not None:
         enriched["void_odds"] = round(float(void_odds), 4)
@@ -132,9 +143,9 @@ def _row_from_extra_market(
         return None
 
     odds = extra.get("odds")
+    # void_odds pubblicato = 1/p_adj (probabilita' ridotta verso il mercato).
+    # Se manca non si ricostruisce da quella grezza: nessuna decisione.
     void_odds = extra.get("void_odds")
-    if void_odds is None and float(probability) > 0:
-        void_odds = 1.0 / float(probability)
 
     row = dict(item)
     row.pop("extra_markets", None)

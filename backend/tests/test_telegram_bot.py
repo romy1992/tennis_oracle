@@ -211,16 +211,35 @@ class TelegramFormattingTest(unittest.TestCase):
                     "predicted_winner": "First Player",
                     "prob_player_1_win": 0.7,
                     "predicted_winner_odds": 1.60,
+                    "predicted_winner_market_probability": 0.60,
                     "confidence": 0.7,
                     "is_correct": None,
                 },
             },
             min_edge_percent=2.0,
         )
-        self.assertAlmostEqual(enriched["void_odds"], 1 / 0.7, places=4)
+        # p_adj = 0.5*0.7 + 0.5*0.6 = 0.65 -> void 1/0.65; odds 1.60 >= 1.5385*1.02
+        self.assertAlmostEqual(enriched["void_odds"], 1 / 0.65, places=4)
         self.assertEqual(enriched["value_decision"], "PLAY")
         self.assertEqual(enriched["pick_status"], "pending")
         self.assertEqual(enriched["market"], "match_winner")
+
+    def test_enrich_fixture_value_fallback_without_market_probability_has_no_decision(self):
+        enriched = enrich_fixture_value(
+            {
+                "event_key": 11,
+                "prediction": {
+                    "predicted_winner": "First Player",
+                    "prob_player_1_win": 0.7,
+                    "predicted_winner_odds": 1.60,
+                    "confidence": 0.7,
+                    "is_correct": None,
+                },
+            },
+            min_edge_percent=2.0,
+        )
+        self.assertNotIn("value_decision", enriched)
+        self.assertNotIn("void_odds", enriched)
 
     def test_expand_fixtures_by_market_emits_match_first_set_and_ou(self):
         items = [

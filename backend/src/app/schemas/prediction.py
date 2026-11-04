@@ -45,6 +45,9 @@ class MatchPredictionRead(BaseModel):
     actual_winner: str | None = None
     is_correct: bool | None = None
     predicted_winner_odds: float | None = None
+    # Probabilita' di mercato senza margine (no-vig) del vincitore predetto:
+    # serve a ridurre la probabilita' del modello verso il mercato (EV/PLAY).
+    predicted_winner_market_probability: float | None = None
     odds_bookmaker_count: int | None = None
     confidence: float | None
     features_available: bool = True

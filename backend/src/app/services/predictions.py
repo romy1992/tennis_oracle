@@ -11,6 +11,7 @@ from backend.src.app.ml.datasets.odds_builder import (
     MatchWinnerOddsAverage,
     average_match_winner_odds_from_record,
     has_real_odds,
+    no_vig_market_probabilities,
 )
 from backend.src.app.ml.model_selection import select_best_model
 from backend.src.app.ml.model_versioning import (
@@ -238,6 +239,9 @@ def _prediction_read(
         actual_winner=resolved_winner,
         is_correct=is_correct,
         predicted_winner_odds=_predicted_winner_odds(prediction.predicted_winner, odds),
+        predicted_winner_market_probability=_predicted_winner_market_probability(
+            prediction.predicted_winner, odds
+        ),
         odds_bookmaker_count=odds.odds_bookmaker_count if odds is not None else None,
         confidence=_confidence(prediction.prob_player_1_win),
         warnings=[],
@@ -316,6 +320,20 @@ def _fixture_read_from_completed_fixture(fixture: Fixture) -> NextFixtureRead:
         is_completed=True,
         moved_to_fixture_at=None,
     )
+
+
+def _predicted_winner_market_probability(
+    predicted_winner: str | None,
+    odds: MatchWinnerOddsAverage | None,
+) -> float | None:
+    """Probabilita' no-vig del vincitore predetto, dalle quote dei due lati."""
+    if odds is None or predicted_winner not in {"First Player", "Second Player"}:
+        return None
+    try:
+        first, second = no_vig_market_probabilities(odds.avg_player_1_odds, odds.avg_player_2_odds)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return first if predicted_winner == "First Player" else second
 
 
 def _predicted_winner_odds(
