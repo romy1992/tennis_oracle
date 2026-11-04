@@ -10,6 +10,7 @@ from backend.src.app.ml.datasets.odds_builder import (
     MatchWinnerOddsAverage,
     average_match_winner_odds_from_record,
     bookmaker_margin,
+    no_vig_market_probabilities,
     profit_for_unit_stake,
 )
 from backend.src.app.ml.model_versioning import ModelVersion
@@ -42,6 +43,45 @@ MIN_EDGE_PERCENT_FLOOR = 1.0
 MIN_EDGE_PERCENT_CAP = 10.0
 LOW_BOOKMAKER_COUNT_THRESHOLD = 2
 LOW_BOOKMAKER_COUNT_PENALTY = 0.5
+
+# Riduzione verso il mercato (2026-11-04). In produzione il modello pubblica
+# probabilita' NON calibrate e troppo sicure (es. vincitore partita: dichiara
+# 74%, osserva 33% nella fascia 70-80%) e il log-loss peggiora al crescere del
+# peso del modello. EV/PLAY usano quindi
+#   p_adj = w * p_model + (1 - w) * p_market_no_vig.
+# I pesi sono PROVVISORI: vanno tarati per mercato fuori campione quando il
+# ledger avra' >=300 casi chiusi per mercato.
+MODEL_WEIGHT_DEFAULT = 0.5
+MODEL_WEIGHT_BY_MARKET: dict[str, float] = {
+    "match_winner": 0.5,
+    "first_set_winner": 0.75,
+    "over_under_games": 0.5,
+}
+
+
+def model_weight_for_market(market: str | None) -> float:
+    return MODEL_WEIGHT_BY_MARKET.get(market or "", MODEL_WEIGHT_DEFAULT)
+
+
+def blend_with_market(
+    model_probability: float,
+    market_fair_probability: float | None,
+    *,
+    market: str | None = None,
+    model_weight: float | None = None,
+) -> float | None:
+    """Probabilita' usata per EV/PLAY. Con peso 1 restituisce quella del
+    modello; con peso <1 e probabilita' di mercato mancante/non valida
+    restituisce None (il chiamante classifica NO BET: mai una riduzione
+    silenziosa verso un valore finto)."""
+    weight = model_weight_for_market(market) if model_weight is None else float(model_weight)
+    if not 0.0 <= weight <= 1.0:
+        raise ValueError("model_weight must be in [0, 1].")
+    if weight >= 1.0:
+        return model_probability
+    if market_fair_probability is None or not 0.0 < float(market_fair_probability) < 1.0:
+        return None
+    return weight * model_probability + (1.0 - weight) * float(market_fair_probability)
 
 
 @dataclass(frozen=True)
@@ -121,14 +161,35 @@ def analyze_single_match_value(
     )
     effective_min_edge_percent = suggested_min_edge_percent
 
-    void_odds = calculate_void_odds(model_probability)
+    # EV/PLAY sulla probabilita' ridotta verso il mercato; `model_probability`
+    # mostrata resta quella grezza del modello.
+    try:
+        fair_p1, fair_p2 = no_vig_market_probabilities(
+            odds.avg_player_1_odds, odds.avg_player_2_odds
+        )
+        fair_probability = fair_p1 if predicted_winner == "First Player" else fair_p2
+    except (TypeError, ValueError, ZeroDivisionError):
+        fair_probability = None
+    adjusted_probability = blend_with_market(
+        model_probability, fair_probability, market="match_winner"
+    )
+    void_odds = calculate_void_odds(
+        adjusted_probability if adjusted_probability is not None else model_probability
+    )
     edge_absolute = market_odds - void_odds
     edge_percent = (edge_absolute / void_odds) * 100.0
-    expected_roi = calculate_expected_roi(market_odds, model_probability)
-    decision = classify_single_bet_value(
-        market_odds=market_odds,
-        void_odds=void_odds,
-        min_edge_percent=effective_min_edge_percent,
+    expected_roi = calculate_expected_roi(
+        market_odds,
+        adjusted_probability if adjusted_probability is not None else model_probability,
+    )
+    decision = (
+        "NO BET"
+        if adjusted_probability is None
+        else classify_single_bet_value(
+            market_odds=market_odds,
+            void_odds=void_odds,
+            min_edge_percent=effective_min_edge_percent,
+        )
     )
     is_correct = None
     profit_loss = None

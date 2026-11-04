@@ -27,6 +27,7 @@ from typing import Any
 
 from backend.src.app.ml.datasets.first_set_winner_odds_builder import first_set_winner_feature_row
 from backend.src.app.ml.datasets.over_under_games_odds_builder import DEFAULT_LINE, over_under_games_feature_row
+from backend.src.app.ml.datasets.odds_builder import no_vig_market_probabilities
 from backend.src.app.ml.model_versioning import MODELS_DIR
 from backend.src.app.ml.prediction.predictor import PreMatchFeatureBuilder, _clean_features
 from backend.src.entity import NextFixture
@@ -83,6 +84,16 @@ def _missing_required_fields(fixture: NextFixture) -> bool:
     return not fixture.first_player_key or not fixture.second_player_key or not fixture.event_date
 
 
+def _no_vig_for_selection(first_odd: object, second_odd: object, *, first_selected: bool) -> float | None:
+    """Probabilita' di mercato senza margine della selezione scelta (None se
+    le quote dei due lati non sono entrambe valide)."""
+    try:
+        first, second = no_vig_market_probabilities(float(first_odd), float(second_odd))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return first if first_selected else second
+
+
 def predict_first_set_winner(
     fixture: NextFixture,
     *,
@@ -105,6 +116,7 @@ def predict_first_set_winner(
         "prob_player_1": None,
         "confidence": None,
         "market_odds": None,
+        "market_fair_probability": None,
         "features_available": False,
         "warnings": [],
     }
@@ -168,6 +180,11 @@ def predict_first_set_winner(
             "selection": selection,
             "confidence": max(prob_player_1, 1.0 - prob_player_1),
             "market_odds": market_odds,
+            "market_fair_probability": _no_vig_for_selection(
+                fs_features["avg_first_set_player_1_odds"],
+                fs_features["avg_first_set_player_2_odds"],
+                first_selected=selection == "First Player",
+            ),
             "features_available": features_available,
         }
     )
@@ -198,6 +215,7 @@ def predict_over_under_games(
         "market_odds": None,
         "avg_over_odds": None,
         "avg_under_odds": None,
+        "market_fair_probability": None,
         "features_available": False,
         "warnings": [],
     }
@@ -260,6 +278,9 @@ def predict_over_under_games(
             "market_odds": market_odds,
             "avg_over_odds": ou_features["avg_over_odds"],
             "avg_under_odds": ou_features["avg_under_odds"],
+            "market_fair_probability": _no_vig_for_selection(
+                ou_features["avg_over_odds"], ou_features["avg_under_odds"], first_selected=is_over,
+            ),
             "features_available": features_available,
         }
     )

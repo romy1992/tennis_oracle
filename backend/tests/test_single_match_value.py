@@ -15,6 +15,35 @@ from backend.tests.db_helpers import create_session_factory, create_test_engine,
 from backend.tests.auth_helpers import clear_settings_override, make_test_settings, override_settings
 
 
+class BlendWithMarketTest(unittest.TestCase):
+    def test_blend_uses_market_weight(self):
+        from backend.src.app.services.single_match_value import blend_with_market
+
+        self.assertAlmostEqual(
+            blend_with_market(0.80, 0.60, market="over_under_games"), 0.70, places=6
+        )
+        self.assertAlmostEqual(
+            blend_with_market(0.80, 0.60, market="first_set_winner"), 0.75, places=6
+        )
+
+    def test_weight_one_keeps_model_probability(self):
+        from backend.src.app.services.single_match_value import blend_with_market
+
+        self.assertEqual(blend_with_market(0.80, None, model_weight=1.0), 0.80)
+
+    def test_missing_market_probability_returns_none(self):
+        from backend.src.app.services.single_match_value import blend_with_market
+
+        self.assertIsNone(blend_with_market(0.80, None, market="over_under_games"))
+        self.assertIsNone(blend_with_market(0.80, 1.2, market="over_under_games"))
+
+    def test_invalid_weight_raises(self):
+        from backend.src.app.services.single_match_value import blend_with_market
+
+        with self.assertRaises(ValueError):
+            blend_with_market(0.8, 0.6, model_weight=1.5)
+
+
 class SingleMatchValueTest(unittest.TestCase):
     def setUp(self):
         self.engine = create_test_engine()
@@ -117,8 +146,11 @@ class SingleMatchValueTest(unittest.TestCase):
         self.assertEqual(item["match_id"], 100)
         self.assertEqual(item["selection"], "Sinner")
         self.assertEqual(item["decision"], "PLAY")
-        self.assertAlmostEqual(item["void_odds"], 1.3889, places=4)
-        self.assertAlmostEqual(item["expected_roi"], 0.0944, places=4)
+        # EV/PLAY sulla probabilita' ridotta verso il mercato (peso modello 0.5):
+        # fair no-vig 0.6482 -> p_adj = 0.5*0.72 + 0.5*0.6482 = 0.6841.
+        self.assertAlmostEqual(item["model_probability"], 0.72, places=4)
+        self.assertAlmostEqual(item["void_odds"], 1.4618, places=4)
+        self.assertAlmostEqual(item["expected_roi"], 0.0398, places=3)
         self.assertIn("suggested_min_edge_percent", item)
         self.assertIn("min_edge_percent", item)
         self.assertEqual(item["value_label"], "Singola con valore")

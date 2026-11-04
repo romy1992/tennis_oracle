@@ -143,6 +143,57 @@ class TestPublishResult:
         assert second_status == "skipped_already_published"
 
 
+class TestMarketBlendOnPublication:
+    def _result(self, event_key: int, **extra) -> dict:
+        return {
+            "event_key": event_key, "market": "over_under_games", "selection": "Over 20.5",
+            "probability": 0.80, "model_version": "over_under_games_v1",
+            "model_name": "random_forest", "market_odds": 1.50, **extra,
+        }
+
+    def _stored(self, db: Session, event_key: int):
+        from backend.src.entity.published_prediction import PublishedPrediction
+
+        return db.query(PublishedPrediction).filter_by(event_key=event_key).one()
+
+    def test_decision_uses_probability_blended_with_market(self, db_session: Session) -> None:
+        # p_adj = 0.5*0.80 + 0.5*0.60 = 0.70 -> void 1.4286; odds 1.50 >= 1.4286*1.02
+        result = self._result(10, market_fair_probability=0.60)
+        status = _publish_result(
+            db_session, _FixtureStub(10), result, publication_source="system", dry_run=False,
+        )
+        stored = self._stored(db_session, 10)
+
+        assert status == "published"
+        assert stored.probability == pytest.approx(0.80)  # grezza, non ridotta
+        assert stored.void_odds == pytest.approx(1 / 0.70, abs=1e-4)
+        assert stored.value_decision == "PLAY"
+
+    def test_raw_probability_alone_would_have_been_play_but_blend_removes_it(
+        self, db_session: Session
+    ) -> None:
+        # Con p grezza 0.80 la soglia PLAY e' 1.275: odds 1.35 sarebbe PLAY.
+        # Con p_adj = 0.5*0.80 + 0.5*0.70 = 0.75 la soglia sale a 1.36: non e' PLAY.
+        result = self._result(11, market_odds=1.35, market_fair_probability=0.70)
+        _publish_result(
+            db_session, _FixtureStub(11), result, publication_source="system", dry_run=False,
+        )
+        stored = self._stored(db_session, 11)
+
+        assert stored.value_decision != "PLAY"
+        assert stored.official_play is False
+
+    def test_missing_market_probability_is_no_bet(self, db_session: Session) -> None:
+        result = self._result(12)  # nessuna market_fair_probability
+        _publish_result(
+            db_session, _FixtureStub(12), result, publication_source="system", dry_run=False,
+        )
+        stored = self._stored(db_session, 12)
+
+        assert stored.value_decision == "NO BET"
+        assert stored.official_play is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
 

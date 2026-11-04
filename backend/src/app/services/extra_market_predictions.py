@@ -40,6 +40,7 @@ from backend.src.app.services.predictions import list_next_fixtures
 from backend.src.app.services.published_predictions import PublishedPredictionError, publish_prediction
 from backend.src.app.services.single_match_value import (
     DEFAULT_MIN_EDGE_PERCENT,
+    blend_with_market,
     calculate_void_odds,
     classify_single_bet_value,
 )
@@ -124,18 +125,31 @@ def _publish_result(
     # the model probability alone. odds/edge require a REAL market quote for
     # this exact selection: set by the extra-market predictors when the
     # dedicated bookmaker market is present (Home/Away 1st Set, O/U games).
-    void_odds = calculate_void_odds(probability)
+    market = str(result.get("market") or "match_winner")
     market_odds = result.get("market_odds")
     odds = float(market_odds) if market_odds is not None else None
+    # EV/PLAY usano la probabilita' ridotta verso il mercato (vedi
+    # `blend_with_market`); `probability` pubblicata resta quella grezza del
+    # modello. void_odds/edge salvati sono quelli della probabilita' ridotta,
+    # cosi' ogni riclassificazione a valle (schedine) resta coerente.
+    fair_probability = result.get("market_fair_probability")
+    adjusted_probability = blend_with_market(
+        probability,
+        float(fair_probability) if fair_probability is not None else None,
+        market=market,
+    )
+    void_odds = calculate_void_odds(adjusted_probability if adjusted_probability is not None else probability)
     edge = ((odds - void_odds) / void_odds) * 100.0 if odds is not None else None
-    market = str(result.get("market") or "match_winner")
     value_decision = None
     if market in {"over_under_games", "first_set_winner"} and odds is not None:
-        value_decision = classify_single_bet_value(
-            market_odds=odds,
-            void_odds=void_odds,
-            min_edge_percent=DEFAULT_MIN_EDGE_PERCENT,
-        )
+        if adjusted_probability is None:
+            value_decision = "NO BET"
+        else:
+            value_decision = classify_single_bet_value(
+                market_odds=odds,
+                void_odds=void_odds,
+                min_edge_percent=DEFAULT_MIN_EDGE_PERCENT,
+            )
     official_play = bool(
         publication_source == DEFAULT_PUBLICATION_SOURCE
         and odds is not None
