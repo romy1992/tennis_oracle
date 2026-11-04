@@ -7,6 +7,7 @@ from backend.src.app.api.routes import (
     global_update,
     imports,
     live_beta_dashboard,
+    match_refresh,
     ops,
     payments,
     predictions,
@@ -29,6 +30,7 @@ from backend.src.app.api.routes import (
 api_router = APIRouter()
 api_router.include_router(auth.router)
 api_router.include_router(imports.router)
+api_router.include_router(match_refresh.router)
 api_router.include_router(predictions.router)
 api_router.include_router(predictions.predictions_stats_router)
 api_router.include_router(betting_slips.router)
