@@ -222,6 +222,9 @@ Variabili importanti in `backend/.env` / `backend/properties/config.env`:
 - `DATABASE_URL` — connessione PostgreSQL
 - `API_TENNIS_KEY` / `API_TENNIS_BASE` — API tennis
 - `API_TENNIS_TIMEOUT` — timeout HTTP verso API tennis in secondi (opzionale, default 30)
+- `API_TENNIS_MAX_RETRIES`, `API_TENNIS_RETRY_BACKOFF_SECONDS`, `API_TENNIS_RETRY_BACKOFF_MAX_SECONDS` — retry con backoff esponenziale su timeout, errori di rete e HTTP 429/5xx (opzionali, default 2 / 0.5 / 8)
+- `API_TENNIS_CIRCUIT_FAILURE_THRESHOLD`, `API_TENNIS_CIRCUIT_RECOVERY_SECONDS` — circuit breaker verso API tennis (opzionali, default 5 / 60; soglia 0 = disattivato)
+- `MATCH_WINNER_MISSING_FEATURE_POLICY` — `zero` (default, comportamento storico) oppure `impute`; vedi `docs/platform-audit/IMPLEMENTATION_LOG.md`
 - `CORS_ORIGINS` — origini frontend consentite
 - `ADMIN_JWT_SECRET` — segreto per i token di accesso della dashboard (obbligatorio per il login)
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` — usati solo alla prima creazione dell’admin se il database non ne ha ancora uno
