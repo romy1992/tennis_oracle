@@ -384,12 +384,24 @@ def promote_completed_match(
     return summary
 
 
-def fetch_odds_for_match(event_key: int) -> dict | None:
+def fetch_odds_for_match(
+    event_key: int,
+    *,
+    failures: list[int] | None = None,
+) -> dict | None:
+    """Odds for one match, or ``None`` when there are none or the call failed.
+
+    A provider failure is not the same thing as "the provider has no odds":
+    pass ``failures`` to learn which one happened (the event key is appended
+    when the call raised). The return value is unchanged for existing callers.
+    """
     try:
         odds = request_api(method="get_odds", params={"match_key": event_key})
         return odds if odds else None
     except Exception as exc:
         logger.warning("Odds import failed for event_key=%s: %s", event_key, exc)
+        if failures is not None:
+            failures.append(event_key)
         return None
 
 
@@ -411,7 +423,18 @@ def _ingest_upcoming_payloads(
             summary["predictions_resolved"] += promoted["predictions_resolved"]
             continue
 
-        odds = fetch_odds_for_match(payload["event_key"]) if import_odds else None
+        odds = None
+        if import_odds:
+            failures: list[int] = []
+            odds = fetch_odds_for_match(payload["event_key"], failures=failures)
+            if failures:
+                # Stored odds (if any) are kept by upsert_next_fixture: they are
+                # not refreshed, so they must not be counted as fetched now.
+                summary["odds_fetch_errors"] = summary.get("odds_fetch_errors", 0) + 1
+            elif odds:
+                summary["odds_fetched"] = summary.get("odds_fetched", 0) + 1
+            else:
+                summary["odds_empty"] = summary.get("odds_empty", 0) + 1
         action = upsert_next_fixture(payload, odds=odds)
         summary[action] += 1
 
@@ -444,6 +467,9 @@ def import_next_fixtures(
         "predictions_resolved": 0,
         "skipped_non_singles": 0,
         "api_chunks": 0,
+        "odds_fetched": 0,
+        "odds_empty": 0,
+        "odds_fetch_errors": 0,
     }
 
     logger.info(
@@ -508,6 +534,15 @@ def import_next_fixtures(
                 summary["predictions_resolved"] += promoted["predictions_resolved"]
     except Exception as exc:
         logger.warning("Recent fixtures refresh failed: %s", exc)
+
+    if summary["odds_fetch_errors"]:
+        logger.warning(
+            "Odds not refreshed for %s upcoming fixtures because the provider call failed "
+            "(fetched=%s, provider returned none=%s). Previously stored odds were left untouched.",
+            summary["odds_fetch_errors"],
+            summary["odds_fetched"],
+            summary["odds_empty"],
+        )
 
     if upcoming_ok:
         summary["removed_outside_window"] = next_fixtures_repo.delete_outside_date_range(
