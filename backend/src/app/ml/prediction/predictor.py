@@ -36,6 +36,7 @@ from backend.src.app.ml.datasets.dataset_builder import (
 from backend.src.app.ml.datasets.elo_builder import EloTracker
 from backend.src.app.ml.datasets.odds_builder import FixtureOddsRecord, match_winner_rows_from_record
 from backend.src.app.ml.datasets.ranking_history import HistoricalRankingLookup
+from backend.src.app.ml.prediction.data_sufficiency import assess_data_sufficiency
 from backend.src.app.ml.model_versioning import (
     ATP_DATA_DIR,
     MATCH_MAPPING_PATH,
@@ -78,6 +79,52 @@ ODDS_FEATURE_COLUMNS = (
     "avg_bookmaker_margin",
     "odds_bookmaker_count",
 )
+
+
+MISSING_FEATURE_POLICY_ZERO = "zero"
+MISSING_FEATURE_POLICY_IMPUTE = "impute"
+
+
+def missing_feature_policy() -> str:
+    """Configured fill policy for feature columns unavailable at serving time."""
+    from backend.src.app.core.config import get_settings
+
+    raw = str(getattr(get_settings(), "match_winner_missing_feature_policy", "") or "").strip().lower()
+    return MISSING_FEATURE_POLICY_IMPUTE if raw == MISSING_FEATURE_POLICY_IMPUTE else MISSING_FEATURE_POLICY_ZERO
+
+
+def fill_missing_feature_columns(
+    cleaned: pd.DataFrame,
+    missing_columns: list[str],
+    *,
+    policy: str = MISSING_FEATURE_POLICY_ZERO,
+) -> pd.DataFrame:
+    """Add the feature columns the model expects but serving could not build.
+
+    ``zero``   -> integer 0 everywhere (legacy). For the v4 artifact this means
+                  age/height/best_of = 0 and an all-zero one-hot vector, values
+                  never seen in training.
+    ``impute`` -> NaN (``None`` for categoricals), so the artifact's own
+                  imputers produce the training-time defaults. A match-found
+                  flag is 0 because no enrichment row was matched.
+    """
+    if not missing_columns:
+        return cleaned
+    if policy != MISSING_FEATURE_POLICY_IMPUTE:
+        for column in missing_columns:
+            cleaned[column] = 0
+        return cleaned
+
+    from backend.src.app.ml.training.train_baseline import CATEGORICAL_FEATURES
+
+    for column in missing_columns:
+        if column.endswith("_match_found"):
+            cleaned[column] = 0
+        elif column in CATEGORICAL_FEATURES:
+            cleaned[column] = pd.Series([None] * len(cleaned), index=cleaned.index, dtype=object)
+        else:
+            cleaned[column] = float("nan")
+    return cleaned
 
 
 def _ensure_logistic_regression_compat(obj: Any) -> bool:
@@ -324,6 +371,40 @@ class PreMatchFeatureBuilder:
 
         return row, warnings, features_available
 
+    def prior_match_count(self, player_id: int | None) -> int:
+        """Completed matches known for the player (0 when never seen)."""
+        if player_id is None:
+            return 0
+        return len(self.player_history.get(player_id, []))
+
+
+def _data_quality(
+    fixture: NextFixture,
+    feature_builder: PreMatchFeatureBuilder,
+    warnings: list[str],
+    *,
+    row: dict[str, Any] | None = None,
+    unavailable_feature_columns: list[str] | None = None,
+) -> dict[str, Any]:
+    bookmaker_count = None
+    if row is not None and row.get("odds_bookmaker_count") is not None:
+        bookmaker_count = int(row["odds_bookmaker_count"])
+    ranking_available = None
+    if row is not None and row.get("player_1_rank") is not None:
+        ranking_available = not (
+            row.get("player_1_rank") == MISSING_RANK_VALUE and row.get("player_2_rank") == MISSING_RANK_VALUE
+        )
+    return assess_data_sufficiency(
+        player_1_prior_matches=feature_builder.prior_match_count(fixture.first_player_key),
+        player_2_prior_matches=feature_builder.prior_match_count(fixture.second_player_key),
+        surface_known=_normalise_surface(fixture.surface) != "unknown",
+        ranking_available=ranking_available,
+        odds_available=False if "missing_odds" in warnings else (True if bookmaker_count else None),
+        bookmaker_count=bookmaker_count,
+        unavailable_feature_columns=unavailable_feature_columns,
+        blocking_reasons=warnings,
+    )
+
 
 def _clean_features(row: dict[str, Any], model_version: ModelVersion) -> pd.DataFrame:
     dataframe = pd.DataFrame([row])
@@ -425,6 +506,7 @@ def predict_fixture(
             "confidence": None,
             "features_available": False,
             "warnings": ["missing_player_keys_or_date"],
+            "data_quality": assess_data_sufficiency(blocking_reasons=["missing_player_keys_or_date"]),
         }
 
     raw_row, warnings, features_available = feature_builder.build_feature_row(
@@ -446,6 +528,7 @@ def predict_fixture(
             "confidence": None,
             "features_available": False,
             "warnings": warnings,
+            "data_quality": _data_quality(fixture, feature_builder, warnings, row=raw_row),
         }
     cleaned = _clean_features(raw_row, model_version)
     artifact = _load_model_artifact(model_version, model_name)
@@ -465,11 +548,13 @@ def predict_fixture(
                 "confidence": None,
                 "features_available": False,
                 "warnings": [*warnings, f"missing_odds_features:{','.join(missing_odds_columns)}"],
+                "data_quality": _data_quality(fixture, feature_builder, [*warnings, "missing_odds"], row=raw_row),
             }
-    for column in missing_columns:
-        cleaned[column] = 0
+    fill_policy = missing_feature_policy()
+    cleaned = fill_missing_feature_columns(cleaned, missing_columns, policy=fill_policy)
     if missing_columns:
         warnings.append(f"missing_feature_columns:{','.join(missing_columns)}")
+        warnings.append(f"missing_feature_policy:{fill_policy}")
 
     probabilities = pipeline.predict_proba(cleaned[feature_columns])[0]
     prob_player_1_win = float(probabilities[1])
@@ -485,6 +570,13 @@ def predict_fixture(
         "confidence": confidence,
         "features_available": features_available,
         "warnings": warnings,
+        "data_quality": _data_quality(
+            fixture,
+            feature_builder,
+            warnings,
+            row=raw_row,
+            unavailable_feature_columns=missing_columns,
+        ),
     }
 
 
@@ -551,6 +643,16 @@ def predict_upcoming_fixtures(
     if persist:
         db.commit()
 
+    quality_counts: dict[str, int] = {}
+    for result in predictions:
+        status = (result.get("data_quality") or {}).get("status", "unknown")
+        quality_counts[status] = quality_counts.get(status, 0) + 1
+    logger.info(
+        "Match-winner predictions data quality model=%s/%s counts=%s",
+        model_version,
+        model_name,
+        quality_counts,
+    )
 
     return predictions
 

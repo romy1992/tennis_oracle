@@ -52,6 +52,11 @@ class MatchPredictionRead(BaseModel):
     confidence: float | None
     features_available: bool = True
     warnings: list[str] = []
+    # Additive. Evidence behind the prediction as it can be verified when the
+    # response is built: {"status": sufficient|limited|insufficient, "reasons",
+    # "systemic_gaps", "details", "evaluated", "not_evaluated"}. Inputs listed
+    # in "not_evaluated" were neither checked nor assumed.
+    data_quality: dict | None = None
 
 
 class ExtraMarketPredictionRead(BaseModel):
@@ -80,6 +85,10 @@ class NextFixtureWithPrediction(NextFixtureRead):
     prediction: MatchPredictionRead | None = None
     prediction_warning: str | None = None
     extra_markets: list[ExtraMarketPredictionRead] = []
+    # Additive. UTC instant of the latest successful match-winner odds capture
+    # for this event (prematch_odds_snapshot.captured_at). None when no capture
+    # is recorded: the age of ``odds`` is then unknown, never assumed fresh.
+    odds_captured_at: datetime | None = None
 
 
 class FixturesWithPredictionsPage(BaseModel):

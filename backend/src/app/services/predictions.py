@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
 from sqlalchemy import exists, func, or_, select
@@ -24,7 +24,9 @@ from backend.src.app.ml.prediction.extra_markets_predictor import (
     FIRST_SET_WINNER_MODEL_VERSION,
     OVER_UNDER_GAMES_MODEL_VERSION,
 )
+from backend.src.app.ml.prediction.data_sufficiency import assess_data_sufficiency
 from backend.src.app.models import Fixture, MatchPrediction, NextFixture
+from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
 from backend.src.app.schemas.prediction import (
     DailyPredictionStatsDay,
     DailyPredictionStatsResponse,
@@ -685,15 +687,66 @@ def _attach_lifecycle_fields(
     )
 
 
+def _latest_odds_capture_by_event_key(
+    db: Session,
+    event_keys: list[int],
+) -> dict[int, datetime]:
+    """Latest match-winner odds capture per event (one grouped query, UTC-aware)."""
+    if not event_keys:
+        return {}
+    rows = db.execute(
+        select(
+            PrematchOddsSnapshot.event_key,
+            func.max(PrematchOddsSnapshot.captured_at),
+        )
+        .where(
+            PrematchOddsSnapshot.event_key.in_(event_keys),
+            PrematchOddsSnapshot.market == "match_winner",
+        )
+        .group_by(PrematchOddsSnapshot.event_key)
+    ).all()
+    captured: dict[int, datetime] = {}
+    for event_key, captured_at in rows:
+        if captured_at is None:
+            continue
+        # captured_at is stored UTC-naive (see prematch_odds_snapshots._as_utc_naive).
+        if captured_at.tzinfo is None:
+            captured_at = captured_at.replace(tzinfo=timezone.utc)
+        captured[int(event_key)] = captured_at
+    return captured
+
+
+def _read_time_data_quality(
+    fixture: NextFixture,
+    fixture_odds: MatchWinnerOddsAverage | None,
+) -> dict:
+    """Evidence checks that need no extra query; history/ranking are not evaluated here."""
+    surface = (fixture.surface or "").strip().lower()
+    bookmaker_count = fixture_odds.odds_bookmaker_count if fixture_odds is not None else None
+    quality = assess_data_sufficiency(
+        surface_known=bool(surface) and surface != "unknown",
+        odds_available=fixture_odds is not None,
+        bookmaker_count=bookmaker_count,
+    )
+    quality["evaluated"] = ["surface", "odds", "bookmaker_count"]
+    quality["not_evaluated"] = ["player_history", "ranking"]
+    return quality
+
+
 def _wrap_upcoming_fixture(
     fixture: NextFixture,
     stored_prediction: MatchPrediction | None,
     extra_markets: list[ExtraMarketPredictionRead] | None = None,
+    odds_captured_at: datetime | None = None,
 ) -> NextFixtureWithPrediction:
     fixture_odds = _next_fixture_odds(fixture)
     prediction = (
         _prediction_read(stored_prediction, fixture_odds) if stored_prediction else None
     )
+    if prediction is not None:
+        prediction = prediction.model_copy(
+            update={"data_quality": _read_time_data_quality(fixture, fixture_odds)}
+        )
     final_result = (
         fixture.live_score.get("final_result")
         if isinstance(fixture.live_score, dict)
@@ -710,6 +763,7 @@ def _wrap_upcoming_fixture(
         prediction=prediction,
         prediction_warning=None if prediction is not None else "missing_persisted_prediction",
         extra_markets=extra_markets or [],
+        odds_captured_at=odds_captured_at,
     )
 
 
@@ -794,11 +848,15 @@ def get_next_fixtures_with_predictions(
         extra_by_key = _extra_markets_by_event_key(
             db, [fixture.event_key for fixture in fixtures]
         )
+        odds_capture_by_key = _latest_odds_capture_by_event_key(
+            db, [fixture.event_key for fixture in fixtures]
+        )
         results = [
             _wrap_upcoming_fixture(
                 fixture,
                 prediction_by_key.get(fixture.event_key),
                 extra_by_key.get(fixture.event_key),
+                odds_capture_by_key.get(fixture.event_key),
             )
             for fixture in fixtures
         ]
@@ -881,11 +939,15 @@ def get_next_fixtures_with_predictions(
             extra_by_key = _extra_markets_by_event_key(
                 db, [fixture.event_key for fixture in fixtures]
             )
+            odds_capture_by_key = _latest_odds_capture_by_event_key(
+                db, [fixture.event_key for fixture in fixtures]
+            )
             results.extend(
                 _wrap_upcoming_fixture(
                     fixture,
                     prediction_by_key.get(fixture.event_key),
                     extra_by_key.get(fixture.event_key),
+                    odds_capture_by_key.get(fixture.event_key),
                 )
                 for fixture in fixtures
             )

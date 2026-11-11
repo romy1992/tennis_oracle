@@ -161,6 +161,16 @@ class Settings(BaseSettings):
     public_model_version: str | None = None
     public_model_name: str | None = None
 
+    # How match-winner inference fills feature columns that are not available at
+    # serving time (ATP enrichment: age, height, hand, tourney level, ...).
+    #   zero   = legacy behaviour: integer 0 in every missing column.
+    #   impute = declare them missing (NaN) so the imputers fitted at training
+    #            time apply (median / "unknown"), i.e. what the model saw for
+    #            unmatched rows during training.
+    # Changing it changes live probabilities: see
+    # docs/platform-audit/IMPLEMENTATION_LOG.md before enabling "impute".
+    match_winner_missing_feature_policy: str = "zero"
+
     # Dedicated pre-kickoff closing-odds capture (job run_closing_odds_capture).
     # Disabled by default: opt-in once a frequent cron (every 1-5 min) is configured.
     # See docs/SCHEDULING.md#closing-odds-pre-kickoff-job.
