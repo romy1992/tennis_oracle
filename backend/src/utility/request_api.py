@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from typing import Any
 
@@ -41,6 +42,10 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 #   API_TENNIS_MAX_RETRIES                 extra attempts after the first one (0 disables)
 #   API_TENNIS_RETRY_BACKOFF_SECONDS       first backoff step
 #   API_TENNIS_RETRY_BACKOFF_MAX_SECONDS   cap for a single wait (also caps Retry-After)
+#   API_TENNIS_RETRY_BUDGET_SECONDS        worst-case wall time of one request_api call
+#                                          (default: 2 x API_TENNIS_TIMEOUT). A retry is
+#                                          skipped when it could push the call past it, so
+#                                          slow timeouts do not multiply the old latency.
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_RETRY_BACKOFF_SECONDS = 0.5
 DEFAULT_RETRY_BACKOFF_MAX_SECONDS = 8.0
@@ -127,6 +132,7 @@ def _max_retries() -> int:
 
 _breaker: CircuitBreaker | None = None
 _breaker_config: tuple[int, float] | None = None
+_breaker_lock = threading.Lock()
 
 
 def _circuit_breaker() -> CircuitBreaker:
@@ -136,10 +142,13 @@ def _circuit_breaker() -> CircuitBreaker:
         int(_env_number("API_TENNIS_CIRCUIT_FAILURE_THRESHOLD", DEFAULT_CIRCUIT_FAILURE_THRESHOLD)),
         _env_number("API_TENNIS_CIRCUIT_RECOVERY_SECONDS", DEFAULT_CIRCUIT_RECOVERY_SECONDS),
     )
-    if _breaker is None or _breaker_config != config:
-        _breaker = CircuitBreaker(failure_threshold=config[0], recovery_seconds=config[1])
-        _breaker_config = config
-    return _breaker
+    with _breaker_lock:
+        # Check-and-create under a lock: two threads must never end up with
+        # different breakers (each would count failures on its own).
+        if _breaker is None or _breaker_config != config:
+            _breaker = CircuitBreaker(failure_threshold=config[0], recovery_seconds=config[1])
+            _breaker_config = config
+        return _breaker
 
 
 def circuit_breaker_state() -> str:
@@ -150,8 +159,9 @@ def circuit_breaker_state() -> str:
 def reset_circuit_breaker() -> None:
     """Forget breaker state (tests, or an operator after fixing configuration)."""
     global _breaker, _breaker_config
-    _breaker = None
-    _breaker_config = None
+    with _breaker_lock:
+        _breaker = None
+        _breaker_config = None
 
 
 def _record_counter(name: str, labels: dict[str, str]) -> None:
@@ -194,6 +204,8 @@ def _http_get_with_resilience(method: str, request_params: dict[str, Any], timeo
     max_retries = _max_retries()
     backoff_base = _env_number("API_TENNIS_RETRY_BACKOFF_SECONDS", DEFAULT_RETRY_BACKOFF_SECONDS)
     backoff_max = _env_number("API_TENNIS_RETRY_BACKOFF_MAX_SECONDS", DEFAULT_RETRY_BACKOFF_MAX_SECONDS)
+    budget = _env_number("API_TENNIS_RETRY_BUDGET_SECONDS", 2.0 * timeout)
+    call_started = time.monotonic()
     labels_method = method or ""
     attempt = 0
 
@@ -282,6 +294,12 @@ def _http_get_with_resilience(method: str, request_params: dict[str, Any], timeo
         delay = backoff_delay(attempt, base_seconds=backoff_base, max_seconds=backoff_max)
         if retry_after_hint is not None:
             delay = min(max(delay, retry_after_hint), backoff_max)
+        if time.monotonic() - call_started + delay + timeout > budget:
+            # Another attempt could exceed the call's time budget: give the
+            # caller the typed error now instead of a much slower failure.
+            breaker.release_probe()
+            _record_counter(METRIC_REQUESTS, {"method": labels_method, "outcome": outcome})
+            raise failure
         _record_counter(METRIC_RETRIES, {"method": labels_method, "reason": outcome})
         logger.warning(
             "API Tennis retry method=%s attempt=%s/%s reason=%s wait_s=%.2f",

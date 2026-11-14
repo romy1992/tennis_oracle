@@ -142,6 +142,29 @@ class TestRetries:
         assert len(sleeps) == 2
         assert 0.25 <= sleeps[0] <= 0.5 and 0.5 <= sleeps[1] <= 1.0
 
+    def test_retry_skipped_when_it_would_exceed_the_time_budget(self, client, monkeypatch):
+        mock_requests, sleeps = client
+        monkeypatch.setenv("API_TENNIS_RETRY_BUDGET_SECONDS", "1")  # < timeout (30s default)
+        mock_requests.get.side_effect = requests_exc.Timeout()
+
+        with pytest.raises(ApiTennisTimeoutError):
+            module.request_api(method="get_fixtures")
+
+        assert mock_requests.get.call_count == 1
+        assert sleeps == []
+
+    def test_default_budget_is_twice_the_timeout(self, client, monkeypatch):
+        mock_requests, _ = client
+        clock = iter([0.0, 0.0, 31.0, 31.0, 31.0, 31.0, 31.0, 31.0])
+        monkeypatch.setattr(module.time, "monotonic", lambda: next(clock, 31.0))
+        mock_requests.get.side_effect = requests_exc.Timeout()
+
+        with pytest.raises(ApiTennisTimeoutError):
+            module.request_api(method="get_fixtures")
+
+        # 31s elapsed + backoff + 30s timeout > 60s: no second attempt.
+        assert mock_requests.get.call_count == 1
+
     def test_connection_error_is_retried(self, client):
         mock_requests, _ = client
         mock_requests.get.side_effect = [requests_exc.ConnectionError(), _response()]
@@ -296,3 +319,43 @@ class TestMetrics:
         mock_requests.get.return_value = _response()
         module.request_api(method="get_fixtures")
         assert "fake-key-not-real" not in get_metrics().render_prometheus()
+
+
+class TestSharedStateAcrossThreads:
+    def test_all_threads_share_one_breaker(self, client):
+        import threading
+
+        seen: list[object] = []
+        barrier = threading.Barrier(8)
+
+        def worker():
+            barrier.wait()
+            seen.append(module._circuit_breaker())
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len({id(b) for b in seen}) == 1
+
+    def test_half_open_admits_a_single_probe_under_concurrency(self):
+        import threading
+
+        now = [0.0]
+        breaker = CircuitBreaker(failure_threshold=1, recovery_seconds=10, clock=lambda: now[0])
+        breaker.record_failure()
+        now[0] = 11.0
+        results: list[bool] = []
+        barrier = threading.Barrier(16)
+
+        def worker():
+            barrier.wait()
+            results.append(breaker.allow_request())
+
+        threads = [threading.Thread(target=worker) for _ in range(16)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert results.count(True) == 1
