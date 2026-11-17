@@ -48,6 +48,19 @@ class MatchPredictionRead(BaseModel):
     # Probabilita' di mercato senza margine (no-vig) del vincitore predetto:
     # serve a ridurre la probabilita' del modello verso il mercato (EV/PLAY).
     predicted_winner_market_probability: float | None = None
+    # Additivi. Decisione di valore del vincitore predetto presa dal motore come
+    # in `analyze_single_match_value` (services/single_match_value.py):
+    #   adjusted_probability = p_adj = blend_with_market(p_modello,
+    #       predicted_winner_market_probability, market="match_winner");
+    #   void_odds = 1 / p_adj; value_decision = classify_single_bet_value(
+    #       predicted_winner_odds, void_odds, DEFAULT_MIN_EDGE_PERCENT).
+    # Quota del vincitore predetto mancante: tutti None (nessuna decisione).
+    # Quota presente ma probabilita' di mercato mancante: value_decision
+    # "NO BET", void_odds/adjusted_probability None. Le probabilita' pubblicate
+    # (prob_player_1_win, confidence) restano quelle grezze del modello.
+    value_decision: str | None = None
+    void_odds: float | None = None
+    adjusted_probability: float | None = None
     odds_bookmaker_count: int | None = None
     confidence: float | None
     features_available: bool = True

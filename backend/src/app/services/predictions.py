@@ -229,10 +229,24 @@ def _prediction_read(
     odds: MatchWinnerOddsAverage | None = None,
     actual_winner: str | None = None,
 ) -> MatchPredictionRead:
+    # Import locale: single_match_value importa da questo modulo.
+    from backend.src.app.services.single_match_value import match_winner_value
+
     resolved_winner = prediction.actual_winner or actual_winner
     is_correct = None
     if resolved_winner is not None and prediction.predicted_winner is not None:
         is_correct = prediction.predicted_winner == resolved_winner
+
+    predicted_winner_odds = _predicted_winner_odds(prediction.predicted_winner, odds)
+    market_probability = _predicted_winner_market_probability(
+        prediction.predicted_winner, odds
+    )
+    value = match_winner_value(
+        predicted_winner=prediction.predicted_winner,
+        prob_player_1_win=prediction.prob_player_1_win,
+        market_odds=predicted_winner_odds,
+        market_fair_probability=market_probability,
+    )
 
     return MatchPredictionRead(
         event_key=prediction.event_key,
@@ -243,13 +257,14 @@ def _prediction_read(
         predicted_winner=prediction.predicted_winner,
         actual_winner=resolved_winner,
         is_correct=is_correct,
-        predicted_winner_odds=_predicted_winner_odds(prediction.predicted_winner, odds),
-        predicted_winner_market_probability=_predicted_winner_market_probability(
-            prediction.predicted_winner, odds
-        ),
+        predicted_winner_odds=predicted_winner_odds,
+        predicted_winner_market_probability=market_probability,
         odds_bookmaker_count=odds.odds_bookmaker_count if odds is not None else None,
         confidence=_confidence(prediction.prob_player_1_win),
         warnings=[],
+        value_decision=value.value_decision,
+        void_odds=value.void_odds,
+        adjusted_probability=value.adjusted_probability,
     )
 
 

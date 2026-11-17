@@ -135,6 +135,72 @@ def classify_single_bet_value(
     return "BORDERLINE"
 
 
+@dataclass(frozen=True)
+class MatchWinnerValue:
+    """Decisione di valore del vincitore partita, presa come la prende
+    `analyze_single_match_value`: stessa riduzione verso il mercato
+    (`blend_with_market`, mercato "match_winner"), stessa quota void
+    (`calculate_void_odds` su p_adj) e stessa soglia
+    (`classify_single_bet_value` con `DEFAULT_MIN_EDGE_PERCENT`)."""
+
+    value_decision: SingleMatchValueDecision | None
+    void_odds: float | None
+    adjusted_probability: float | None
+
+
+NO_MATCH_WINNER_VALUE = MatchWinnerValue(
+    value_decision=None, void_odds=None, adjusted_probability=None
+)
+
+
+def match_winner_value(
+    *,
+    predicted_winner: str | None,
+    prob_player_1_win: float | None,
+    market_odds: float | None,
+    market_fair_probability: float | None,
+) -> MatchWinnerValue:
+    """Decisione PLAY / BORDERLINE / NO BET del vincitore predetto.
+
+    - Nessun vincitore predetto, nessuna probabilita' del modello valida o
+      nessuna quota del vincitore predetto: nessuna decisione (tutto None).
+    - Quota presente ma probabilita' di mercato no-vig mancante/non valida:
+      `blend_with_market` restituisce None e la decisione e' "NO BET", come in
+      `analyze_single_match_value`; void_odds e adjusted_probability restano
+      None (nessuna quota void ricavata dalla probabilita' grezza).
+    - Altrimenti void_odds = 1 / p_adj e decisione con la soglia di default.
+    """
+    if prob_player_1_win is None or market_odds is None:
+        return NO_MATCH_WINNER_VALUE
+    if predicted_winner is None:
+        return NO_MATCH_WINNER_VALUE
+    model_probability = _model_prob_for_selection(predicted_winner, float(prob_player_1_win))
+    if model_probability is None or not 0.0 <= model_probability <= 1.0:
+        return NO_MATCH_WINNER_VALUE
+
+    adjusted_probability = blend_with_market(
+        model_probability, market_fair_probability, market="match_winner"
+    )
+    if adjusted_probability is None:
+        return MatchWinnerValue(
+            value_decision="NO BET", void_odds=None, adjusted_probability=None
+        )
+    if not 0.0 < adjusted_probability <= 1.0:
+        # Quota void non definita: nessuna decisione invece di un errore in lettura.
+        return NO_MATCH_WINNER_VALUE
+    void_odds = calculate_void_odds(adjusted_probability)
+    decision = classify_single_bet_value(
+        market_odds=float(market_odds),
+        void_odds=void_odds,
+        min_edge_percent=DEFAULT_MIN_EDGE_PERCENT,
+    )
+    return MatchWinnerValue(
+        value_decision=decision,
+        void_odds=round(void_odds, 4),
+        adjusted_probability=round(adjusted_probability, 6),
+    )
+
+
 def analyze_single_match_value(
     *,
     match_id: int,
