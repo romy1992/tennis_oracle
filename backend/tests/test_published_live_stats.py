@@ -852,3 +852,88 @@ def test_clv_ignores_odds_from_a_different_market(db_session):
     assert item.clv_available is False
     assert item.closing_odds is None
     assert item.publication_odds is None
+
+
+def _kickoff_utc_of_future_fixture() -> datetime:
+    """UTC-naive kickoff of ``_future_fixture`` (today+3 at 14:00 Europe/Rome)."""
+    from zoneinfo import ZoneInfo
+    from datetime import timezone as tz
+
+    local = datetime.combine(
+        date.today() + timedelta(days=3), time(14, 0), tzinfo=ZoneInfo("Europe/Rome")
+    )
+    return local.astimezone(tz.utc).replace(tzinfo=None)
+
+
+def test_clv_ignores_closing_captured_before_publication(db_session):
+    """A 'closing' older than the bet (e.g. the daily import's last observed
+    quote sealed as closing) is not a closing line for that bet."""
+    event_key = 9420
+    kickoff = _kickoff_utc_of_future_fixture()
+    published_at = kickoff - timedelta(hours=5)
+    _publish(
+        db_session,
+        event_key=event_key,
+        selection="Alice",
+        odds=2.0,
+        stake=1.0,
+        edge=5.0,
+        published_at=published_at,
+    )
+    _add_snapshot_pair(
+        db_session,
+        event_key=event_key,
+        snapshot_type="closing",
+        bookmaker="book_a",
+        captured_at=published_at - timedelta(hours=1),
+        alice_odds=1.80,
+        bob_odds=2.10,
+    )
+
+    item = next(
+        row for row in list_settled_published_tips(db_session) if row.event_key == event_key
+    )
+    assert item.clv_available is False
+    assert item.clv_pct is None
+    assert item.closing_odds is None
+
+
+def test_clv_ignores_closing_captured_after_kickoff(db_session):
+    """Quotes captured after the scheduled start may be in-play: the last valid
+    pre-kickoff closing is used instead."""
+    event_key = 9421
+    kickoff = _kickoff_utc_of_future_fixture()
+    published_at = kickoff - timedelta(hours=5)
+    _publish(
+        db_session,
+        event_key=event_key,
+        selection="Alice",
+        odds=2.0,
+        stake=1.0,
+        edge=5.0,
+        published_at=published_at,
+    )
+    _add_snapshot_pair(
+        db_session,
+        event_key=event_key,
+        snapshot_type="closing",
+        bookmaker="book_a",
+        captured_at=kickoff - timedelta(minutes=10),
+        alice_odds=1.60,
+        bob_odds=2.40,
+    )
+    _add_snapshot_pair(
+        db_session,
+        event_key=event_key,
+        snapshot_type="closing",
+        bookmaker="book_a",
+        captured_at=kickoff + timedelta(minutes=20),
+        alice_odds=1.10,
+        bob_odds=6.00,
+    )
+
+    item = next(
+        row for row in list_settled_published_tips(db_session) if row.event_key == event_key
+    )
+    assert item.closing_odds == 1.6
+    assert round(item.clv_pct or 0.0, 4) == 25.0

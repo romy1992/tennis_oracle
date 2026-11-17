@@ -11,9 +11,10 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time, timezone
 from statistics import median
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -83,6 +84,26 @@ class _MatchContext:
     # regardless of the overall match-winner ``actual_winner`` above.
     first_set_winner_side: str | None = None
     total_games: int | None = None
+    # Latest known scheduled kickoff (UTC-naive) of the fixture. A "closing"
+    # quote captured after it cannot be trusted as pre-match, so CLV ignores it.
+    # None when the schedule has no explicit time (kickoff unknown).
+    kickoff_utc: datetime | None = None
+
+
+_ROME_TZ = ZoneInfo("Europe/Rome")
+
+
+def _scheduled_kickoff_utc(event_date: date | None, event_time: time | None) -> datetime | None:
+    """Scheduled kickoff in UTC-naive (``event_date``/``event_time`` are Europe/Rome).
+
+    Unlike the publication gate, an unknown ``event_time`` is NOT defaulted to
+    midnight: the closing-odds job never captures fixtures without a time, and a
+    midnight default would wrongly discard same-day quotes.
+    """
+    if event_date is None or event_time is None:
+        return None
+    local_dt = datetime.combine(event_date, event_time, tzinfo=_ROME_TZ)
+    return local_dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 @dataclass
@@ -246,6 +267,7 @@ def _load_match_contexts(db: Session, event_keys: list[int]) -> dict[int, _Match
                 event_date=fixture.event_date,
                 first_set_winner_side=first_set_winner_side,
                 total_games=total_games,
+                kickoff_utc=_scheduled_kickoff_utc(fixture.event_date, fixture.event_time),
             )
             continue
 
@@ -265,6 +287,7 @@ def _load_match_contexts(db: Session, event_keys: list[int]) -> dict[int, _Match
                 player_2_name=next_row.event_second_player,
                 surface=surface,
                 event_date=next_row.event_date,
+                kickoff_utc=_scheduled_kickoff_utc(next_row.event_date, next_row.event_time),
             )
             continue
 
@@ -470,6 +493,7 @@ def settle_published_tips(
                 player_2_name=row.player_2_name,
                 surface=None,
                 event_date=row.event_date,
+                kickoff_utc=_scheduled_kickoff_utc(row.event_date, row.event_time),
             ),
             snapshots=snapshots.get(int(row.event_key), []),
         )
@@ -653,6 +677,44 @@ def _no_vig_probability(
     return inv_selected / denom
 
 
+def _as_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _valid_closing_rows(
+    rows: list[PrematchOddsSnapshot],
+    *,
+    published_at: datetime,
+    kickoff_utc: datetime | None,
+) -> list[PrematchOddsSnapshot]:
+    """Closing quotes usable for this tip's CLV.
+
+    A closing line is the market price *after* the tip was taken and *before*
+    the match starts. Two kinds of ``closing`` rows break that and are dropped:
+
+    - captured at/before publication (e.g. the daily import's last observed
+      quote sealed as closing, or a dedicated capture that ran before a late
+      publication): comparing against it measures nothing (CLV ~0 by
+      construction, or a quote older than the bet);
+    - captured after the scheduled kickoff: may be an in-play price.
+
+    ``captured_at`` is stored truncated to the second, so publication is
+    compared at second resolution too (strictly later = after the bet).
+    """
+    published_floor = _as_utc_naive(published_at).replace(microsecond=0)
+    valid: list[PrematchOddsSnapshot] = []
+    for row in rows:
+        captured = _as_utc_naive(row.captured_at)
+        if captured <= published_floor:
+            continue
+        if kickoff_utc is not None and captured > kickoff_utc:
+            continue
+        valid.append(row)
+    return valid
+
+
 def _resolve_clv(
     tip: PublishedPrediction,
     context: _MatchContext,
@@ -669,7 +731,12 @@ def _resolve_clv(
         and row.market_line == market_line
     ]
     publication_rows = [row for row in same_selection if row.snapshot_type == "publication"]
-    closing_rows = [row for row in same_selection if row.snapshot_type == "closing"]
+    closing_rows = _valid_closing_rows(
+        [row for row in same_selection if row.snapshot_type == "closing"],
+        published_at=tip.published_at,
+        kickoff_utc=context.kickoff_utc
+        or _scheduled_kickoff_utc(tip.event_date, tip.event_time),
+    )
 
     publication_row: PrematchOddsSnapshot | None = None
     if publication_rows:
