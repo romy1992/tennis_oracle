@@ -312,6 +312,15 @@ class TestProtocolOnSyntheticData:
         accuracy = comparison["accuracy"]
         assert accuracy["mean_delta"] == pytest.approx(accuracy["candidate"] - accuracy["reference"], abs=2e-4)
 
+    def test_summary_markdown_is_built_from_the_report(self, synthetic_run):
+        report, _fitted, _predicted = synthetic_run
+        summary = bench.render_summary_markdown(report)
+        market = report["contenders"]["market_no_vig"]["overall"]
+        assert f"| `market_no_vig` | {market['n']} | {market['log_loss']:.5f} | {market['brier']:.5f} |" in summary
+        for segment in REQUIRED_SEGMENTS:
+            assert f"## Segmento: `{segment}`" in summary
+        assert "Scostamento train/serve" in summary
+
 
 class TestInferredTourUsesOnlyThePast:
     def test_label_does_not_depend_on_later_matches(self):
@@ -334,7 +343,7 @@ class TestInferredTourUsesOnlyThePast:
 
 
 class TestCommittedReport:
-    """The committed JSON must describe a leak-free protocol."""
+    """The committed JSON must describe a leak-free protocol and match its summary."""
 
     @pytest.fixture(scope="class")
     def report(self):
@@ -359,3 +368,7 @@ class TestCommittedReport:
             entry = report["contenders"][name]
             assert entry["overall"]["n"] == report["test_rows_total"]
             assert REQUIRED_SEGMENTS <= set(entry["segments"])
+
+    def test_committed_summary_is_the_rendering_of_the_committed_json(self, report):
+        summary_path = bench.DEFAULT_REPORT_PATH.with_suffix(".md")
+        assert summary_path.read_text(encoding="utf-8") == bench.render_summary_markdown(report)

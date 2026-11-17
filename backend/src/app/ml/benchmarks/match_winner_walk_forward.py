@@ -22,6 +22,9 @@ Anti-leakage
 Usage (repository root)::
 
     python -m backend.src.app.ml.benchmarks.match_winner_walk_forward
+
+It writes the JSON report and, next to it, a Markdown digest with the main
+tables (same name, ``.md``) rendered from that JSON.
 """
 
 from __future__ import annotations
@@ -1090,6 +1093,216 @@ def ranking_table(report: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: row["log_loss"])
 
 
+SUMMARY_CONTENDERS = [
+    "market_no_vig",
+    "elo_overall_k32",
+    "elo_surface_k32",
+    "elo_overall_dynamic",
+    "lr_no_odds",
+    "hgb_no_odds",
+    "lr_with_odds",
+    "hgb_with_odds",
+    "v4_like__true_features",
+    "v4_like__serving_enrichment_zeros_and_rank_fallback",
+]
+SUMMARY_SEGMENTS = ["surface", "period", "market_balance", "min_prior_matches"]
+SUMMARY_CALIBRATION = [
+    "market_no_vig",
+    "v4_like__true_features",
+    "v4_like__serving_enrichment_zeros_and_rank_fallback",
+]
+
+
+def _md_table(header: list[str], rows: list[list[Any]]) -> list[str]:
+    lines = ["| " + " | ".join(header) + " |", "|" + "|".join("---" for _ in header) + "|"]
+    lines += ["| " + " | ".join(str(cell) for cell in row) + " |" for row in rows]
+    return lines
+
+
+def _md_ci(block: dict[str, Any]) -> str:
+    return f"{block['mean_delta']:+.5f} [{block['ci95_low']:+.5f}, {block['ci95_high']:+.5f}]"
+
+
+def render_summary_markdown(report: dict[str, Any]) -> str:
+    """Human-readable digest of the JSON report (every number is copied from it)."""
+    dataset = report["dataset"]
+    contenders = report["contenders"]
+    selected_elo = report["elo_selection"]["selected_dynamic_config"]
+    lines: list[str] = [
+        "# Benchmark walk-forward — vincitore partita (riepilogo)",
+        "",
+        "File generato insieme a `match_winner_walk_forward_benchmark.json` dallo stesso comando; "
+        "ogni numero e' copiato dal JSON. Non modificare a mano.",
+        "",
+        f"- Comando: `{report['command']}`",
+        f"- Generato: {report['generated_at']} (seed {report['seed']}, "
+        f"{report['protocol']['bootstrap_resamples']} ricampionamenti bootstrap)",
+        f"- Dataset: `{dataset['path']}` — sha256 `{dataset['sha256']}`",
+        f"- Righe: {dataset['rows']} ({dataset['date_min']} .. {dataset['date_max']}); "
+        f"con quote valide: {dataset['rows_with_valid_odds']} ({dataset['odds_date_min']} .. {dataset['odds_date_max']})",
+        f"- Righe di test (somma dei fold): {report['test_rows_total']}",
+        "- Ambiente: " + ", ".join(f"{name} {version}" for name, version in report["environment"].items()),
+        f"- Elo dinamico selezionato prima del primo fold: `{selected_elo}` "
+        "(K variabile con l'esperienza; `tau` = decadimento per inattivita', in giorni)",
+        "",
+        "## Fold (finestra espandibile, un trimestre di test per fold)",
+        "",
+    ]
+    lines += _md_table(
+        ["fold", "test", "fine train", "righe train con quote", "righe test", "quota righe test con arricchimento ATP"],
+        [
+            [
+                fold["fold"],
+                f"{fold['test_start']} .. {fold['test_end']}",
+                fold["train_end"],
+                fold["train_rows_with_odds"],
+                fold["test_rows"],
+                fold.get("test_enrichment_matched_share", "n/d"),
+            ]
+            for fold in report["folds"]
+        ],
+    )
+
+    lines += [
+        "",
+        "## Tabella principale (tutti i fold, stesse righe di test per ogni modello)",
+        "",
+        "Delta log loss rispetto al mercato no-vig: negativo = meglio del mercato; IC 95% da bootstrap appaiato.",
+        "",
+    ]
+    rows = []
+    for row in ranking_table(report):
+        delta = contenders[row["contender"]].get("vs_market", {}).get("log_loss")
+        rows.append(
+            [
+                f"`{row['contender']}`",
+                row["n"],
+                f"{row['log_loss']:.5f}",
+                f"{row['brier']:.5f}",
+                f"{row['ece']:.4f}",
+                f"{row['accuracy']:.4f}",
+                _md_ci(delta) if delta else "riferimento",
+                row.get("folds_better", "—"),
+            ]
+        )
+    lines += _md_table(
+        ["modello", "n", "log loss", "Brier", "ECE", "accuratezza", "delta log loss vs mercato [IC95]", "fold migliori del mercato"],
+        rows,
+    )
+    lines += [
+        "",
+        "Legenda: `market_no_vig` = probabilita' di mercato senza margine; `elo_overall_k32` = Elo (K=32); "
+        "`elo_surface_k32` = Elo per superficie; `elo_overall_dynamic` / `elo_blend_dynamic` = Elo con K variabile "
+        "e decadimento; `lr_*` = regressione logistica; `hgb_*` / `xgb_*` = gradient boosting; `*_no_odds` senza "
+        "quote, `*_with_odds` con quote; `v4_like__*` = stessi algoritmi e stesse 38 feature dell'artefatto v4, "
+        "riaddestrati dentro ogni fold (non e' l'artefatto di produzione).",
+    ]
+
+    available = [name for name in SUMMARY_CONTENDERS if name in contenders]
+    for segment in SUMMARY_SEGMENTS:
+        values = list(contenders[available[0]]["segments"][segment].keys())
+        if segment == "min_prior_matches":
+            order = [label for _low, _high, label in HISTORY_BINS]
+            values.sort(key=lambda value: order.index(value) if value in order else len(order))
+        lines += ["", f"## Segmento: `{segment}` (log loss / Brier)", ""]
+        seg_rows = []
+        for value in values:
+            cells: list[Any] = [value, contenders[available[0]]["segments"][segment][value].get("n", 0)]
+            for name in available:
+                block = contenders[name]["segments"][segment][value]
+                cells.append(f"{block['log_loss']:.4f} / {block['brier']:.4f}" if block.get("n") else "—")
+            seg_rows.append(cells)
+        lines += _md_table([segment, "n", *[f"`{name}`" for name in available]], seg_rows)
+
+    lines += ["", "## Calibrazione (10 intervalli di uguale ampiezza sulla probabilita' del giocatore 1)", ""]
+    for name in SUMMARY_CALIBRATION:
+        if name not in contenders:
+            continue
+        lines += [f"`{name}` — ECE {contenders[name]['overall']['ece']:.4f}", ""]
+        lines += _md_table(
+            ["intervallo", "n", "probabilita' media", "frequenza osservata"],
+            [[b["bin"], b["n"], f"{b['mean_predicted']:.4f}", f"{b['observed_rate']:.4f}"] for b in contenders[name]["calibration_bins"]],
+        )
+        lines.append("")
+
+    lines += [
+        "## Scostamento train/serve (stesso modello addestrato nel fold, due modi di valorizzare le feature in test)",
+        "",
+        "Log loss e Brier: positivo = il candidato e' peggiore del riferimento. Accuratezza: candidato − riferimento.",
+        "",
+    ]
+    skew_rows = []
+    for item in report["train_serve_skew"]["comparisons"]:
+        accuracy = item.get("accuracy")
+        skew_rows.append(
+            [
+                f"`{item['candidate']}`",
+                f"`{item['reference']}`",
+                _md_ci(item["log_loss"]),
+                _md_ci(item["brier"]),
+                f"{accuracy['candidate']:.4f} vs {accuracy['reference']:.4f} ({_md_ci(accuracy)})" if accuracy else "n/d",
+                f"{item['mean_abs_probability_shift']:.5f} / {item['p95_abs_probability_shift']:.5f}",
+                f"{item['pick_flip_rate']:.5f}",
+                f"{item['folds_candidate_worse']}/{len(item['log_loss_delta_per_fold'])}",
+            ]
+        )
+    lines += _md_table(
+        [
+            "candidato",
+            "riferimento",
+            "delta log loss [IC95]",
+            "delta Brier [IC95]",
+            "accuratezza (delta [IC95])",
+            "abs(delta p) medio / p95",
+            "pronostici invertiti",
+            "fold peggiori",
+        ],
+        skew_rows,
+    )
+    lines += [
+        "",
+        "`serving_enrichment_zeros` = le 13 colonne di arricchimento ATP valgono 0 (cio' che il serving passa "
+        "oggi al modello); `rank_fallback` = differenze di ranking a 0 (nessun file ranking disponibile); "
+        "`enrichment_as_missing` = colonne dichiarate mancanti e gestite dagli imputer del modello.",
+    ]
+
+    sensitivity = report.get("production_artifact_sensitivity")
+    if sensitivity:
+        lines += [
+            "",
+            "## Artefatto di produzione: sensibilita' al riempimento (IN-SAMPLE)",
+            "",
+            f"`{sensitivity['artifact']}` (sha256 `{sensitivity['artifact_sha256']}`), {sensitivity['rows']} righe dal "
+            f"{sensitivity['since']}. L'artefatto e' stato addestrato su questo dataset: i valori assoluti sono "
+            "ottimistici, contano solo le differenze tra varianti.",
+            "",
+        ]
+        lines += _md_table(
+            ["variante", "n", "log loss", "Brier", "ECE", "accuratezza", "probabilita' media"],
+            [
+                [
+                    f"`{name}`",
+                    block["n"],
+                    f"{block['log_loss']:.5f}",
+                    f"{block['brier']:.5f}",
+                    f"{block['ece']:.4f}",
+                    f"{block['accuracy']:.4f}",
+                    sensitivity["mean_probability"].get(name, "n/d"),
+                ]
+                for name, block in sensitivity["scores"].items()
+            ],
+        )
+        lines += ["", sensitivity["reference_note"]]
+
+    lines += ["", "## Controlli anti-leakage e avvertenze", ""]
+    lines += [f"- {text}" for text in report["protocol"].get("leakage_controls", [])]
+    for key in ("odds_provenance", "enrichment_coverage_note"):
+        if report["protocol"].get(key):
+            lines.append(f"- {report['protocol'][key]}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET_PATH)
@@ -1110,6 +1323,8 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=1, ensure_ascii=False)
+    summary_path = args.output.with_suffix(".md")
+    summary_path.write_text(render_summary_markdown(report), encoding="utf-8")
     for row in ranking_table(report):
         print(row)
     sensitivity = report.get("production_artifact_sensitivity")
@@ -1118,6 +1333,7 @@ def main() -> None:
         for comparison in sensitivity["comparisons"]:
             print(comparison)
     print(f"Report written to {args.output}")
+    print(f"Summary written to {summary_path}")
 
 
 if __name__ == "__main__":
