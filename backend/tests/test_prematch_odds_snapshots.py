@@ -397,7 +397,8 @@ def test_capture_closing_odds_for_fixture_appends_closing_rows(db_session):
     ) as fetch_mock:
         result = capture_closing_odds_for_fixture(db_session, event_key=6030)
 
-    fetch_mock.assert_called_once_with(6030)
+    fetch_mock.assert_called_once()
+    assert fetch_mock.call_args.args == (6030,)
     assert result is not None
     assert result.inserted == 4
     assert all(item.snapshot_type == "closing" for item in result.items)
@@ -455,7 +456,7 @@ def test_run_closing_odds_capture_once_summarizes_batch(db_session):
     _seed_fixture_with_kickoff(db_session, event_key=6041, minutes_from_now=20)
     _seed_fixture_with_kickoff(db_session, event_key=6042, minutes_from_now=500)
 
-    def _fake_fetch(event_key: int):
+    def _fake_fetch(event_key: int, **_kwargs):
         return None if event_key == 6041 else SAMPLE_ODDS
 
     with patch(
@@ -476,7 +477,7 @@ def test_run_closing_odds_capture_once_isolates_per_fixture_failures(db_session)
     _seed_fixture_with_kickoff(db_session, event_key=6050, minutes_from_now=10)
     _seed_fixture_with_kickoff(db_session, event_key=6051, minutes_from_now=20)
 
-    def _fake_fetch(event_key: int):
+    def _fake_fetch(event_key: int, **_kwargs):
         if event_key == 6050:
             raise RuntimeError("boom")
         return SAMPLE_ODDS
@@ -492,3 +493,56 @@ def test_run_closing_odds_capture_once_isolates_per_fixture_failures(db_session)
 
 
 
+
+
+def test_capture_closing_odds_skips_started_match_without_provider_call(db_session):
+    """A fixture already live per stored state must not get a fresh (possibly
+    in-play) quote recorded as closing, and costs no API call."""
+    row = _seed_fixture_with_kickoff(db_session, event_key=6060, minutes_from_now=10)
+    row.event_status = "Set 1"
+    row.event_live = "1"
+    db_session.commit()
+
+    with patch(
+        "backend.src.service.import_next_fixtures.fetch_odds_for_match",
+        return_value=SAMPLE_ODDS,
+    ) as fetch_mock:
+        result = capture_closing_odds_for_fixture(db_session, event_key=6060)
+        summary = run_closing_odds_capture_once(db_session, window_minutes=60)
+
+    fetch_mock.assert_not_called()
+    assert result is None
+    assert summary["candidates"] == 1
+    assert summary["skipped_match_started"] == 1
+    assert summary["captured"] == 0
+    closing_rows = db_session.scalars(
+        select(PrematchOddsSnapshot).where(
+            PrematchOddsSnapshot.event_key == 6060,
+            PrematchOddsSnapshot.snapshot_type == "closing",
+        )
+    ).all()
+    assert list(closing_rows) == []
+
+
+def test_run_closing_odds_capture_counts_provider_errors_as_failures(db_session):
+    """A failed provider call is a capture failure, not "the provider has no odds"."""
+    _seed_fixture_with_kickoff(db_session, event_key=6070, minutes_from_now=10)
+    _seed_fixture_with_kickoff(db_session, event_key=6071, minutes_from_now=20)
+
+    def _fake_fetch(event_key: int, *, failures=None):
+        if event_key == 6070:
+            if failures is not None:
+                failures.append(event_key)
+            return None
+        return None
+
+    with patch(
+        "backend.src.service.import_next_fixtures.fetch_odds_for_match",
+        side_effect=_fake_fetch,
+    ):
+        summary = run_closing_odds_capture_once(db_session, window_minutes=60)
+
+    assert summary["provider_errors"] == 1
+    assert summary["failed"] == 1
+    assert summary["skipped_no_odds"] == 1
+    assert summary["captured"] == 0

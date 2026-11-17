@@ -44,6 +44,7 @@ from backend.src.app.schemas.prematch_odds_snapshot import (
     SnapshotType,
     SnapshotTypeOrAuto,
 )
+from backend.src.app.services.match_lifecycle import classify_match_lifecycle
 from backend.src.entity.fixture import Fixture
 from backend.src.entity.next_fixture import NextFixture
 from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
@@ -926,6 +927,24 @@ def find_fixtures_pending_closing_capture(
     return pending
 
 
+class ClosingOddsProviderError(PrematchOddsSnapshotError):
+    """The provider call for closing odds failed (not the same as "no odds")."""
+
+
+# Lifecycles for which a fresh provider quote may still be a pre-match price.
+_CLOSING_CAPTURABLE_LIFECYCLES = frozenset({"upcoming", "postponed"})
+
+
+def closing_capture_lifecycle(row: NextFixture) -> str:
+    """Stored lifecycle of a fixture, from what the DB already knows (no API call)."""
+    return classify_match_lifecycle(
+        event_status=row.event_status,
+        event_winner=row.event_winner,
+        event_live=row.event_live,
+        is_completed=row.is_completed,
+    )
+
+
 def capture_closing_odds_for_fixture(
     db: Session,
     *,
@@ -935,9 +954,11 @@ def capture_closing_odds_for_fixture(
     """Fetch fresh odds from the provider and append ``closing`` snapshot rows.
 
     Intended only for the dedicated pre-kickoff job (fixture must already be
-    inside its capture window). Returns ``None`` (never raises) when the
-    fixture is missing or the provider returns no odds, so one bad fixture
-    never blocks the rest of the batch.
+    inside its capture window). Returns ``None`` when the fixture is missing,
+    already started according to its stored state (no provider call is made:
+    a fresh quote could be in-play), or the provider returns no odds. Raises
+    ``ClosingOddsProviderError`` when the provider call itself failed, so the
+    batch counts it as a failure instead of "no odds"; the batch isolates it.
     """
     # Local import: import_next_fixtures imports this module at module scope,
     # so a top-level import here would be circular.
@@ -946,7 +967,15 @@ def capture_closing_odds_for_fixture(
     row = db.scalar(select(NextFixture).where(NextFixture.event_key == event_key))
     if row is None:
         return None
-    odds = fetch_odds_for_match(event_key)
+    if closing_capture_lifecycle(row) not in _CLOSING_CAPTURABLE_LIFECYCLES:
+        return None
+    failures: list[int] = []
+    odds = fetch_odds_for_match(event_key, failures=failures)
+    if failures:
+        raise ClosingOddsProviderError(
+            f"Provider odds request failed for event_key={event_key}.",
+            status_code=502,
+        )
     if not odds:
         return None
     return record_odds_payload(
@@ -958,7 +987,10 @@ def capture_closing_odds_for_fixture(
             snapshot_type="closing",
             player_1_name=row.event_first_player,
             player_2_name=row.event_second_player,
-            event_live=None,
+            # Stored live flag (refreshed by the live poll when enabled): when
+            # set, record_odds_payload seals the last pre-match quote instead of
+            # writing the fresh one.
+            event_live=row.event_live,
         ),
         commit=commit,
     )
@@ -982,12 +1014,37 @@ def run_closing_odds_capture_once(
         "captured": 0,
         "inserted_rows": 0,
         "skipped_no_odds": 0,
+        # Already started/finished per stored state: skipped without API call.
+        "skipped_match_started": 0,
+        # Provider call failed (also counted in ``failed``).
+        "provider_errors": 0,
         "failed": 0,
         "event_keys": [event_key for event_key, _kickoff in pending],
     }
+    rows_by_key: dict[int, NextFixture] = {}
+    if pending:
+        rows_by_key = {
+            row.event_key: row
+            for row in db.scalars(
+                select(NextFixture).where(
+                    NextFixture.event_key.in_([event_key for event_key, _kickoff in pending])
+                )
+            ).all()
+        }
     for event_key, _kickoff in pending:
+        row = rows_by_key.get(event_key)
+        if row is not None and (
+            closing_capture_lifecycle(row) not in _CLOSING_CAPTURABLE_LIFECYCLES
+        ):
+            summary["skipped_match_started"] += 1
+            continue
         try:
             result = capture_closing_odds_for_fixture(db, event_key=event_key, commit=commit)
+        except ClosingOddsProviderError as exc:
+            logger.warning("Closing odds capture provider error: %s", exc.message)
+            summary["provider_errors"] += 1
+            summary["failed"] += 1
+            continue
         except Exception:
             logger.exception(
                 "Closing odds capture failed event_key=%s",

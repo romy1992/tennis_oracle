@@ -118,12 +118,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         logger.info(
             "closing_odds_capture window_minutes=%s candidates=%s captured=%s "
-            "inserted_rows=%s skipped_no_odds=%s failed=%s",
+            "inserted_rows=%s skipped_no_odds=%s skipped_match_started=%s "
+            "provider_errors=%s failed=%s",
             summary["window_minutes"],
             summary["candidates"],
             summary["captured"],
             summary["inserted_rows"],
             summary["skipped_no_odds"],
+            summary.get("skipped_match_started", 0),
+            summary.get("provider_errors", 0),
             summary["failed"],
         )
 
