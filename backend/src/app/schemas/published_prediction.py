@@ -101,6 +101,13 @@ class PublishedPredictionRead(BaseModel):
     closing_basis: str | None = None
     closing_bookmaker_count: int | None = None
     closing_captured_at: datetime | None = None
+    # (odds * no_vig_closing_prob - 1) * 100: return of the taken price at the
+    # closing fair probability.
+    clv_no_vig_pct: float | None = None
+    # Why clv_pct is missing: no_published_odds | awaiting_closing |
+    # closing_after_kickoff | closing_before_publication |
+    # selection_not_in_closing | no_closing_snapshot.
+    clv_missing_reason: str | None = None
     unit_stake: float
     published_at: datetime
     publication_source: str
@@ -216,3 +223,53 @@ class PublishedLiveStatsSummary(BaseModel):
     by_edge: list[PublishedLiveStatsBucket]
     by_surface: list[PublishedLiveStatsBucket]
     by_period: list[PublishedLiveStatsBucket]
+
+
+class PublishedClvBucket(BaseModel):
+    """CLV of one group of published tips (market / decision / market×decision)."""
+
+    key: str
+    label: str
+    predictions_total: int
+    clv_count: int = 0
+    clv_missing: int = 0
+    clv_coverage_pct: float | None = None
+    # Tips whose CLV can already be expected: excludes those still awaiting the
+    # pre-kickoff closing window and those published without odds.
+    clv_eligible: int = 0
+    clv_coverage_eligible_pct: float | None = None
+    clv_avg_pct: float | None = None
+    clv_median_pct: float | None = None
+    clv_positive_count: int = 0
+    clv_positive_pct: float | None = None
+    clv_no_vig_count: int = 0
+    clv_no_vig_avg_pct: float | None = None
+    clv_no_vig_median_pct: float | None = None
+    clv_no_vig_positive_pct: float | None = None
+    closing_basis_counts: dict[str, int] = Field(default_factory=dict)
+    missing_reasons: dict[str, int] = Field(default_factory=dict)
+
+
+class PublishedClvSummary(BaseModel):
+    """Read-only CLV report of the published ledger, by market and by decision."""
+
+    source: Literal["published_prediction"] = "published_prediction"
+    clv_formula: str
+    clv_no_vig_formula: str
+    closing_rules: list[str]
+    latest_only: bool
+    from_date: date | None = None
+    to_date: date | None = None
+    event_date_from: date | None = None
+    event_date_to: date | None = None
+    model_version: str | None = None
+    model_name: str | None = None
+    publication_source: str | None = None
+    market: PredictionMarket | None = None
+    include_archived: bool = True
+    official_only: bool = False
+
+    overall: PublishedClvBucket
+    by_market: list[PublishedClvBucket]
+    by_decision: list[PublishedClvBucket]
+    by_market_decision: list[PublishedClvBucket]

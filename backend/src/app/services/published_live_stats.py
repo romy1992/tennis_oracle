@@ -131,6 +131,23 @@ CLOSING_BASIS_SAME_BOOKMAKER = "same_bookmaker"
 CLOSING_BASIS_CONSENSUS = "consensus_avg"
 CONSENSUS_CLOSING_BOOKMAKER = "consensus_avg"
 
+# Why a tip has no CLV (``clv_missing_reason``), in evaluation order.
+CLV_MISSING_NO_PUBLISHED_ODDS = "no_published_odds"
+CLV_MISSING_AWAITING_CLOSING = "awaiting_closing"
+CLV_MISSING_CLOSING_AFTER_KICKOFF = "closing_after_kickoff"
+CLV_MISSING_CLOSING_BEFORE_PUBLICATION = "closing_before_publication"
+CLV_MISSING_SELECTION_NOT_IN_CLOSING = "selection_not_in_closing"
+CLV_MISSING_NO_CLOSING_SNAPSHOT = "no_closing_snapshot"
+CLV_MISSING_REASONS: tuple[str, ...] = (
+    CLV_MISSING_NO_PUBLISHED_ODDS,
+    CLV_MISSING_AWAITING_CLOSING,
+    CLV_MISSING_CLOSING_AFTER_KICKOFF,
+    CLV_MISSING_CLOSING_BEFORE_PUBLICATION,
+    CLV_MISSING_SELECTION_NOT_IN_CLOSING,
+    CLV_MISSING_NO_CLOSING_SNAPSHOT,
+)
+_PRE_MATCH_LIFECYCLES = frozenset({"upcoming", "postponed"})
+
 
 @dataclass(frozen=True)
 class _TipClv:
@@ -145,6 +162,10 @@ class _TipClv:
     closing_basis: str | None = None
     closing_bookmaker_count: int | None = None
     closing_captured_at: datetime | None = None
+    # No-vig CLV: expected return of the taken price at the closing fair
+    # probability, (odds_taken * p_no_vig_closing - 1) * 100.
+    clv_no_vig_pct: float | None = None
+    missing_reason: str | None = None
 
 
 def _normalize_name(value: str | None) -> str:
@@ -574,6 +595,8 @@ def settled_tip_to_read(item: _SettledTip, *, is_latest: bool) -> PublishedSettl
         closing_basis=item.clv.closing_basis,
         closing_bookmaker_count=item.clv.closing_bookmaker_count,
         closing_captured_at=item.clv.closing_captured_at,
+        clv_no_vig_pct=round_metric(item.clv.clv_no_vig_pct, 4),
+        clv_missing_reason=item.clv.missing_reason,
         unit_stake=tip.unit_stake,
         published_at=tip.published_at,
         publication_source=tip.publication_source,
@@ -750,11 +773,12 @@ def _resolve_clv(
         and row.market_line == market_line
     ]
     publication_rows = [row for row in same_selection if row.snapshot_type == "publication"]
+    kickoff_utc = context.kickoff_utc or _scheduled_kickoff_utc(tip.event_date, tip.event_time)
+    raw_closing_rows = [row for row in same_selection if row.snapshot_type == "closing"]
     closing_rows = _valid_closing_rows(
-        [row for row in same_selection if row.snapshot_type == "closing"],
+        raw_closing_rows,
         published_at=tip.published_at,
-        kickoff_utc=context.kickoff_utc
-        or _scheduled_kickoff_utc(tip.event_date, tip.event_time),
+        kickoff_utc=kickoff_utc,
     )
 
     publication_row: PrematchOddsSnapshot | None = None
@@ -854,6 +878,21 @@ def _resolve_clv(
     if no_vig_publication is not None and no_vig_closing is not None:
         clv_prob_delta_pct = (no_vig_closing - no_vig_publication) * 100.0
 
+    clv_no_vig_pct = None
+    if publication_odds is not None and no_vig_closing is not None:
+        clv_no_vig_pct = (publication_odds * no_vig_closing - 1.0) * 100.0
+
+    missing_reason = None
+    if clv_pct is None:
+        missing_reason = _clv_missing_reason(
+            tip,
+            context,
+            publication_odds=publication_odds,
+            raw_closing_rows=raw_closing_rows,
+            kickoff_utc=kickoff_utc,
+            event_snapshots=event_snapshots,
+        )
+
     return _TipClv(
         publication_odds=publication_odds,
         publication_bookmaker=publication_bookmaker,
@@ -866,7 +905,42 @@ def _resolve_clv(
         closing_basis=closing_basis,
         closing_bookmaker_count=closing_bookmaker_count,
         closing_captured_at=closing_captured_at,
+        clv_no_vig_pct=clv_no_vig_pct,
+        missing_reason=missing_reason,
     )
+
+
+def _clv_missing_reason(
+    tip: PublishedPrediction,
+    context: _MatchContext,
+    *,
+    publication_odds: float | None,
+    raw_closing_rows: list[PrematchOddsSnapshot],
+    kickoff_utc: datetime | None,
+    event_snapshots: list[PrematchOddsSnapshot],
+) -> str:
+    """First applicable reason (see ``CLV_MISSING_REASONS``) for a tip without CLV."""
+    if publication_odds is None:
+        return CLV_MISSING_NO_PUBLISHED_ODDS
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if context.lifecycle in _PRE_MATCH_LIFECYCLES and (
+        kickoff_utc is None or now < kickoff_utc
+    ):
+        # The pre-kickoff capture window has not closed yet.
+        return CLV_MISSING_AWAITING_CLOSING
+    if raw_closing_rows:
+        latest = max(_as_utc_naive(row.captured_at) for row in raw_closing_rows)
+        if kickoff_utc is not None and latest > kickoff_utc:
+            return CLV_MISSING_CLOSING_AFTER_KICKOFF
+        return CLV_MISSING_CLOSING_BEFORE_PUBLICATION
+    if any(
+        row.snapshot_type == "closing" and row.market == tip.market
+        for row in event_snapshots
+    ):
+        # Closing exists for this market but not for this exact selection/line
+        # (e.g. player-name mismatch or a different O/U line).
+        return CLV_MISSING_SELECTION_NOT_IN_CLOSING
+    return CLV_MISSING_NO_CLOSING_SNAPSHOT
 
 
 def _counterpart_selection(

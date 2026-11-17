@@ -8,6 +8,7 @@ from backend.src.app.db.session import get_db
 from backend.src.app.schemas.published_prediction import (
     InitialStatus,
     PredictionMarket,
+    PublishedClvSummary,
     PublishedLiveStatsSummary,
     PublishedPredictionCorrection,
     PublishedPredictionCreate,
@@ -15,6 +16,7 @@ from backend.src.app.schemas.published_prediction import (
     PublishedPredictionRead,
     PublishedPredictionVersionChainResponse,
 )
+from backend.src.app.services.published_clv_summary import compute_published_clv_summary
 from backend.src.app.services.published_live_stats import compute_published_live_stats
 from backend.src.app.services.published_predictions import (
     PublishedPredictionError,
@@ -119,6 +121,49 @@ def read_published_live_stats(
     """Live tipbook KPIs from the immutable published ledger only."""
     try:
         return compute_published_live_stats(
+            db,
+            from_date=from_date,
+            to_date=to_date,
+            event_date_from=event_date_from,
+            event_date_to=event_date_to,
+            model_version=model_version,
+            model_name=model_name,
+            publication_source=publication_source,
+            tournament_name=tournament_name,
+            surface=surface,
+            odds_band=odds_band,
+            latest_only=latest_only,
+            market=market,
+            include_archived=include_archived,
+            official_only=official_only,
+            initial_status=initial_status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/clv-summary", response_model=PublishedClvSummary)
+def read_published_clv_summary(
+    from_date: date | None = Query(default=None, alias="from"),
+    to_date: date | None = Query(default=None, alias="to"),
+    event_date_from: date | None = Query(default=None),
+    event_date_to: date | None = Query(default=None),
+    model_version: str | None = Query(default=None),
+    model_name: str | None = Query(default=None),
+    publication_source: str | None = Query(default=None),
+    tournament_name: str | None = Query(default=None),
+    surface: str | None = Query(default=None),
+    odds_band: str | None = Query(default=None),
+    latest_only: bool = Query(default=True),
+    market: PredictionMarket | None = Query(default=None),
+    include_archived: bool = Query(default=True),
+    official_only: bool = Query(default=False),
+    initial_status: InitialStatus | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> PublishedClvSummary:
+    """Read-only CLV report (closing line value) by market and value_decision."""
+    try:
+        return compute_published_clv_summary(
             db,
             from_date=from_date,
             to_date=to_date,
