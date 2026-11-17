@@ -133,6 +133,36 @@ class TestProductionArtifactServing:
         assert "missing_feature_policy:zero" in result["warnings"]
         assert 0.0 < result["prob_player_1_win"] < 1.0
 
+    def test_shipped_default_is_the_legacy_policy(self):
+        from backend.src.app.core.config import Settings
+
+        assert Settings.model_fields["match_winner_missing_feature_policy"].default == MISSING_FEATURE_POLICY_ZERO
+
+    def test_default_policy_probability_is_exactly_the_legacy_integer_zero_fill(self, policy):
+        """Production guard: by default the model is fed exactly what main feeds it."""
+        result = self._predict()
+
+        artifact = module._load_model_artifact("v4", "voting_ensemble")
+        fixture = _fixture()
+        row, _warnings, _available = _builder(8).build_feature_row(
+            event_key=fixture.event_key,
+            match_date=fixture.event_date,
+            surface=fixture.surface,
+            player_1_id=fixture.first_player_key,
+            player_2_id=fixture.second_player_key,
+            model_version="v4",
+            odds=fixture.odds,
+        )
+        cleaned = module._clean_features(row, "v4")
+        missing = [column for column in artifact["feature_columns"] if column not in cleaned.columns]
+        assert set(missing) == set(ENRICHMENT_COLUMNS)
+        for column in missing:  # the loop predict_fixture ran before the policy existed
+            cleaned[column] = 0
+        expected = float(artifact["pipeline"].predict_proba(cleaned[artifact["feature_columns"]])[0][1])
+
+        assert result["prob_player_1_win"] == expected
+        assert result["predicted_winner"] == ("First Player" if expected >= 0.5 else "Second Player")
+
     def test_impute_policy_uses_training_time_imputers(self, policy):
         legacy = self._predict()
         policy(MISSING_FEATURE_POLICY_IMPUTE)
