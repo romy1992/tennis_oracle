@@ -341,6 +341,39 @@ class TestSharedStateAcrossThreads:
             t.join()
         assert len({id(b) for b in seen}) == 1
 
+    def test_concurrent_failing_calls_open_the_breaker_once_and_stay_typed(self, client, monkeypatch):
+        import threading
+
+        mock_requests, _ = client
+        monkeypatch.setenv("API_TENNIS_CIRCUIT_FAILURE_THRESHOLD", "5")
+        mock_requests.get.side_effect = requests_exc.ConnectionError()
+        opened_before = _counter(module.METRIC_BREAKER_TRANSITIONS, state="open")
+        workers = 16
+        barrier = threading.Barrier(workers)
+        raised: list[BaseException] = []
+
+        def worker():
+            barrier.wait()
+            try:
+                module.request_api(method="get_odds")
+            except BaseException as exc:  # noqa: BLE001 - the test inspects every outcome
+                raised.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(raised) == workers
+        assert all(isinstance(exc, ApiTennisNetworkError) for exc in raised)
+        assert module.circuit_breaker_state() == STATE_OPEN
+        assert _counter(module.METRIC_BREAKER_TRANSITIONS, state="open") == opened_before + 1
+        # Every thread may have one attempt in flight when the breaker opens, never more.
+        assert 5 <= mock_requests.get.call_count <= 5 + workers
+        with pytest.raises(ApiTennisCircuitOpenError):
+            module.request_api(method="get_odds")
+
     def test_half_open_admits_a_single_probe_under_concurrency(self):
         import threading
 
