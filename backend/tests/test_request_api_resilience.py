@@ -6,6 +6,8 @@ drive ``requests.get`` themselves (always mocked here, never real HTTP).
 
 from __future__ import annotations
 
+import logging
+import traceback
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -359,3 +361,59 @@ class TestSharedStateAcrossThreads:
         for t in threads:
             t.join()
         assert results.count(True) == 1
+
+
+# Shape of the real urllib3/requests message: it embeds the request URL, query string included.
+_TRANSPORT_MESSAGE = (
+    "HTTPSConnectionPool(host='api.example', port=443): Max retries exceeded with url: "
+    "/tennis/?match_key=1&APIkey=fake-key-not-real&method=get_fixtures "
+    "(Caused by NewConnectionError('Failed to establish a new connection'))"
+)
+
+
+class TestNoCredentialInErrors:
+    @pytest.mark.parametrize(
+        ("raised", "expected"),
+        [
+            (requests_exc.ConnectionError, ApiTennisNetworkError),
+            (requests_exc.ConnectTimeout, ApiTennisTimeoutError),
+            (requests_exc.RequestException, ApiTennisNetworkError),
+        ],
+    )
+    def test_traceback_and_cause_never_contain_the_api_key(self, client, monkeypatch, caplog, raised, expected):
+        mock_requests, _ = client
+        monkeypatch.setenv("API_TENNIS_MAX_RETRIES", "0")
+        mock_requests.get.side_effect = raised(_TRANSPORT_MESSAGE)
+
+        with caplog.at_level(logging.DEBUG), pytest.raises(expected) as ctx:
+            try:
+                module.request_api(method="get_fixtures", params={"match_key": 1})
+            except module.ApiTennisError:
+                logging.getLogger("job").exception("job failed")  # what callers do
+                raise
+
+        rendered = "".join(traceback.format_exception(ctx.value))
+        assert "fake-key-not-real" not in rendered
+        assert "fake-key-not-real" not in caplog.text
+        assert all("fake-key-not-real" not in (record.exc_text or "") for record in caplog.records)
+        cause = ctx.value.__cause__
+        assert isinstance(cause, module.ApiTennisTransportCause)
+        assert not isinstance(cause, requests_exc.RequestException)  # no request object kept alive
+        assert raised.__name__ in str(cause) and "APIkey=***" in str(cause)
+
+    def test_retried_then_exhausted_error_is_also_clean(self, client):
+        mock_requests, _ = client
+        mock_requests.get.side_effect = requests_exc.ConnectionError(_TRANSPORT_MESSAGE)
+        with pytest.raises(ApiTennisNetworkError) as ctx:
+            module.request_api(method="get_fixtures")
+        assert mock_requests.get.call_count == 3
+        assert "fake-key-not-real" not in "".join(traceback.format_exception(ctx.value))
+
+    def test_safe_cause_redacts_url_encoded_and_unlabelled_key(self):
+        key = "k+e/y=1 2"
+        message = "bad url /tennis/?APIkey=k%2Be%2Fy%3D1+2&method=x and again k%2Be%2Fy%3D1%202 or raw k+e/y=1 2"
+        cause = module._safe_cause(requests_exc.InvalidURL(message), key)
+        text = str(cause)
+        assert text.startswith("InvalidURL: ")
+        for leaked in ("k%2Be%2Fy%3D1+2", "k%2Be%2Fy%3D1%202", "k+e/y=1 2"):
+            assert leaked not in text

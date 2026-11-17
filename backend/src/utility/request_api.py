@@ -7,6 +7,7 @@ import os
 import threading
 import time
 from typing import Any
+from urllib.parse import quote, quote_plus
 
 import requests
 from requests import exceptions as requests_exc
@@ -22,6 +23,7 @@ from backend.src.utility.resilience import (
     backoff_delay,
 )
 from backend.src.utility.sensitive_data import (
+    REDACTED,
     sanitize_payload,
     sanitize_text,
     sanitize_url,
@@ -96,6 +98,27 @@ class ApiTennisHttpError(ApiTennisError):
 
 class ApiTennisInvalidResponseError(ApiTennisError):
     """Response body is not valid JSON or has an unexpected shape."""
+
+
+class ApiTennisTransportCause(Exception):
+    """Credential-free stand-in chained as ``__cause__`` of transport failures.
+
+    requests/urllib3 embed the full request URL (query string included, hence
+    the APIkey) in their exception messages and keep the request object alive.
+    Chaining the original exception would print the key in every traceback
+    (``logger.exception``, unhandled errors), so only its type name and a
+    redacted message are kept.
+    """
+
+
+def _safe_cause(exc: BaseException, api_key: Any = None) -> ApiTennisTransportCause:
+    text = str(exc)
+    secret = str(api_key) if api_key else ""
+    if secret:
+        # Literal value first (raw and URL-encoded), then pattern-based redaction.
+        for variant in {secret, quote(secret, safe=""), quote_plus(secret)}:
+            text = text.replace(variant, REDACTED)
+    return ApiTennisTransportCause(f"{type(exc).__name__}: {sanitize_text(text, max_length=300)}")
 
 
 def _timeout_seconds() -> float:
@@ -205,6 +228,7 @@ def _http_get_with_resilience(method: str, request_params: dict[str, Any], timeo
     backoff_base = _env_number("API_TENNIS_RETRY_BACKOFF_SECONDS", DEFAULT_RETRY_BACKOFF_SECONDS)
     backoff_max = _env_number("API_TENNIS_RETRY_BACKOFF_MAX_SECONDS", DEFAULT_RETRY_BACKOFF_MAX_SECONDS)
     budget = _env_number("API_TENNIS_RETRY_BUDGET_SECONDS", 2.0 * timeout)
+    api_key = request_params.get("APIkey")
     call_started = time.monotonic()
     labels_method = method or ""
     attempt = 0
@@ -233,17 +257,17 @@ def _http_get_with_resilience(method: str, request_params: dict[str, Any], timeo
         except requests_exc.Timeout as exc:
             logger.error("API Tennis timeout method=%s timeout_s=%s", method, timeout)
             failure = ApiTennisTimeoutError(f"API Tennis timeout after {timeout}s (method={method})")
-            failure.__cause__ = exc
+            failure.__cause__ = _safe_cause(exc, api_key)
             outcome = "timeout"
         except requests_exc.ConnectionError as exc:
             logger.error("API Tennis network error method=%s", method)
             failure = ApiTennisNetworkError(f"API Tennis network error (method={method})")
-            failure.__cause__ = exc
+            failure.__cause__ = _safe_cause(exc, api_key)
             outcome = "network"
         except requests_exc.RequestException as exc:
             logger.error("API Tennis request failed method=%s", method)
             failure = ApiTennisNetworkError(f"API Tennis request failed (method={method})")
-            failure.__cause__ = exc
+            failure.__cause__ = _safe_cause(exc, api_key)
             outcome = "network"
         except BaseException:
             breaker.release_probe()
