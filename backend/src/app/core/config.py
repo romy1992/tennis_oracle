@@ -161,6 +161,24 @@ class Settings(BaseSettings):
     public_model_version: str | None = None
     public_model_name: str | None = None
 
+    # How match-winner inference fills feature columns that are not available at
+    # serving time (ATP enrichment: age, height, hand, tourney level, ...).
+    #   zero   = legacy behaviour: integer 0 in every missing column.
+    #   impute = declare them missing (NaN) so the imputers fitted at training
+    #            time apply (median / "unknown"), i.e. what the model saw for
+    #            unmatched rows during training.
+    # Changing it changes live probabilities: see
+    # docs/platform-audit/IMPLEMENTATION_LOG.md before enabling "impute".
+    match_winner_missing_feature_policy: str = "zero"
+
+    # ``prediction.data_quality`` on GET /api/next-fixtures/predictions: also
+    # evaluate each player's match history when the page is read (reasons
+    # player_N_no_history / player_N_low_history). It costs one aggregate query
+    # per page on ``fixture``, which has no index on the player keys: its
+    # latency on the production database was not measured, hence opt-in.
+    # When off, "player_history" is listed under data_quality.not_evaluated.
+    prediction_data_quality_history_enabled: bool = False
+
     # Dedicated pre-kickoff closing-odds capture (job run_closing_odds_capture).
     # Disabled by default: opt-in once a frequent cron (every 1-5 min) is configured.
     # See docs/SCHEDULING.md#closing-odds-pre-kickoff-job.

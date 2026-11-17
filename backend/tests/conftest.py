@@ -26,6 +26,8 @@ _TEST_ENV = {
     "DATABASE_TARGET_URL": "sqlite://",
     "API_TENNIS_KEY": "test-api-tennis-key-not-real",
     "API_TENNIS_BASE": "https://example.test/tennis/",
+    # Retries stay enabled (default count) but never wait in tests.
+    "API_TENNIS_RETRY_BACKOFF_SECONDS": "0",
     "RUNTIME_SECRETS_MASTER_KEY": "",
     "TELEGRAM_BOT_TOKEN": "",
     "TELEGRAM_SERVICE_API_KEY": "",
@@ -137,6 +139,16 @@ def import_state_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _isolate_import_state(import_state_path: Path) -> Path:
     """Always isolate import_state.json for every test."""
     return import_state_path
+
+
+@pytest.fixture(autouse=True)
+def _reset_api_tennis_circuit_breaker() -> Generator[None, None, None]:
+    """The breaker is process-wide: never let one test's failures trip another."""
+    from backend.src.utility import request_api
+
+    request_api.reset_circuit_breaker()
+    yield
+    request_api.reset_circuit_breaker()
 
 
 @pytest.fixture(autouse=True)
