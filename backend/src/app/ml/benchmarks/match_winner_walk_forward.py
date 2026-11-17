@@ -142,6 +142,33 @@ BENCH_ELO_FEATURES = ["bm_elo_diff", "bm_surface_elo_diff", "bm_dyn_elo_diff", "
 SERVING_ZERO_CATEGORY = "0"
 
 
+LEAKAGE_CONTROLS = [
+    "Folds are chronological: a model is fitted only on rows dated before the first day of its test quarter.",
+    "Imputers, scalers and encoders are part of the fitted pipeline (train rows only).",
+    "Elo variants and prior-match counts are recomputed here in date order; every row of a calendar "
+    "date is read before any result of that date is applied (the rating is updated after the prediction).",
+    "Dataset form / head-to-head / ranking columns are pre-match by construction "
+    "(dataset_builder applies the same same-day batching; ranking snapshot dated on or before the match).",
+    "Dynamic-Elo hyper-parameters are selected on the 730 days that precede the first test fold.",
+    "The inferred-circuit label uses only earlier-dated matches.",
+    "Post-match columns (atp_score, atp_minutes, profit / edge columns) are never features.",
+]
+ODDS_PROVENANCE = (
+    "avg_* odds columns are the bookmaker average of the snapshot stored on fixture.odds. The dataset has "
+    "no capture timestamp: historical fixtures get their odds from get_odds calls made on or after the match "
+    "day (service/import_fixtures.py), so they are presumably the last pre-match quote (closing) but this "
+    "cannot be verified offline. At serving time the "
+    "model reads the snapshot available when the prediction is generated (hours or days before the match): "
+    "market-based contenders are therefore likely better informed here than they would be in production."
+)
+ENRICHMENT_COVERAGE_NOTE = (
+    "ATP enrichment (age, height, hand, tourney level, round, best_of, match_found) exists only where a row "
+    "was matched to the Sackmann files (see folds[].test_enrichment_matched_share). In a fold where the share "
+    "is 0 the 'true features' are missing values handled by the fitted imputers, not real player data: there "
+    "the train/serve comparison measures 'declared missing' against 'filled with 0'."
+)
+
+
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
@@ -425,20 +452,36 @@ def valid_odds_mask(dataframe: pd.DataFrame) -> pd.Series:
 
 
 def infer_tour(dataframe: pd.DataFrame) -> pd.Series:
-    """Heuristic circuit label (the dataset has no tour column).
+    """Heuristic circuit label (the dataset has no tour column), as of each match date.
 
-    A player is "known men's circuit" when at least one of his matches was
-    matched to the Sackmann ATP files (``player_*_atp_id`` present).
+    A player is "known men's circuit" from the day after his first match that
+    was matched to the Sackmann ATP files (``player_*_atp_id`` present). Only
+    rows of earlier dates are used, so the label of a row (and therefore the
+    per-circuit contender and the ``tour_inferred`` segment) never depends on
+    later matches.
     - ``men_matched``: both players known.
     - ``men_partial``: exactly one player known.
-    - ``not_matched``: neither player ever matched (women's circuit and
-      unmatched lower-level events; cannot be separated with this dataset).
+    - ``not_matched``: neither player matched so far (women's circuit,
+      unmatched lower-level events and players not seen yet; cannot be
+      separated with this dataset).
     """
-    known = set(dataframe.loc[dataframe["player_1_atp_id"].notna(), "player_1_id"]) | set(
-        dataframe.loc[dataframe["player_2_atp_id"].notna(), "player_2_id"]
+    dates = pd.to_datetime(dataframe["match_date"])
+    matched = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "player": dataframe.loc[dataframe[f"player_{side}_atp_id"].notna(), f"player_{side}_id"],
+                    "match_date": dates[dataframe[f"player_{side}_atp_id"].notna()],
+                }
+            )
+            for side in ("1", "2")
+        ]
     )
-    count = dataframe["player_1_id"].isin(known).astype(int) + dataframe["player_2_id"].isin(known).astype(int)
-    return count.map({2: "men_matched", 1: "men_partial", 0: "not_matched"}).astype(object)
+    first_matched = matched.groupby("player")["match_date"].min()
+    # NaT (never matched) compares False: the player is not known.
+    known_1 = (dataframe["player_1_id"].map(first_matched) < dates).astype(int)
+    known_2 = (dataframe["player_2_id"].map(first_matched) < dates).astype(int)
+    return (known_1 + known_2).map({2: "men_matched", 1: "men_partial", 0: "not_matched"}).astype(object)
 
 
 def build_folds(odds_dates: pd.Series, *, min_train_rows: int, min_test_rows: int) -> list[dict[str, Any]]:
@@ -714,6 +757,8 @@ def run_benchmark(
                 "train_rows_history_2021plus": int(len(train_history)),
                 "train_end": train_odds["match_date"].max().date().isoformat(),
                 "test_rows": int(len(test)),
+                "train_enrichment_matched_share": round(float(train_odds["atp_match_found"].mean()), 4),
+                "test_enrichment_matched_share": round(float(test["atp_match_found"].mean()), 4),
             }
         )
 
@@ -846,6 +891,8 @@ def run_benchmark(
     def skew_delta(candidate: str, reference: str) -> dict[str, Any]:
         ll_c = log_loss_rows(y, stacked[candidate])
         ll_r = log_loss_rows(y, stacked[reference])
+        correct_c = ((stacked[candidate] >= 0.5).astype(float) == y).astype(float)
+        correct_r = ((stacked[reference] >= 0.5).astype(float) == y).astype(float)
         per_fold = {
             fold["name"]: round(float((ll_c - ll_r)[fold_labels == fold["name"]].mean()), 5) for fold in folds
         }
@@ -856,6 +903,12 @@ def run_benchmark(
             "brier": paired_bootstrap_delta(
                 brier_rows(y, stacked[candidate]), brier_rows(y, stacked[reference]), n_resamples=bootstrap_resamples
             ),
+            "accuracy": {
+                "candidate": round(float(correct_c.mean()), 4),
+                "reference": round(float(correct_r.mean()), 4),
+                # candidate - reference: here a NEGATIVE delta means the candidate is worse.
+                **paired_bootstrap_delta(correct_c, correct_r, n_resamples=bootstrap_resamples),
+            },
             "log_loss_delta_per_fold": per_fold,
             "folds_candidate_worse": int(sum(v > 0 for v in per_fold.values())),
             "mean_abs_probability_shift": round(float(np.abs(stacked[candidate] - stacked[reference]).mean()), 5),
@@ -868,7 +921,8 @@ def run_benchmark(
     reference = "v4_like__true_features"
     train_serve_skew = {
         "note": (
-            "Positive deltas mean the candidate is worse than the reference. "
+            "Log loss / Brier: positive deltas mean the candidate is worse than the reference. "
+            "Accuracy: candidate minus reference, so negative means worse. "
             "All variants are scored out-of-sample on the same test rows."
         ),
         "comparisons": [
@@ -921,6 +975,9 @@ def run_benchmark(
             "min_test_rows": min_test_rows,
             "same_day_batching": True,
             "post_match_columns_excluded": sorted(POST_MATCH_COLUMNS),
+            "leakage_controls": LEAKAGE_CONTROLS,
+            "odds_provenance": ODDS_PROVENANCE,
+            "enrichment_coverage_note": ENRICHMENT_COVERAGE_NOTE,
             "bootstrap_resamples": bootstrap_resamples,
             "tour_inference": infer_tour.__doc__,
             "feature_sets": {
