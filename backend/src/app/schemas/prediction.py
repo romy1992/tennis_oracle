@@ -55,7 +55,10 @@ class MatchPredictionRead(BaseModel):
     # Additive. Evidence behind the prediction as it can be verified when the
     # response is built: {"status": sufficient|limited|insufficient, "reasons",
     # "systemic_gaps", "details", "evaluated", "not_evaluated"}. Inputs listed
-    # in "not_evaluated" were neither checked nor assumed.
+    # in "not_evaluated" were neither checked nor assumed. Set only for
+    # upcoming fixtures; ``systemic_gaps`` reports the ATP enrichment columns
+    # serving cannot build (details.unavailable_feature_columns); player
+    # history is evaluated only with PREDICTION_DATA_QUALITY_HISTORY_ENABLED.
     data_quality: dict | None = None
 
 

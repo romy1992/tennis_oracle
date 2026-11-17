@@ -226,6 +226,7 @@ Variabili importanti in `backend/.env` / `backend/properties/config.env`:
 - `API_TENNIS_RETRY_BUDGET_SECONDS` — tempo massimo complessivo di una chiamata, tentativi e attese inclusi (opzionale, default 2 × `API_TENNIS_TIMEOUT`); un nuovo tentativo viene saltato se potrebbe superarlo
 - `API_TENNIS_CIRCUIT_FAILURE_THRESHOLD`, `API_TENNIS_CIRCUIT_RECOVERY_SECONDS` — circuit breaker verso API tennis (opzionali, default 5 / 60; soglia 0 = disattivato)
 - `MATCH_WINNER_MISSING_FEATURE_POLICY` — `zero` (default, comportamento storico) oppure `impute`; vedi `docs/platform-audit/IMPLEMENTATION_LOG.md`
+- `PREDICTION_DATA_QUALITY_HISTORY_ENABLED` — `false` (default) / `true`: `prediction.data_quality` valuta anche lo storico dei giocatori in lettura (una query aggregata per pagina)
 - `CORS_ORIGINS` — origini frontend consentite
 - `ADMIN_JWT_SECRET` — segreto per i token di accesso della dashboard (obbligatorio per il login)
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` — usati solo alla prima creazione dell’admin se il database non ne ha ancora uno

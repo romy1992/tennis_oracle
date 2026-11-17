@@ -171,6 +171,14 @@ class Settings(BaseSettings):
     # docs/platform-audit/IMPLEMENTATION_LOG.md before enabling "impute".
     match_winner_missing_feature_policy: str = "zero"
 
+    # ``prediction.data_quality`` on GET /api/next-fixtures/predictions: also
+    # evaluate each player's match history when the page is read (reasons
+    # player_N_no_history / player_N_low_history). It costs one aggregate query
+    # per page on ``fixture``, which has no index on the player keys: its
+    # latency on the production database was not measured, hence opt-in.
+    # When off, "player_history" is listed under data_quality.not_evaluated.
+    prediction_data_quality_history_enabled: bool = False
+
     # Dedicated pre-kickoff closing-odds capture (job run_closing_odds_capture).
     # Disabled by default: opt-in once a frequent cron (every 1-5 min) is configured.
     # See docs/SCHEDULING.md#closing-odds-pre-kickoff-job.

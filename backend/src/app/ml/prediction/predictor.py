@@ -19,8 +19,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.src.app.ml.datasets.dataset_builder import (
+    DATASET_COLUMNS,
     LegacyMatchRow,
     MISSING_RANK_VALUE,
+    V2_DATASET_COLUMNS,
     PlayerHistoryItem,
     _days_since_last_match,
     _h2h_key,
@@ -125,6 +127,27 @@ def fill_missing_feature_columns(
         else:
             cleaned[column] = float("nan")
     return cleaned
+
+
+def serving_unavailable_feature_columns(model_version: str) -> list[str]:
+    """Training feature columns that serving never builds from real data.
+
+    Static mirror of ``_clean_features`` (no artifact is loaded, so it is safe
+    on read paths): the columns a model of this version may have been trained
+    on, minus the columns ``_clean_features`` keeps. ``ATP_DEFAULTS`` are set
+    on the raw row but dropped by the cleaning step, so these columns reach
+    the model only through ``fill_missing_feature_columns``. An artifact
+    trained on fewer columns can miss only a subset of them.
+    """
+    from backend.src.app.ml.training.train_baseline import allowed_feature_columns
+
+    if model_version in {"v2", "v3", "v4"}:
+        built = set(V2_DATASET_COLUMNS)
+    else:
+        built = set(DATASET_COLUMNS)
+    if model_version in {"v3", "v4"}:
+        built.update(ODDS_FEATURE_COLUMNS)
+    return [column for column in allowed_feature_columns(model_version) if column not in built]
 
 
 def _ensure_logistic_regression_compat(obj: Any) -> bool:

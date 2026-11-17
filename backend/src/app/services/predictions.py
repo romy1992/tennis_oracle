@@ -3,8 +3,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import exists, func, or_, select, union_all
 from sqlalchemy.orm import Session
+
+from backend.src.app.core.config import get_settings
 
 from backend.src.app.ml.datasets.odds_builder import (
     FixtureOddsRecord,
@@ -25,6 +27,7 @@ from backend.src.app.ml.prediction.extra_markets_predictor import (
     OVER_UNDER_GAMES_MODEL_VERSION,
 )
 from backend.src.app.ml.prediction.data_sufficiency import assess_data_sufficiency
+from backend.src.app.ml.prediction.predictor import serving_unavailable_feature_columns
 from backend.src.app.models import Fixture, MatchPrediction, NextFixture
 from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
 from backend.src.app.schemas.prediction import (
@@ -716,20 +719,111 @@ def _latest_odds_capture_by_event_key(
     return captured
 
 
+def _prior_match_counts_by_player(
+    db: Session,
+    player_keys: list[int],
+) -> dict[int, int]:
+    """Completed singles matches per player, one aggregate query.
+
+    Same rows as ``dataset_builder.load_legacy_match_rows``, i.e. the history
+    the predictor ingests (``PreMatchFeatureBuilder.prior_match_count``).
+    Players without any such match are returned with 0.
+    """
+    keys = sorted({int(key) for key in player_keys if key is not None})
+    if not keys:
+        return {}
+    completed_singles = (
+        Fixture.event_date.is_not(None),
+        Fixture.first_player_key.is_not(None),
+        Fixture.second_player_key.is_not(None),
+        Fixture.event_winner.in_(["First Player", "Second Player"]),
+        Fixture.event_final_result.is_not(None),
+        Fixture.event_final_result != "-",
+        Fixture.event_type_type.ilike("%singles%"),
+        ~Fixture.event_type_type.ilike("%doubles%"),
+        ~Fixture.event_type_type.ilike("%teams%"),
+    )
+    appearances = union_all(
+        select(Fixture.first_player_key.label("player_key")).where(
+            Fixture.first_player_key.in_(keys), *completed_singles
+        ),
+        select(Fixture.second_player_key.label("player_key")).where(
+            Fixture.second_player_key.in_(keys), *completed_singles
+        ),
+    ).subquery()
+    rows = db.execute(
+        select(appearances.c.player_key, func.count()).group_by(appearances.c.player_key)
+    ).all()
+    counts = dict.fromkeys(keys, 0)
+    for player_key, total in rows:
+        counts[int(player_key)] = int(total)
+    return counts
+
+
+def _prior_match_counts_for_fixtures(
+    db: Session,
+    fixtures: list[NextFixture],
+) -> dict[int, int] | None:
+    """Player history for a page, or ``None`` when the check is disabled (default)."""
+    if not get_settings().prediction_data_quality_history_enabled:
+        return None
+    player_keys: list[int] = []
+    for fixture in fixtures:
+        player_keys.extend(
+            key for key in (fixture.first_player_key, fixture.second_player_key) if key is not None
+        )
+    return _prior_match_counts_by_player(db, player_keys)
+
+
 def _read_time_data_quality(
     fixture: NextFixture,
     fixture_odds: MatchWinnerOddsAverage | None,
+    *,
+    model_version: str | None = None,
+    prior_match_counts: dict[int, int] | None = None,
 ) -> dict:
-    """Evidence checks that need no extra query; history/ranking are not evaluated here."""
+    """Evidence behind a stored prediction, as it can be verified when it is read.
+
+    Always evaluated (no query): surface, odds, bookmaker count and the feature
+    columns the serving pipeline cannot build for the model version (ATP
+    enrichment: reported under ``systemic_gaps``, never a downgrade).
+    Player history is evaluated only when ``prior_match_counts`` is given
+    (``prediction_data_quality_history_enabled``); ranking is never evaluated
+    here. What was not evaluated is listed, never assumed.
+    """
     surface = (fixture.surface or "").strip().lower()
     bookmaker_count = fixture_odds.odds_bookmaker_count if fixture_odds is not None else None
+    evaluated = ["surface", "odds", "bookmaker_count"]
+    not_evaluated = ["ranking"]
+
+    unavailable_columns: list[str] | None = None
+    if model_version:
+        unavailable_columns = serving_unavailable_feature_columns(model_version)
+        evaluated.append("enrichment_features")
+    else:
+        not_evaluated.append("enrichment_features")
+
+    player_1_prior = player_2_prior = None
+    if prior_match_counts is not None:
+        # A missing player key is not "no history": it stays not evaluated.
+        if fixture.first_player_key is not None:
+            player_1_prior = prior_match_counts.get(int(fixture.first_player_key), 0)
+        if fixture.second_player_key is not None:
+            player_2_prior = prior_match_counts.get(int(fixture.second_player_key), 0)
+        evaluated.append("player_history")
+    else:
+        not_evaluated.insert(0, "player_history")
+
     quality = assess_data_sufficiency(
+        player_1_prior_matches=player_1_prior,
+        player_2_prior_matches=player_2_prior,
         surface_known=bool(surface) and surface != "unknown",
         odds_available=fixture_odds is not None,
         bookmaker_count=bookmaker_count,
+        unavailable_feature_columns=unavailable_columns,
     )
-    quality["evaluated"] = ["surface", "odds", "bookmaker_count"]
-    quality["not_evaluated"] = ["player_history", "ranking"]
+    quality["evaluated"] = evaluated
+    quality["not_evaluated"] = not_evaluated
     return quality
 
 
@@ -738,6 +832,7 @@ def _wrap_upcoming_fixture(
     stored_prediction: MatchPrediction | None,
     extra_markets: list[ExtraMarketPredictionRead] | None = None,
     odds_captured_at: datetime | None = None,
+    prior_match_counts: dict[int, int] | None = None,
 ) -> NextFixtureWithPrediction:
     fixture_odds = _next_fixture_odds(fixture)
     prediction = (
@@ -745,7 +840,14 @@ def _wrap_upcoming_fixture(
     )
     if prediction is not None:
         prediction = prediction.model_copy(
-            update={"data_quality": _read_time_data_quality(fixture, fixture_odds)}
+            update={
+                "data_quality": _read_time_data_quality(
+                    fixture,
+                    fixture_odds,
+                    model_version=prediction.model_version,
+                    prior_match_counts=prior_match_counts,
+                )
+            }
         )
     final_result = (
         fixture.live_score.get("final_result")
@@ -851,12 +953,14 @@ def get_next_fixtures_with_predictions(
         odds_capture_by_key = _latest_odds_capture_by_event_key(
             db, [fixture.event_key for fixture in fixtures]
         )
+        prior_match_counts = _prior_match_counts_for_fixtures(db, fixtures)
         results = [
             _wrap_upcoming_fixture(
                 fixture,
                 prediction_by_key.get(fixture.event_key),
                 extra_by_key.get(fixture.event_key),
                 odds_capture_by_key.get(fixture.event_key),
+                prior_match_counts,
             )
             for fixture in fixtures
         ]
@@ -942,12 +1046,14 @@ def get_next_fixtures_with_predictions(
             odds_capture_by_key = _latest_odds_capture_by_event_key(
                 db, [fixture.event_key for fixture in fixtures]
             )
+            prior_match_counts = _prior_match_counts_for_fixtures(db, fixtures)
             results.extend(
                 _wrap_upcoming_fixture(
                     fixture,
                     prediction_by_key.get(fixture.event_key),
                     extra_by_key.get(fixture.event_key),
                     odds_capture_by_key.get(fixture.event_key),
+                    prior_match_counts,
                 )
                 for fixture in fixtures
             )
