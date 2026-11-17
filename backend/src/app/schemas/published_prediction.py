@@ -95,6 +95,12 @@ class PublishedPredictionRead(BaseModel):
     clv_pct: float | None = None
     clv_prob_delta_pct: float | None = None
     clv_available: bool = False
+    # How closing_odds was obtained: "same_bookmaker" (publication snapshot of a
+    # real bookmaker) or "consensus_avg" (mean of the bookmakers' quotes in the
+    # last valid pre-kickoff closing capture, for average published odds).
+    closing_basis: str | None = None
+    closing_bookmaker_count: int | None = None
+    closing_captured_at: datetime | None = None
     unit_stake: float
     published_at: datetime
     publication_source: str

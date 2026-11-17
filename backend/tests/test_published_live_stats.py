@@ -937,3 +937,139 @@ def test_clv_ignores_closing_captured_after_kickoff(db_session):
     )
     assert item.closing_odds == 1.6
     assert round(item.clv_pct or 0.0, 4) == 25.0
+
+
+def _add_single_snapshot(
+    db_session,
+    *,
+    event_key: int,
+    selection: str,
+    bookmaker: str,
+    odds: float,
+    snapshot_type: str,
+    captured_at: datetime,
+    market: str = "match_winner",
+    market_line: float | None = None,
+) -> None:
+    db_session.add(
+        PrematchOddsSnapshot(
+            event_key=event_key,
+            market=market,
+            market_line=market_line,
+            selection=selection,
+            bookmaker=bookmaker,
+            odds=odds,
+            implied_probability=1 / odds,
+            margin=0.0,
+            captured_at=captured_at,
+            source="test",
+            snapshot_type=snapshot_type,
+            detection_hash=(
+                f"{event_key}-{market}-{market_line}-{snapshot_type}-{bookmaker}-"
+                f"{selection}-{captured_at.isoformat()}"
+            ),
+        )
+    )
+    db_session.commit()
+
+
+def test_clv_average_published_odds_compared_with_closing_average(db_session):
+    """Official match-winner tips publish the cross-bookmaker AVERAGE price
+    (snapshot bookmaker = "publication" sentinel). With no line movement the CLV
+    must be 0: comparing the average with the bookmaker closest to the median
+    (old behaviour) gave a spurious +3.6% whenever one book was an outlier."""
+    event_key = 9430
+    kickoff = _kickoff_utc_of_future_fixture()
+    published_at = kickoff - timedelta(hours=6)
+    books = {"book_a": (1.80, 2.05), "book_b": (1.85, 2.00), "book_c": (2.10, 1.75)}
+    average_alice = sum(alice for alice, _bob in books.values()) / len(books)
+    _publish(
+        db_session,
+        event_key=event_key,
+        selection="Alice",
+        odds=round(average_alice, 4),
+        stake=1.0,
+        edge=5.0,
+        published_at=published_at,
+    )
+    _add_single_snapshot(
+        db_session,
+        event_key=event_key,
+        selection="Alice",
+        bookmaker="publication",
+        odds=round(average_alice, 4),
+        snapshot_type="publication",
+        captured_at=published_at,
+    )
+    closing_at = kickoff - timedelta(minutes=5)
+    for bookmaker, (alice, bob) in books.items():
+        _add_snapshot_pair(
+            db_session,
+            event_key=event_key,
+            snapshot_type="closing",
+            bookmaker=bookmaker,
+            captured_at=closing_at,
+            alice_odds=alice,
+            bob_odds=bob,
+        )
+
+    item = next(
+        row for row in list_settled_published_tips(db_session) if row.event_key == event_key
+    )
+    assert item.closing_basis == "consensus_avg"
+    assert item.closing_bookmaker == "consensus_avg"
+    assert item.closing_bookmaker_count == 3
+    assert item.closing_captured_at == closing_at
+    assert round(item.closing_odds or 0.0, 4) == round(average_alice, 4)
+    assert abs(item.clv_pct or 0.0) < 0.01
+    average_bob = sum(bob for _alice, bob in books.values()) / len(books)
+    expected_fair = (1 / average_alice) / ((1 / average_alice) + (1 / average_bob))
+    assert round(item.no_vig_closing_prob or 0.0, 6) == round(expected_fair, 6)
+
+
+def test_clv_extra_market_without_publication_snapshot_uses_closing_average(db_session):
+    """Extra markets have no publication snapshot: the published (average) odds
+    are compared with the average of the same market/line/selection at closing."""
+    event_key = 9431
+    kickoff = _kickoff_utc_of_future_fixture()
+    published_at = kickoff - timedelta(hours=6)
+    _publish(
+        db_session,
+        event_key=event_key,
+        selection="Over 20.5",
+        odds=2.0,
+        stake=1.0,
+        edge=6.0,
+        model_version=OVER_UNDER_GAMES_MODEL_VERSION,
+        model_name="random_forest",
+        published_at=published_at,
+    )
+    closing_at = kickoff - timedelta(minutes=5)
+    for bookmaker, over, under in (("book_a", 1.80, 2.00), ("book_b", 1.90, 1.90)):
+        _add_single_snapshot(
+            db_session, event_key=event_key, selection="Over 20.5", bookmaker=bookmaker,
+            odds=over, snapshot_type="closing", captured_at=closing_at,
+            market="over_under_games", market_line=20.5,
+        )
+        _add_single_snapshot(
+            db_session, event_key=event_key, selection="Under 20.5", bookmaker=bookmaker,
+            odds=under, snapshot_type="closing", captured_at=closing_at,
+            market="over_under_games", market_line=20.5,
+        )
+    # Another line of the same market must never be used.
+    _add_single_snapshot(
+        db_session, event_key=event_key, selection="Over 21.5", bookmaker="book_a",
+        odds=2.50, snapshot_type="closing", captured_at=closing_at,
+        market="over_under_games", market_line=21.5,
+    )
+
+    item = next(
+        row
+        for row in list_settled_published_tips(db_session, market="over_under_games")
+        if row.event_key == event_key
+    )
+    assert item.publication_bookmaker is None
+    assert item.closing_basis == "consensus_avg"
+    assert item.closing_bookmaker_count == 2
+    assert round(item.closing_odds or 0.0, 4) == 1.85
+    assert round(item.clv_pct or 0.0, 4) == round((2.0 / 1.85 - 1) * 100, 4)

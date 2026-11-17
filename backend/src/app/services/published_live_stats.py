@@ -119,6 +119,19 @@ class _SettledTip:
     sort_ts: datetime
 
 
+# How the closing price compared with the published one was obtained.
+# - same_bookmaker: the publication snapshot names a real bookmaker that also
+#   has a valid closing quote → that bookmaker's last valid closing quote.
+# - consensus_avg: the published odds are a cross-bookmaker average (official
+#   tips: ``average_*_odds_from_record`` at publication, stored with the
+#   "publication" sentinel bookmaker or with no publication snapshot at all) →
+#   arithmetic mean of the bookmakers' quotes in the last valid closing capture,
+#   i.e. the same averaging used for the published price.
+CLOSING_BASIS_SAME_BOOKMAKER = "same_bookmaker"
+CLOSING_BASIS_CONSENSUS = "consensus_avg"
+CONSENSUS_CLOSING_BOOKMAKER = "consensus_avg"
+
+
 @dataclass(frozen=True)
 class _TipClv:
     publication_odds: float | None = None
@@ -129,6 +142,9 @@ class _TipClv:
     no_vig_closing_prob: float | None = None
     clv_pct: float | None = None
     clv_prob_delta_pct: float | None = None
+    closing_basis: str | None = None
+    closing_bookmaker_count: int | None = None
+    closing_captured_at: datetime | None = None
 
 
 def _normalize_name(value: str | None) -> str:
@@ -555,6 +571,9 @@ def settled_tip_to_read(item: _SettledTip, *, is_latest: bool) -> PublishedSettl
         clv_pct=round_metric(item.clv.clv_pct, 4),
         clv_prob_delta_pct=round_metric(item.clv.clv_prob_delta_pct, 4),
         clv_available=item.clv.clv_pct is not None,
+        closing_basis=item.clv.closing_basis,
+        closing_bookmaker_count=item.clv.closing_bookmaker_count,
+        closing_captured_at=item.clv.closing_captured_at,
         unit_stake=tip.unit_stake,
         published_at=tip.published_at,
         publication_source=tip.publication_source,
@@ -752,6 +771,10 @@ def _resolve_clv(
     )
     publication_bookmaker = publication_row.bookmaker if publication_row is not None else None
 
+    counterpart_selection = _counterpart_selection(tip, context, market_line=market_line)
+
+    # Same-bookmaker comparison only when the published price really belongs to
+    # one bookmaker; otherwise (average price) compare with the closing average.
     closing_row: PrematchOddsSnapshot | None = None
     if publication_bookmaker:
         same_bookmaker = [row for row in closing_rows if row.bookmaker == publication_bookmaker]
@@ -759,37 +782,56 @@ def _resolve_clv(
             closing_row = max(
                 same_bookmaker, key=lambda row: (row.captured_at, row.id or 0)
             )
-    if closing_row is None and closing_rows:
-        latest_ts = max(row.captured_at for row in closing_rows)
-        latest_rows = [row for row in closing_rows if row.captured_at == latest_ts]
-        median_odds = median(float(row.odds) for row in latest_rows)
-        closing_row = min(
-            latest_rows,
-            key=lambda row: (abs(float(row.odds) - median_odds), row.bookmaker),
+
+    closing_odds: float | None = None
+    closing_bookmaker: str | None = None
+    closing_basis: str | None = None
+    closing_bookmaker_count: int | None = None
+    closing_captured_at: datetime | None = None
+    no_vig_closing: float | None = None
+    if closing_row is not None:
+        closing_odds = float(closing_row.odds)
+        closing_bookmaker = closing_row.bookmaker
+        closing_basis = CLOSING_BASIS_SAME_BOOKMAKER
+        closing_bookmaker_count = 1
+        closing_captured_at = closing_row.captured_at
+        no_vig_closing = _no_vig_probability(
+            event_snapshots=event_snapshots,
+            snapshot_type="closing",
+            bookmaker=closing_row.bookmaker,
+            selection=selection,
+            counterpart_selection=counterpart_selection,
+            market=tip.market,
+            market_line=market_line,
+            captured_at=closing_row.captured_at,
         )
-
-    closing_odds = float(closing_row.odds) if closing_row is not None else None
-    closing_bookmaker = closing_row.bookmaker if closing_row is not None else None
-
-    counterpart_selection = None
-    if tip.market == "over_under_games" and market_line is not None:
-        match = _OVER_UNDER_SELECTION_RE.match((selection or "").strip())
-        if match is not None:
-            opposite = "Under" if match.group(1).lower() == "over" else "Over"
-            counterpart_selection = f"{opposite} {market_line:g}"
-    elif tip.market == "first_set_winner":
-        if selection == "First Player":
-            counterpart_selection = "Second Player"
-        elif selection == "Second Player":
-            counterpart_selection = "First Player"
-    elif context.player_1_name and context.player_2_name:
-        selected_key = selection.strip().lower()
-        p1 = context.player_1_name.strip().lower()
-        p2 = context.player_2_name.strip().lower()
-        if selected_key == p1:
-            counterpart_selection = context.player_2_name
-        elif selected_key == p2:
-            counterpart_selection = context.player_1_name
+    elif closing_rows:
+        latest_ts = max(row.captured_at for row in closing_rows)
+        by_bookmaker: dict[str, PrematchOddsSnapshot] = {}
+        for row in sorted(
+            (row for row in closing_rows if row.captured_at == latest_ts),
+            key=lambda row: row.id or 0,
+        ):
+            by_bookmaker[row.bookmaker] = row
+        closing_odds = sum(float(row.odds) for row in by_bookmaker.values()) / len(
+            by_bookmaker
+        )
+        closing_bookmaker = (
+            next(iter(by_bookmaker))
+            if len(by_bookmaker) == 1
+            else CONSENSUS_CLOSING_BOOKMAKER
+        )
+        closing_basis = CLOSING_BASIS_CONSENSUS
+        closing_bookmaker_count = len(by_bookmaker)
+        closing_captured_at = latest_ts
+        no_vig_closing = _consensus_no_vig_probability(
+            event_snapshots=event_snapshots,
+            selected_rows=list(by_bookmaker.values()),
+            counterpart_selection=counterpart_selection,
+            market=tip.market,
+            market_line=market_line,
+            captured_at=latest_ts,
+        )
 
     no_vig_publication = None
     if publication_row is not None:
@@ -802,18 +844,6 @@ def _resolve_clv(
             market=tip.market,
             market_line=market_line,
             captured_at=publication_row.captured_at,
-        )
-    no_vig_closing = None
-    if closing_row is not None:
-        no_vig_closing = _no_vig_probability(
-            event_snapshots=event_snapshots,
-            snapshot_type="closing",
-            bookmaker=closing_row.bookmaker,
-            selection=selection,
-            counterpart_selection=counterpart_selection,
-            market=tip.market,
-            market_line=market_line,
-            captured_at=closing_row.captured_at,
         )
 
     clv_pct = None
@@ -833,7 +863,82 @@ def _resolve_clv(
         no_vig_closing_prob=no_vig_closing,
         clv_pct=clv_pct,
         clv_prob_delta_pct=clv_prob_delta_pct,
+        closing_basis=closing_basis,
+        closing_bookmaker_count=closing_bookmaker_count,
+        closing_captured_at=closing_captured_at,
     )
+
+
+def _counterpart_selection(
+    tip: PublishedPrediction,
+    context: _MatchContext,
+    *,
+    market_line: float | None,
+) -> str | None:
+    """The other side of the same two-way market (same line), as stored in snapshots."""
+    selection = tip.selection
+    counterpart_selection = None
+    if tip.market == "over_under_games" and market_line is not None:
+        match = _OVER_UNDER_SELECTION_RE.match((selection or "").strip())
+        if match is not None:
+            opposite = "Under" if match.group(1).lower() == "over" else "Over"
+            counterpart_selection = f"{opposite} {market_line:g}"
+    elif tip.market == "first_set_winner":
+        if selection == "First Player":
+            counterpart_selection = "Second Player"
+        elif selection == "Second Player":
+            counterpart_selection = "First Player"
+    elif context.player_1_name and context.player_2_name:
+        selected_key = selection.strip().lower()
+        p1 = context.player_1_name.strip().lower()
+        p2 = context.player_2_name.strip().lower()
+        if selected_key == p1:
+            counterpart_selection = context.player_2_name
+        elif selected_key == p2:
+            counterpart_selection = context.player_1_name
+    return counterpart_selection
+
+
+def _consensus_no_vig_probability(
+    *,
+    event_snapshots: list[PrematchOddsSnapshot],
+    selected_rows: list[PrematchOddsSnapshot],
+    counterpart_selection: str | None,
+    market: str,
+    market_line: float | None,
+    captured_at: datetime,
+) -> float | None:
+    """No-vig probability of the selection from the closing consensus.
+
+    Averages both sides over the bookmakers quoting both in that same closing
+    capture, then removes the margin: (1/avg_sel) / (1/avg_sel + 1/avg_opp).
+    """
+    if not counterpart_selection:
+        return None
+    opposite_by_bookmaker: dict[str, PrematchOddsSnapshot] = {}
+    for row in sorted(event_snapshots, key=lambda row: row.id or 0):
+        if (
+            row.snapshot_type == "closing"
+            and row.selection == counterpart_selection
+            and row.market == market
+            and row.market_line == market_line
+            and row.captured_at == captured_at
+        ):
+            opposite_by_bookmaker[row.bookmaker] = row
+    pairs = [
+        (float(row.odds), float(opposite_by_bookmaker[row.bookmaker].odds))
+        for row in selected_rows
+        if row.bookmaker in opposite_by_bookmaker
+    ]
+    if not pairs:
+        return None
+    avg_selected = sum(pair[0] for pair in pairs) / len(pairs)
+    avg_opposite = sum(pair[1] for pair in pairs) / len(pairs)
+    if avg_selected <= 0 or avg_opposite <= 0:
+        return None
+    inv_selected = 1.0 / avg_selected
+    inv_opposite = 1.0 / avg_opposite
+    return inv_selected / (inv_selected + inv_opposite)
 
 
 def _settle_first_set_winner(
