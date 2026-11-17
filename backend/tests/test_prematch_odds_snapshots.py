@@ -546,3 +546,59 @@ def test_run_closing_odds_capture_counts_provider_errors_as_failures(db_session)
     assert summary["failed"] == 1
     assert summary["skipped_no_odds"] == 1
     assert summary["captured"] == 0
+
+
+def _publish_tip(db_session, *, event_key: int, official: bool) -> None:
+    from backend.src.app.schemas.published_prediction import PublishedPredictionCreate
+    from backend.src.app.services.published_predictions import publish_prediction
+
+    publish_prediction(
+        db_session,
+        PublishedPredictionCreate(
+            event_key=event_key,
+            market="match_winner",
+            value_decision="PLAY" if official else "NO BET",
+            official_play=official,
+            selection="Alice",
+            model_version="v3",
+            model_name="logistic_regression",
+            probability=0.6,
+            odds=2.0,
+            void_odds=1.6667,
+            edge=5.0,
+            publication_source="admin_api",
+        ),
+    )
+
+
+def test_closing_capture_scope_limits_fixtures_polled(db_session):
+    """Only fixtures whose CLV can be read are worth a provider call."""
+    _seed_fixture_with_kickoff(db_session, event_key=6080, minutes_from_now=10)
+    _seed_fixture_with_kickoff(db_session, event_key=6081, minutes_from_now=20)
+    _seed_fixture_with_kickoff(db_session, event_key=6082, minutes_from_now=30)
+    _publish_tip(db_session, event_key=6080, official=True)
+    _publish_tip(db_session, event_key=6081, official=False)
+
+    def _keys(scope: str) -> list[int]:
+        return [
+            key
+            for key, _kickoff in find_fixtures_pending_closing_capture(
+                db_session, window_minutes=60, scope=scope
+            )
+        ]
+
+    assert _keys("all") == [6080, 6081, 6082]
+    assert _keys("published") == [6080, 6081]
+    assert _keys("official") == [6080]
+
+    with patch(
+        "backend.src.service.import_next_fixtures.fetch_odds_for_match",
+        return_value=SAMPLE_ODDS,
+    ) as fetch_mock:
+        summary = run_closing_odds_capture_once(
+            db_session, window_minutes=60, scope="official"
+        )
+    assert fetch_mock.call_count == 1
+    assert summary["scope"] == "official"
+    assert summary["candidates"] == 1
+    assert summary["captured"] == 1

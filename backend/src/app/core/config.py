@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -185,6 +186,11 @@ class Settings(BaseSettings):
     closing_odds_job_enabled: bool = False
     # How many minutes before scheduled kickoff a fixture enters the capture window.
     closing_odds_capture_window_minutes: int = 60
+    # Which fixtures each run polls (one API-Tennis get_odds call per fixture):
+    # "published" = fixtures with at least one published tip (any market/decision),
+    # "official" = only fixtures with an official PLAY tip,
+    # "all" = every next_fixture with a known kickoff time.
+    closing_odds_capture_scope: Literal["published", "official", "all"] = "published"
 
     # Stable daily betting-slip pool and live/result jobs.
     betting_slip_timezone: str = "Europe/Rome"

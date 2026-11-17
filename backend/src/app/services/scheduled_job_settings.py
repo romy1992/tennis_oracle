@@ -575,7 +575,9 @@ def execute_scheduled_job(db: Session, settings: Settings, job_key: str) -> str:
         )
 
         run_closing_odds_capture_once(
-            db, window_minutes=settings.closing_odds_capture_window_minutes
+            db,
+            window_minutes=settings.closing_odds_capture_window_minutes,
+            scope=settings.closing_odds_capture_scope,
         )
         return "completed"
     if job_key == OPS_CHECKS_JOB_KEY:

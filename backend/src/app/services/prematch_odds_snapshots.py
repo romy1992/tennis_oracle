@@ -48,6 +48,7 @@ from backend.src.app.services.match_lifecycle import classify_match_lifecycle
 from backend.src.entity.fixture import Fixture
 from backend.src.entity.next_fixture import NextFixture
 from backend.src.entity.prematch_odds_snapshot import PrematchOddsSnapshot
+from backend.src.entity.published_prediction import PublishedPrediction
 
 logger = logging.getLogger(__name__)
 
@@ -888,17 +889,45 @@ def capture_imported_odds(
 # ---------------------------------------------------------------------------
 
 
+ClosingCaptureScope = Literal["published", "official", "all"]
+CLOSING_CAPTURE_SCOPES: tuple[str, ...] = ("published", "official", "all")
+
+
+def _event_keys_in_capture_scope(
+    db: Session, event_keys: list[int], scope: ClosingCaptureScope
+) -> set[int]:
+    """Subset of ``event_keys`` worth a provider call for the given scope.
+
+    CLV is only ever computed for published tips, so polling fixtures without
+    one spends API calls on quotes nothing reads.
+    """
+    if scope == "all" or not event_keys:
+        return set(event_keys)
+    stmt = select(PublishedPrediction.event_key).where(
+        PublishedPrediction.event_key.in_(event_keys)
+    )
+    if scope == "official":
+        stmt = stmt.where(
+            PublishedPrediction.official_play.is_(True),
+            PublishedPrediction.value_decision == "PLAY",
+        )
+    return {int(key) for key in db.scalars(stmt.distinct()).all()}
+
+
 def find_fixtures_pending_closing_capture(
     db: Session,
     *,
     window_minutes: int,
     now_utc_naive: datetime | None = None,
+    scope: ClosingCaptureScope = "all",
 ) -> list[tuple[int, datetime]]:
     """Event keys whose scheduled kickoff falls within ``(now, now + window]``.
 
     Only considers ``next_fixture`` rows with a known ``event_time`` (an
     unknown/midnight-defaulted time must never look "imminent") and not yet
-    promoted to ``Fixture`` (``is_completed=False``). Returns
+    promoted to ``Fixture`` (``is_completed=False``). ``scope`` further limits
+    them to fixtures with a published tip ("published") or an official PLAY
+    ("official"); "all" keeps every fixture. Returns
     ``(event_key, kickoff_utc_naive)`` pairs sorted by nearest kickoff first.
     """
     now = now_utc_naive if now_utc_naive is not None else _utc_now_naive()
@@ -923,6 +952,11 @@ def find_fixtures_pending_closing_capture(
             continue
         if now < kickoff <= now + timedelta(minutes=window_minutes):
             pending.append((row.event_key, kickoff))
+    if scope != "all":
+        in_scope = _event_keys_in_capture_scope(
+            db, [event_key for event_key, _kickoff in pending], scope
+        )
+        pending = [item for item in pending if item[0] in in_scope]
     pending.sort(key=lambda item: item[1])
     return pending
 
@@ -1001,15 +1035,21 @@ def run_closing_odds_capture_once(
     *,
     window_minutes: int,
     commit: bool = True,
+    scope: ClosingCaptureScope = "all",
 ) -> dict[str, Any]:
     """One capture pass: find fixtures entering the window, fetch + append closing odds.
 
     Meant to be invoked by ``backend.src.jobs.run_closing_odds_capture`` on a
-    frequent external cron; this function itself does not loop/sleep.
+    frequent external cron; this function itself does not loop/sleep. Cost:
+    at most one provider ``get_odds`` call (plus transient-error retries) per
+    candidate not already started.
     """
-    pending = find_fixtures_pending_closing_capture(db, window_minutes=window_minutes)
+    pending = find_fixtures_pending_closing_capture(
+        db, window_minutes=window_minutes, scope=scope
+    )
     summary: dict[str, Any] = {
         "window_minutes": window_minutes,
+        "scope": scope,
         "candidates": len(pending),
         "captured": 0,
         "inserted_rows": 0,

@@ -88,6 +88,22 @@ class RunClosingOddsCaptureJobTest(unittest.TestCase):
         self.assertEqual(run_mock.call_args.kwargs.get("window_minutes"), 45)
         self.assertEqual(code, 0)
 
+    def test_scope_defaults_to_settings_and_can_be_overridden(self):
+        override_settings(
+            make_test_settings(
+                closing_odds_job_enabled=True,
+                closing_odds_capture_scope="official",
+            )
+        )
+        with patch(
+            "backend.src.jobs.run_closing_odds_capture.run_closing_odds_capture_once",
+            return_value=_summary(),
+        ) as run_mock:
+            self.assertEqual(main([]), 0)
+            self.assertEqual(run_mock.call_args.kwargs.get("scope"), "official")
+            self.assertEqual(main(["--scope", "all"]), 0)
+            self.assertEqual(run_mock.call_args.kwargs.get("scope"), "all")
+
     def test_enabled_runs_capture_and_reflects_failures_in_exit_code(self):
         override_settings(make_test_settings(closing_odds_job_enabled=True))
         with patch(

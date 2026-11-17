@@ -25,6 +25,7 @@ Examples:
   python -m backend.src.jobs.run_closing_odds_capture --dry-run
   python -m backend.src.jobs.run_closing_odds_capture
   python -m backend.src.jobs.run_closing_odds_capture --window-minutes 45 --json
+  python -m backend.src.jobs.run_closing_odds_capture --scope official
   python -m backend.src.jobs.run_closing_odds_capture --force  # ignore CLOSING_ODDS_JOB_ENABLED
 """
 
@@ -42,6 +43,7 @@ from backend.src.app.db.session import SessionLocal
 from backend.src.app.observability.context import ensure_correlation_id
 from backend.src.app.observability.setup import setup_observability
 from backend.src.app.services.prematch_odds_snapshots import (
+    CLOSING_CAPTURE_SCOPES,
     find_fixtures_pending_closing_capture,
     run_closing_odds_capture_once,
 )
@@ -59,6 +61,13 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Minutes before kickoff a fixture enters the capture window "
         "(default: CLOSING_ODDS_CAPTURE_WINDOW_MINUTES)",
+    )
+    parser.add_argument(
+        "--scope",
+        choices=CLOSING_CAPTURE_SCOPES,
+        default=None,
+        help="Fixtures to poll: published (with a published tip), official "
+        "(with an official PLAY) or all (default: CLOSING_ODDS_CAPTURE_SCOPE)",
     )
     parser.add_argument(
         "--dry-run",
@@ -79,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     logger = logging.getLogger(__name__)
 
     window_minutes = args.window_minutes or settings.closing_odds_capture_window_minutes
+    scope = args.scope or settings.closing_odds_capture_scope
 
     if not settings.closing_odds_job_enabled and not args.force:
         message = (
@@ -93,10 +103,13 @@ def main(argv: list[str] | None = None) -> int:
 
     with SessionLocal() as db:
         if args.dry_run:
-            pending = find_fixtures_pending_closing_capture(db, window_minutes=window_minutes)
+            pending = find_fixtures_pending_closing_capture(
+                db, window_minutes=window_minutes, scope=scope
+            )
             payload = {
                 "dry_run": True,
                 "window_minutes": window_minutes,
+                "scope": scope,
                 "candidates": len(pending),
                 "event_keys": [event_key for event_key, _kickoff in pending],
             }
@@ -104,14 +117,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, indent=2, default=str))
             else:
                 logger.info(
-                    "closing_odds_capture dry_run window_minutes=%s candidates=%s event_keys=%s",
+                    "closing_odds_capture dry_run window_minutes=%s scope=%s candidates=%s "
+                    "event_keys=%s",
                     window_minutes,
+                    scope,
                     payload["candidates"],
                     payload["event_keys"],
                 )
             return 0
 
-        summary = run_closing_odds_capture_once(db, window_minutes=window_minutes)
+        summary = run_closing_odds_capture_once(
+            db, window_minutes=window_minutes, scope=scope
+        )
 
     if args.json:
         print(json.dumps(summary, indent=2, default=str))
