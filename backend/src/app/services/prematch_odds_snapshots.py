@@ -883,9 +883,10 @@ def capture_imported_odds(
 # produces very low and irregular CLV coverage (see docs/SCHEDULING.md). Running
 # this on a frequent cron (every 1-5 minutes) in the last N minutes before kickoff
 # writes ``snapshot_type="closing"`` directly and repeatedly; ``_resolve_clv`` in
-# ``published_live_stats.py`` already picks the row with the latest ``captured_at``
-# per bookmaker, so multiple closing rows per fixture are expected and correctly
-# collapse to "the last quote seen before kickoff" without any consumer changes.
+# ``published_live_stats.py`` keeps only closing rows captured after the tip's
+# publication and not after the scheduled kickoff, then uses the last such
+# capture, so multiple closing rows per fixture are expected and collapse to
+# "the last quote seen before kickoff".
 # ---------------------------------------------------------------------------
 
 

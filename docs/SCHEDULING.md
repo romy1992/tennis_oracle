@@ -420,9 +420,13 @@ L’import giornaliero cattura `opening`/`observed` e, a partita live, può etic
 
 ### Cosa fa
 
-Ogni esecuzione è **un singolo passaggio** (nessun loop/sleep interno): trova le partite in `next_fixture` il cui orario di inizio (`event_date`/`event_time`, fuso Europe/Rome) cade entro `--window-minutes` da adesso (default `CLOSING_ODDS_CAPTURE_WINDOW_MINUTES`), richiede quote fresche al provider (`get_odds`) e le scrive **direttamente** con `snapshot_type=closing`. Partite senza `event_time` noto sono escluse (un orario sconosciuto non deve mai sembrare "imminente").
+Ogni esecuzione è **un singolo passaggio** (nessun loop/sleep interno): trova le partite in `next_fixture` il cui orario di inizio (`event_date`/`event_time`, fuso Europe/Rome) cade entro `--window-minutes` da adesso (default `CLOSING_ODDS_CAPTURE_WINDOW_MINUTES`), le filtra per `CLOSING_ODDS_CAPTURE_SCOPE`, richiede quote fresche al provider (`get_odds`) e le scrive **direttamente** con `snapshot_type=closing` (mercati Home/Away, Home/Away 1st Set, Over/Under games linea 20.5; tutti i bookmaker presenti nella risposta). Partite senza `event_time` noto sono escluse (un orario sconosciuto non deve mai sembrare "imminente").
 
-Eseguendolo di frequente (cron ogni 1–5 minuti) durante la finestra pre-partita si accumulano più righe `closing` per fixture/bookmaker: `_resolve_clv` (in `published_live_stats.py`) sceglie già quella con `captured_at` più recente per bookmaker, quindi nessuna modifica lato consumer è necessaria.
+- **Scope** (`CLOSING_ODDS_CAPTURE_SCOPE`, flag `--scope`): `published` (default: fixture con almeno una tip pubblicata, qualsiasi mercato/decisione, per confrontare PLAY e NO BET), `official` (solo fixture con PLAY ufficiale: costo minimo), `all` (ogni `next_fixture` con orario, comportamento storico).
+- **Partita già iniziata**: se lo stato salvato in `next_fixture` (`event_status`/`event_live`/`event_winner`/`is_completed`, aggiornato anche dal polling live se attivo) non è `upcoming`/`postponed`, la fixture è saltata **senza chiamata API** (`skipped_match_started`). Se `event_live` è vero, `record_odds_payload` sigilla l'ultima quota pre-match invece di scrivere quella fresca. Limite: una partita anticipata rispetto all'orario stimato e non ancora segnalata live nel DB non è rilevabile senza chiamate aggiuntive; per questo lato lettura il CLV scarta comunque le closing successive al kickoff programmato.
+- **Errori provider**: contati in `provider_errors` e in `failed` (exit code 1), non come "nessuna quota".
+
+Eseguendolo di frequente durante la finestra pre-partita si accumulano più righe `closing` per fixture/bookmaker: il CLV usa l'ultima cattura valida.
 
 ```bash
 # Dry-run: elenca solo le fixture attualmente in finestra, nessuna chiamata API/scrittura
@@ -434,32 +438,71 @@ python3 -m backend.src.jobs.run_closing_odds_capture
 # Forza l'esecuzione anche con CLOSING_ODDS_JOB_ENABLED=false (test manuale)
 python3 -m backend.src.jobs.run_closing_odds_capture --force --json
 
-# Finestra personalizzata (minuti prima del kickoff)
-python3 -m backend.src.jobs.run_closing_odds_capture --window-minutes 45
+# Finestra e scope personalizzati
+python3 -m backend.src.jobs.run_closing_odds_capture --window-minutes 10 --scope official
 ```
 
-Flag utili: `--window-minutes`, `--dry-run`, `--force`, `--json`. Exit code: `0` ok (anche a zero candidate), `1` se almeno una fixture ha fallito la cattura (le altre non sono bloccate: isolamento per-fixture).
+Flag utili: `--window-minutes`, `--scope`, `--dry-run`, `--force`, `--json`. Exit code: `0` ok (anche a zero candidate), `1` se almeno una fixture ha fallito la cattura (errore provider o eccezione; le altre non sono bloccate: isolamento per-fixture).
 
 ### Configurazione
 
 ```env
-# Disabilitato di default: abilita solo insieme a un cron/Task Scheduler frequente.
+# Disabilitato di default: abilita solo insieme a uno scheduler frequente.
 CLOSING_ODDS_JOB_ENABLED=false
 CLOSING_ODDS_CAPTURE_WINDOW_MINUTES=60
+CLOSING_ODDS_CAPTURE_SCOPE=published
 ```
 
-### Cron (ogni 2 minuti, tutti i giorni)
+Configurazione consigliata per misurare il CLV (finestra = 2 × intervallo: ogni partita è catturata 1-2 volte, l'ultima al più ~5 minuti prima dell'orario programmato):
+
+```env
+CLOSING_ODDS_JOB_ENABLED=true
+CLOSING_ODDS_CAPTURE_WINDOW_MINUTES=10
+CLOSING_ODDS_CAPTURE_SCOPE=published   # oppure official per spendere meno
+```
+
+Due modi equivalenti di eseguirlo (usarne **uno solo**, altrimenti le chiamate raddoppiano):
+
+1. **Worker `run_report_scheduler`** (job interno `closing_odds_capture`, intervallo di default 300 s, modificabile dalla pagina admin dei job pianificati o con `PATCH /api/settings/scheduled-jobs/closing_odds_capture` `{"enabled": true, "interval_seconds": 300}`; le variabili sopra vanno sul servizio del worker). Se esiste già una riga in `scheduled_job_setting` per `closing_odds_capture` (`GET /api/settings/scheduled-jobs` → `source=database`), `enabled`/intervallo del DB prevalgono sulla variabile d'ambiente: abilitarlo dalla UI/API. Finestra e scope si leggono sempre dalle variabili d'ambiente del worker. Il periodo reale è l'intervallo più fino a `SCHEDULED_REPORTS_POLL_SECONDS` (30 s).
+2. **Cron esterno** sul comando CLI:
 
 ```cron
-*/2 * * * * cd /percorso/tennis_oracle && .venv/bin/python -m backend.src.jobs.run_closing_odds_capture
+*/5 * * * * cd /percorso/tennis_oracle && .venv/bin/python -m backend.src.jobs.run_closing_odds_capture
 ```
 
-Windows Task Scheduler: trigger ripetuto ogni 2 minuti, programma `python`, argomenti
+Windows Task Scheduler: trigger ripetuto ogni 5 minuti, programma `python`, argomenti
 `-m backend.src.jobs.run_closing_odds_capture`, cartella iniziale la root del repository.
 
-Nota: senza un cron/scheduler frequente configurato, lasciare `CLOSING_ODDS_JOB_ENABLED=false`
+Nota: senza uno scheduler frequente configurato, lasciare `CLOSING_ODDS_JOB_ENABLED=false`
 (il default) — un'esecuzione isolata o rara catturerebbe solo le fixture che casualmente si
 trovano in finestra in quel momento, senza la copertura "densa" che giustifica il job.
+
+### Costo in chiamate API-Tennis
+
+Ogni run fa **una** chiamata `get_odds` per ogni fixture candidata non già iniziata (più al massimo 2 retry, solo su timeout/429/5xx: `API_TENNIS_MAX_RETRIES`); nessuna chiamata se non ci sono candidate. Una fixture è candidata in ogni run con `kickoff ∈ (adesso, adesso + finestra]`, quindi:
+
+- chiamate per partita ≈ `finestra / periodo` (con periodo 5 min: finestra 60 → 12, finestra 10 → 2, finestra 5 → 1 ma a rischio di saltare la partita con un run in ritardo);
+- chiamate al giorno ≈ `N_scope × finestra / periodo`, con `N_scope` = partite del giorno con orario noto nello scope scelto.
+
+`N_scope` dipende dai dati di produzione. I generatori dei mercati extra pubblicano una tip (anche NO BET) per quasi ogni fixture con quote, quindi `published` ≈ tutte le partite con quote; `official` sono solo quelle con un PLAY. Per stimarlo:
+
+```sql
+-- published (per official aggiungere: AND official_play AND value_decision = 'PLAY')
+SELECT event_date, COUNT(DISTINCT event_key) AS partite
+FROM published_prediction
+WHERE event_date >= CURRENT_DATE - 14 AND event_time IS NOT NULL
+GROUP BY event_date ORDER BY event_date;
+```
+
+### Come si legge il CLV
+
+Per ogni tip (campi delle tip assestate del dashboard `GET /api/live-beta-dashboard`, aggregati in `GET /api/published-predictions/stats` e nel riepilogo dedicato sotto):
+
+- `clv_pct = (quota_presa / quota_closing − 1) × 100`. `quota_presa` è la quota pubblicata della tip (media tra bookmaker alla pubblicazione); `quota_closing` è lo stesso bookmaker se lo snapshot di pubblicazione ne indica uno reale, altrimenti la **media** delle quote dei bookmaker nell'ultima cattura closing valida (`closing_basis=consensus_avg`), stesso mercato, stessa linea e stessa selezione. Esempio: PLAY a 1,90 che chiude a 1,80 → +5,56% anche se la giocata è persa.
+- `clv_no_vig_pct = (quota_presa × p_closing_no_vig − 1) × 100`: rendimento atteso della quota presa se la closing senza margine è la probabilità vera.
+- Una closing vale solo se catturata **dopo** `published_at` e **non oltre** il kickoff programmato; altrimenti la tip resta senza CLV con `clv_missing_reason` (`no_published_odds`, `awaiting_closing`, `closing_after_kickoff`, `closing_before_publication`, `selection_not_in_closing`, `no_closing_snapshot`).
+
+Riepilogo di sola lettura per mercato e decisione: **`GET /api/published-predictions/clv-summary`** (admin; stessi filtri di `/stats`, es. `official_only=true`, `market=over_under_games`, `event_date_from=`). Per ogni gruppo (`overall`, `by_market`, `by_decision`, `by_market_decision`): `clv_count`, `clv_avg_pct`, `clv_median_pct`, `clv_positive_pct` (% CLV > 0), varianti no-vig, `clv_coverage_pct` (su tutte le tip), `clv_coverage_eligible_pct` (escluse le tip ancora in attesa della finestra o senza quota) e `missing_reasons`.
 
 ### Impatto misurato sulla copertura CLV (2026-08-10, prima del job dedicato)
 

@@ -8,11 +8,13 @@ docs/SCHEDULING.md#closing-odds-pre-kickoff-job).
 
 This job is meant to run frequently (every 1-5 minutes, e.g. via cron/Task
 Scheduler) and does a single pass each time: find ``next_fixture`` rows whose
-scheduled kickoff falls within the next ``--window-minutes`` and fetch+append
-a fresh ``closing`` odds snapshot for each. Running it repeatedly as kickoff
+scheduled kickoff falls within the next ``--window-minutes`` (limited by
+``--scope``/``CLOSING_ODDS_CAPTURE_SCOPE`` to fixtures with published tips by
+default) and fetch+append a fresh ``closing`` odds snapshot for each: one
+provider ``get_odds`` call per fixture per run. Running it repeatedly as kickoff
 approaches naturally produces several ``closing`` rows per fixture; consumers
-(``published_live_stats._resolve_clv``) already pick the one with the latest
-``captured_at`` per bookmaker, so no downstream change is required.
+(``published_live_stats._resolve_clv``) use the last capture taken after the
+tip's publication and not after the scheduled kickoff.
 
 Disabled by default (``CLOSING_ODDS_JOB_ENABLED=false``): enable only once a
 frequent external cron/scheduler is actually configured, otherwise a single
